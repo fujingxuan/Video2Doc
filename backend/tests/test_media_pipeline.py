@@ -9,7 +9,6 @@ import pytest
 from app.core.errors import PipelineError
 from app.providers.media import (
     FfmpegProvider,
-    FfprobeProvider,
     MediaInfo,
     MediaStream,
     YtDlpSource,

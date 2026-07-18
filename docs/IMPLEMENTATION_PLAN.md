@@ -69,6 +69,7 @@
 - [x] 进程集成测试覆盖 stdout/stderr、退出码、超时和取消
 - [x] HTTP mock 覆盖 ASR 成功、认证、超时和取消
 - [x] 第一轮任务/队列/恢复测试回归
+- [x] Ruff 后端 lint、前端 typecheck/test/build
 - [x] README、架构和实施计划更新
 - [x] 媒体工具环境检查脚本
 

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import SessionLocal
-from app.models import Task, TaskStageRun
+from app.models import Task
 from app.pipeline.runner import run_pipeline
 from app.providers.process import process_registry
 

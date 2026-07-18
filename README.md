@@ -220,6 +220,7 @@ VIDEO2DOC_PROCESS_POLL_SECONDS=0.20
 
 ```powershell
 Set-Location D:\Projects\Video2Doc\backend
+.\.venv\Scripts\python.exe -m ruff check --no-cache app tests
 .\.venv\Scripts\python.exe -m pytest -q
 
 Set-Location D:\Projects\Video2Doc\frontend
