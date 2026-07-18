@@ -19,6 +19,17 @@ if (-not (Test-Path -LiteralPath (Join-Path $frontendDir "node_modules"))) {
 Push-Location $frontendDir
 try {
     Write-Host "Starting Video2Doc frontend at http://127.0.0.1:5173"
-    pnpm dev --host 127.0.0.1
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        pnpm dev --host 127.0.0.1 --strictPort 2>&1
+        $viteExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($viteExitCode -ne 0) {
+        throw "Vite exited with code $viteExitCode."
+    }
 }
 finally { Pop-Location }

@@ -144,7 +144,7 @@ Set-Location D:\Projects\Video2Doc
 .\scripts\start_dev.ps1
 ```
 
-脚本在当前控制台管理两个 PowerShell Job；按 `Ctrl+C` 会停止并清理两项 Job。
+脚本在当前控制台管理两个 PowerShell Job，并分别显示带 `Backend`/`Frontend` 前缀的日志。Alembic、Uvicorn 或 Vite 写入 stderr 的普通日志不会被误判为失败；任一服务真正退出时，脚本会报告退出方并停止另一项。为避免 Uvicorn 的 reload 父进程掩盖子进程失败，联合启动直接监督不带 reload 的后端进程；如需后端热重载，可单独运行 `start_backend.ps1`。按 `Ctrl+C` 会停止并清理两项 Job，释放本地服务端口。
 
 ## 测试和构建
 
