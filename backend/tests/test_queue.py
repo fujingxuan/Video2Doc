@@ -18,6 +18,7 @@ def test_three_tasks_execute_serially_and_persist_outputs(client: TestClient) ->
     response = client.post(
         "/api/v1/tasks",
         json={
+            "pipeline_mode": "SIMULATED",
             "inputs": [
                 {"source": f"https://example.invalid/{index}", "source_type": "URL", "title": f"Task {index}"}
                 for index in range(1, 4)
@@ -56,6 +57,7 @@ def test_cancel_waiting_task(client: TestClient) -> None:
     created = client.post(
         "/api/v1/tasks",
         json={
+            "pipeline_mode": "SIMULATED",
             "inputs": [
                 {"source": "cancel-running", "source_type": "LOCAL_FILE", "title": "Cancel running"},
                 {"source": "cancel-waiting", "source_type": "LOCAL_FILE", "title": "Cancel waiting"},
@@ -73,6 +75,7 @@ def test_cancel_processing_task(client: TestClient) -> None:
     created = client.post(
         "/api/v1/tasks",
         json={
+            "pipeline_mode": "SIMULATED",
             "inputs": [
                 {"source": "cancel-running-only", "source_type": "LOCAL_FILE", "title": "Cancel running"}
             ]
@@ -91,6 +94,7 @@ def test_failure_then_retry_succeeds(client: TestClient) -> None:
     created = client.post(
         "/api/v1/tasks",
         json={
+            "pipeline_mode": "SIMULATED",
             "inputs": [
                 {
                     "source": "intentional-failure",

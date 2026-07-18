@@ -62,6 +62,7 @@ def test_health_models_profiles_settings_and_immutable_snapshot(client: TestClie
     created = client.post(
         "/api/v1/tasks",
         json={
+            "pipeline_mode": "SIMULATED",
             "inputs": [{"source": "https://example.invalid/lecture", "source_type": "URL"}],
             "profile_id": profile["id"],
             "config_overrides": {"ocr_enabled": False},
