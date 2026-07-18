@@ -1,0 +1,46 @@
+[CmdletBinding()]
+param(
+    [switch]$NoReload
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$backendDir = Join-Path $repoRoot "backend"
+$python = Join-Path $backendDir ".venv\Scripts\python.exe"
+
+if (-not (Test-Path -LiteralPath $python)) {
+    throw "Backend virtual environment is missing. Run .\scripts\setup.ps1 first."
+}
+
+Push-Location $backendDir
+try {
+    Write-Host "Applying database migrations..."
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & $python -m alembic upgrade head 2>&1
+        $migrationExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($migrationExitCode -ne 0) {
+        throw "Alembic migration failed with exit code $migrationExitCode."
+    }
+    $arguments = @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000")
+    if (-not $NoReload) { $arguments += "--reload" }
+    Write-Host "Starting Video2Doc API at http://127.0.0.1:8000"
+    try {
+        $ErrorActionPreference = "Continue"
+        & $python @arguments 2>&1
+        $uvicornExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if ($uvicornExitCode -ne 0) {
+        throw "Uvicorn exited with code $uvicornExitCode."
+    }
+}
+finally { Pop-Location }
