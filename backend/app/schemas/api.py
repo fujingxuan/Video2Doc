@@ -142,11 +142,21 @@ class TaskInput(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     simulate_failure: Literal["never", "once", "always"] = "never"
 
+    @field_validator("source")
+    @classmethod
+    def normalize_source(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized or "\x00" in normalized:
+            raise ValueError("输入来源不能为空或包含 NUL 字符")
+        return normalized
+
 
 class TaskBatchCreate(BaseModel):
     inputs: list[TaskInput] = Field(min_length=1, max_length=100)
     profile_id: int | None = None
     config_overrides: dict[str, Any] = Field(default_factory=dict)
+    pipeline_mode: Literal["REAL", "SIMULATED"] = "REAL"
+    asr_model_id: int | None = None
 
 
 class SnapshotRead(BaseModel):
@@ -163,9 +173,15 @@ class StageRead(BaseModel):
     stage: str
     status: str
     progress: int
+    message: str | None
     started_at: datetime | None
     finished_at: datetime | None
     error_message: str | None
+    technical_error: str | None
+    retryable: bool | None
+    input_artifacts: list[str] | None
+    output_artifacts: list[str] | None
+    log_path: str | None
 
 
 class TaskRead(BaseModel):
@@ -182,6 +198,9 @@ class TaskRead(BaseModel):
     error_message: str | None
     workspace_path: str | None
     output_path: str | None
+    media_info_path: str | None
+    transcript_path: str | None
+    artifacts_index_path: str | None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None
@@ -191,6 +210,9 @@ class TaskRead(BaseModel):
 class TaskDetail(TaskRead):
     snapshot: SnapshotRead
     stages: list[StageRead]
+    media_info: dict[str, Any] | None = None
+    transcript_preview: dict[str, Any] | None = None
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class QueueStatus(BaseModel):

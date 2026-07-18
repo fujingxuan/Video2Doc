@@ -33,8 +33,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Video2Doc API",
-    version="0.1.0",
-    description="Local API with a persistent, serial simulated Pipeline.",
+    version="0.2.0",
+    description="Local API with a persistent serial real-media and ASR Pipeline.",
     lifespan=lifespan,
 )
 app.add_middleware(

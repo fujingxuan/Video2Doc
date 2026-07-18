@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,57 @@ WINDOWS_RESERVED = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspacePaths:
+    root: Path
+    source: Path
+    media: Path
+    extract: Path
+    audio: Path
+    chunks: Path
+    asr: Path
+    asr_raw: Path
+    metadata: Path
+    logs: Path
+    intermediate: Path
+    output: Path
+
+    @classmethod
+    def from_root(cls, root: Path) -> "WorkspacePaths":
+        return cls(
+            root=root,
+            source=root / "00_source",
+            media=root / "00_source/media",
+            extract=root / "01_extract",
+            audio=root / "01_extract/audio",
+            chunks=root / "01_extract/chunks",
+            asr=root / "02_asr",
+            asr_raw=root / "02_asr/provider_raw",
+            metadata=root / "00_source/metadata",
+            logs=root / "logs",
+            intermediate=root / "04_fusion/intermediate",
+            output=root / "05_output",
+        )
+
+    def create(self) -> None:
+        for path in (
+            self.source,
+            self.media,
+            self.extract,
+            self.audio,
+            self.chunks,
+            self.asr,
+            self.asr_raw,
+            self.metadata,
+            self.logs,
+            self.intermediate,
+            self.output,
+            self.root / "03_ocr",
+            self.root / "04_fusion",
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+
+
 def safe_filename(value: str, *, fallback: str = "untitled", max_length: int = 120) -> str:
     cleaned = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", value).strip().rstrip(". ")
     cleaned = re.sub(r"\s+", " ", cleaned)
@@ -31,8 +84,8 @@ def safe_filename(value: str, *, fallback: str = "untitled", max_length: int = 1
 def create_workspace(data_root: Path, *, task_id: int, title: str, snapshot: dict[str, Any]) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     workspace = data_root / f"{stamp}_{safe_filename(title)}_{task_id:06d}"
-    for relative in ("00_source", "01_extract", "02_asr", "04_fusion", "05_output", "logs"):
-        (workspace / relative).mkdir(parents=True, exist_ok=True)
+    paths = WorkspacePaths.from_root(workspace)
+    paths.create()
     ocr_dir = workspace / "03_ocr"
     ocr_dir.mkdir(parents=True, exist_ok=True)
     if not snapshot["processing"]["ocr_enabled"]:
@@ -42,13 +95,20 @@ def create_workspace(data_root: Path, *, task_id: int, title: str, snapshot: dic
         )
     write_json(workspace / "task_config.json", snapshot)
     write_json(workspace / "task_state.json", {"task_id": task_id, "status": "QUEUED", "progress": 0})
-    (workspace / "logs/task.log").write_text("Simulated Pipeline task created.\n", encoding="utf-8")
+    mode = snapshot.get("pipeline", "SIMULATED")
+    (workspace / "logs/task.log").write_text(
+        f"{mode} Pipeline task created.\n", encoding="utf-8"
+    )
     return workspace
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+    temporary.replace(path)
 
 
 def append_task_log(workspace: Path, message: str) -> None:
@@ -140,3 +200,32 @@ def unique_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
         index += 1
+
+
+def read_json(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def list_artifacts(workspace: Path) -> list[dict[str, Any]]:
+    if not workspace.is_dir():
+        return []
+    artifacts: list[dict[str, Any]] = []
+    for path in sorted(item for item in workspace.rglob("*") if item.is_file()):
+        try:
+            relative = path.relative_to(workspace).as_posix()
+            stat = path.stat()
+        except OSError:
+            continue
+        artifacts.append({"path": relative, "size": stat.st_size})
+    return artifacts
+
+
+def write_artifact_index(workspace: Path) -> Path:
+    index_path = workspace / "artifacts.json"
+    artifacts = [item for item in list_artifacts(workspace) if item["path"] != "artifacts.json"]
+    write_json(index_path, {"schema_version": 1, "artifacts": artifacts})
+    return index_path

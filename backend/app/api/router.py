@@ -41,7 +41,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="0.1.0",
+        version="0.2.0",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -138,6 +138,21 @@ def get_task(task_id: int, session: Session = Depends(get_db)) -> TaskDetail:
 @router.get("/tasks/{task_id}/snapshot", response_model=dict, tags=["tasks"])
 def get_task_snapshot(task_id: int, session: Session = Depends(get_db)) -> dict:
     return TaskService(session).snapshot(task_id)
+
+
+@router.get("/tasks/{task_id}/media", response_model=dict, tags=["tasks"])
+def get_task_media(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session).media(task_id)
+
+
+@router.get("/tasks/{task_id}/transcript", response_model=dict, tags=["tasks"])
+def get_task_transcript(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session).transcript(task_id)
+
+
+@router.get("/tasks/{task_id}/artifacts", response_model=list[dict], tags=["tasks"])
+def get_task_artifacts(task_id: int, session: Session = Depends(get_db)) -> list[dict]:
+    return TaskService(session).artifacts(task_id)
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskRead, tags=["tasks"])
