@@ -18,14 +18,14 @@ export function Layout({ path, children }: { path: string; children: ReactNode }
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">V2D</span>
-          <div><strong>Video2Doc</strong><small>模拟 Pipeline · v0.1</small></div>
+          <div><strong>Video2Doc</strong><small>真实媒体 + ASR · v0.2</small></div>
         </div>
         <nav>
           {links.map(([target, label]) => (
             <button key={target} className={path === target ? "active" : ""} onClick={() => navigate(target)}>{label}</button>
           ))}
         </nav>
-        <p className="scope-note">本轮仅验证持久化任务系统。未连接真实媒体工具或模型。</p>
+        <p className="scope-note">当前支持真实媒体获取、音频标准化、分块与 OneAPI 兼容 ASR；OCR 和文本整理仍未启用。</p>
       </aside>
       <main className="main">{children}</main>
     </div>

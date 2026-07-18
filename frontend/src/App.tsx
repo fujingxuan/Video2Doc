@@ -76,7 +76,7 @@ export default function App() {
     if (detail) return <TaskDetailPage taskId={Number(detail[1])} />;
     switch (path) {
       case "/": return <OverviewPage queue={queue} tasks={tasks} connected={connected} />;
-      case "/new": return <NewTaskPage profiles={profiles} onCreated={refreshTasks} />;
+      case "/new": return <NewTaskPage profiles={profiles} models={models} onCreated={refreshTasks} />;
       case "/queue": return <QueuePage tasks={tasks} refresh={refreshTasks} />;
       case "/models": return <ModelsPage models={models} refresh={refreshCatalog} />;
       case "/profiles": return <ProfilesPage profiles={profiles} models={models} refresh={refreshCatalog} />;

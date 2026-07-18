@@ -49,9 +49,14 @@ export interface StageRun {
   stage: string;
   status: string;
   progress: number;
+  message: string | null;
   started_at: string | null;
   finished_at: string | null;
   error_message: string | null;
+  technical_error: string | null;
+  input_artifacts: string[] | null;
+  output_artifacts: string[] | null;
+  log_path: string | null;
 }
 
 export interface Task {
@@ -68,6 +73,9 @@ export interface Task {
   error_message: string | null;
   workspace_path: string | null;
   output_path: string | null;
+  media_info_path: string | null;
+  transcript_path: string | null;
+  artifacts_index_path: string | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -81,6 +89,26 @@ export interface TaskDetail extends Task {
     created_at: string;
   };
   stages: StageRun[];
+  media_info: {
+    title?: string | null;
+    duration?: number | null;
+    container?: string | null;
+    has_audio?: boolean;
+    has_video?: boolean;
+    audio_streams?: Array<Record<string, unknown>>;
+    video_streams?: Array<Record<string, unknown>>;
+  } | null;
+  transcript_preview: {
+    provider?: string;
+    model?: string;
+    language?: string | null;
+    chunk_count?: number;
+    completed_chunks?: number;
+    segment_count?: number;
+    text?: string;
+    truncated?: boolean;
+  } | null;
+  artifacts: Array<{ path: string; size: number }>;
 }
 
 export interface QueueState {
