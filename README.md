@@ -1,66 +1,58 @@
 # Video2Doc
 
-Video2Doc 是一个 Windows 优先的本地 Web 应用，长期目标是把视频或音频转换为完整、结构化、可追溯、可长期保留的 Obsidian Markdown 学习材料。产品原则是完整保留信息，AI 不替用户总结、提炼或生成知识观点。
+Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音频转换为完整、可追溯、可长期保存的文字资料。产品原则是“质量 > 成本 > 速度”，当前不会总结、提炼观点或补充视频外知识。
 
 ## 当前阶段
 
-当前仓库完成了第一轮工程初始化：模型、处理方案、应用设置、任务配置快照、SQLite 持久化单并发队列、模拟进度、取消、失败、重试、重启恢复、SSE 实时状态和基础操作界面。
+第二阶段已经接入真实媒体与 ASR 核心链路：
 
-> 当前 Pipeline 是明确标注的模拟实现。它不会读取或下载媒体，不会调用 yt-dlp、FFmpeg、ASR、OCR、OneAPI、Ollama 或任何远程模型，也不会伪造媒体正文。
+```text
+本地视频 / 本地音频 / 媒体网页 URL
+  → 输入验证
+  → 本地只读引用或 yt-dlp 下载
+  → ffprobe 探测
+  → FFmpeg 提取为 PCM 16kHz 单声道 WAV
+  → 固定时长分块
+  → OneAPI 的 OpenAI 兼容音频转写接口
+  → 全局时间轴合并
+  → raw JSON / normalized JSON / TXT / SRT / 前端预览
+```
 
-完整产品要求见 [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md)，当前设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，阶段状态见 [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md)。
+现有 SQLite 单并发队列、不可变任务快照、取消、失败、重试、启动恢复、SSE 实时更新和 REST 回退均继续使用。OCR、ASR 文本清洗、内容融合、Markdown 正文生成不在本阶段实现。
+
+完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。
 
 ## 技术栈
 
-- 后端：Python 3.11+、FastAPI、Pydantic、SQLAlchemy 2、Alembic、SQLite
+- 后端：Python 3.11+、FastAPI、Pydantic、SQLAlchemy 2、Alembic、SQLite、httpx
 - 前端：React 19、TypeScript 5、Vite 7
+- 外部程序：FFmpeg、ffprobe、yt-dlp
+- ASR：OneAPI/OpenAI 兼容 `POST /v1/audio/transcriptions`
 - 状态通信：REST + Server-Sent Events（SSE）
-- 测试：pytest、FastAPI TestClient、Vitest
-- 包管理：Python `venv`/pip、pnpm
-
-## 目录结构
-
-```text
-Video2Doc/
-├── backend/
-│   ├── app/
-│   │   ├── api/             # HTTP 与 SSE
-│   │   ├── core/            # 配置、日志、统一异常
-│   │   ├── db/              # SQLAlchemy 引擎与 Session
-│   │   ├── models/          # 持久化实体
-│   │   ├── pipeline/        # 可替换 runner；当前仅模拟
-│   │   ├── repositories/    # 数据访问
-│   │   ├── services/        # 应用业务规则
-│   │   ├── storage/         # 工作区与模拟输出
-│   │   └── workers/         # 固定并发 1 的 Worker
-│   ├── migrations/          # Alembic 迁移
-│   └── tests/               # API/队列/恢复测试
-├── frontend/
-│   ├── src/api/             # API 客户端
-│   ├── src/components/      # 通用界面组件
-│   ├── src/pages/           # 七个功能页面
-│   └── src/utils/           # 展示工具与测试
-├── docs/
-├── scripts/
-├── .env.example
-└── .gitignore
-```
-
-运行时数据库、日志、任务目录、虚拟环境、`node_modules` 和前端构建产物均被 Git 忽略。
+- 测试：pytest、受控外部进程、httpx MockTransport、Vitest
 
 ## 环境要求
 
-- Windows 10/11 与 PowerShell 5.1+（PowerShell 7 也可）
-- Python 3.11 或更新版本
-- Node.js 20.19+（Vite 7 要求）
-- pnpm 10+；推荐使用仓库声明的 pnpm 11
-- 首次安装依赖时需要网络
+- Windows 10/11 和 PowerShell 5.1+
+- Python 3.11+
+- Node.js 20.19+
+- pnpm 10+
+- FFmpeg 与 ffprobe（同一发行包）
+- yt-dlp 独立可执行文件或 PATH 命令
+- 可用的 OneAPI Base URL、API Key 和带 `ASR` 能力标签的模型
 
-本轮不需要 FFmpeg、yt-dlp、OCR 命令或 OneAPI 密钥。
+项目把 FFmpeg、ffprobe 和 yt-dlp 当作外部程序，而不提交大型二进制文件。yt-dlp 也采用外部程序方式，以便三类媒体命令统一使用异步流式日志、超时、取消和 Windows 进程树终止。
 
-## 一键安装
+不要从不可信来源下载可执行文件。安装后运行：
 
-在仓库根目录打开 PowerShell：
+```powershell
+Set-Location D:\Projects\Video2Doc
+.\scripts\check_media_tools.ps1
+```
+
+若程序不在 PATH，可在“应用设置”中填写 FFmpeg 和 yt-dlp 的完整路径。ffprobe 默认取 FFmpeg 同目录下的 `ffprobe.exe`。
+
+## 安装
 
 ```powershell
 Set-Location D:\Projects\Video2Doc
@@ -68,182 +60,194 @@ Copy-Item .env.example .env
 .\scripts\setup.ps1
 ```
 
-若系统阻止本地脚本，可只为当前 PowerShell 进程放宽策略：
+`setup.ps1` 安装 Python/前端依赖并检查媒体命令；媒体命令缺失时会明确警告，但仍允许先启动应用并在设置页补充路径。
 
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+编辑 `.env`：
+
+```dotenv
+ONEAPI_BASE_URL=https://your-oneapi.example/v1
+ONEAPI_API_KEY=replace-with-local-secret
 ```
 
-不要把含真实密钥的 `.env` 提交到 Git。
+真实密钥只能保留在未提交的 `.env` 或进程环境变量中。前端响应、SQLite、任务快照和日志均不保存密钥。
 
-## 后端安装、迁移与启动
-
-手动方式（从仓库根目录开始）：
+## 数据库迁移
 
 ```powershell
-Set-Location D:\Projects\Video2Doc
-py -3 -m venv backend\.venv
-backend\.venv\Scripts\python.exe -m pip install -e ".\backend[dev]"
-Set-Location .\backend
+Set-Location D:\Projects\Video2Doc\backend
 .\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m alembic current
+.\.venv\Scripts\python.exe -m alembic check
 ```
 
-或使用脚本（会先执行迁移）：
+第二阶段迁移 `0004_core_pipeline_artifacts` 新增任务媒体/转写/产物索引引用，以及阶段消息、技术错误、输入产物、输出产物和日志路径。大型媒体和转写仍只保存在文件系统中。
+
+## 启动
+
+后端：
 
 ```powershell
 Set-Location D:\Projects\Video2Doc
 .\scripts\start_backend.ps1
 ```
 
-服务地址：
+前端：
 
+```powershell
+Set-Location D:\Projects\Video2Doc
+.\scripts\start_frontend.ps1
+```
+
+联合启动：
+
+```powershell
+.\scripts\start_dev.ps1
+```
+
+- 前端：<http://127.0.0.1:5173>
 - API：<http://127.0.0.1:8000>
 - 健康检查：<http://127.0.0.1:8000/api/v1/health>
 - OpenAPI：<http://127.0.0.1:8000/docs>
 
-### 数据库迁移
+`Ctrl+C` 会停止前后端；后端停止时会终止受管外部进程树并把任务置为 `INTERRUPTED`，供用户显式重试。
 
-```powershell
-Set-Location D:\Projects\Video2Doc\backend
-.\.venv\Scripts\python.exe -m alembic current
-.\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m alembic check
+## 支持的输入
+
+- 本地视频文件
+- 本地音频文件
+- yt-dlp 支持的视频网页和媒体 URL
+
+本地输入必须是存在的绝对文件路径。应用不会只根据扩展名认定媒体有效，而是最终以 ffprobe 流信息为准。当前浏览器不能安全返回任意本地绝对路径，因此前端使用路径输入；后端仍执行完整验证。
+
+本地文件采用“只读引用原文件”策略，不复制到工作区。URL 媒体下载到任务工作区。外部命令始终使用参数列表启动，不经过 shell 拼接用户输入。
+
+## ASR 配置
+
+1. 在模型管理中创建模型，模型名称必须是 OneAPI 调用使用的模型 ID，并添加 `ASR` 标签。
+2. 在处理方案中选择该 ASR 模型，或在新建任务页为本批任务显式选择 ASR 模型。
+3. 在设置页填写 OneAPI Base URL；密钥仅通过 `ONEAPI_API_KEY` 提供。
+
+Provider 使用 OpenAI 兼容协议：multipart 文件字段 `file`、`model`、`response_format=verbose_json` 和 segment 时间戳请求。厂商差异封装在 Provider 内，Pipeline 不依赖具体服务商。
+
+## 真实 Pipeline 阶段与进度
+
+| 阶段 | 进度来源 |
+| --- | --- |
+| `INPUT_VALIDATE` | 输入规则和文件存在性 |
+| `MEDIA_ACQUIRE` | yt-dlp 实际下载百分比；本地引用直接完成 |
+| `MEDIA_PROBE` | ffprobe 阶段状态（不可精确计量） |
+| `AUDIO_EXTRACT` | FFmpeg `out_time` / 媒体总时长 |
+| `AUDIO_VALIDATE` | 音频文件和标准化流检查 |
+| `AUDIO_CHUNK` | 已完成分块数 / 总分块数 |
+| `ASR_TRANSCRIBE` | 已完成 ASR 分块数 / 总分块数 |
+| `ASR_COMBINE` | 全局时间轴映射和产物写入 |
+| `ASR_VALIDATE` | 结果顺序、时间戳和文本检查 |
+
+总进度由上述真实状态映射，不使用固定 sleep 伪造。无法得到比例的步骤只显示阶段级状态。
+
+## 工作区
+
+每个任务仍使用带 UTC 创建时间和任务 ID 的独立目录：
+
+```text
+<data>/YYYYMMDD_HHMMSS_<safe-title>_<task-id>/
+├── 00_source/
+│   ├── media/                       # URL 下载媒体
+│   └── metadata/
+│       ├── input.json
+│       ├── media_acquisition.json
+│       ├── ytdlp.json               # URL 原始元数据
+│       ├── ffprobe.json             # 原媒体原始探测
+│       ├── media_info.json          # 标准化媒体信息
+│       └── audio_media_info.json
+├── 01_extract/
+│   ├── audio/normalized.wav
+│   └── chunks/
+│       ├── manifest.json
+│       └── chunk_0000.wav
+├── 02_asr/
+│   ├── provider_raw/attempt_0001/   # Provider 原始响应，按 attempt 隔离
+│   ├── raw.json                     # 原始响应索引和分段
+│   ├── normalized.json              # 版本化标准结果
+│   ├── raw.txt
+│   ├── raw.srt
+│   └── preview.json
+├── 03_ocr/DISABLED.txt
+├── 04_fusion/intermediate/
+├── 05_output/
+├── logs/                            # stdout/stderr 与任务日志
+├── artifacts.json
+├── task_config.json
+└── task_state.json
 ```
 
-创建新迁移时，应先修改 SQLAlchemy 模型，再审阅自动生成的迁移：
+临时文件使用 `.part`/`.tmp` 名称，成功后原子替换；失败或取消会删除不完整媒体/音频分块。原始 ASR 响应与标准化结果分离，后续阶段不得覆盖它们。
 
-```powershell
-.\.venv\Scripts\python.exe -m alembic revision --autogenerate -m "describe schema change"
+## 取消、超时和重试
+
+- 等待任务取消后立即进入 `CANCELLED`。
+- 运行任务写入持久化 `cancel_requested`；Provider 停止提交新分块。
+- 外部命令通过统一异步执行器持续读取 stdout/stderr，并在 Windows 使用 `taskkill /T /F` 终止完整进程树，失败时再强制终止父进程。
+- ASR 请求取消时取消本地 HTTP 协程；取消后返回的远端结果不会保存。
+- 媒体命令默认超时 3600 秒，ASR 单请求默认超时 300 秒。
+- ASR 对超时、网络错误、HTTP 429 和 5xx 最多重试 2 次并指数退避；认证和其他 4xx 不重试。
+- `FAILED`/`INTERRUPTED` 可重试。重试增加 attempt，但继续使用创建时的原始配置快照。
+- 重试会复用有效的媒体、探测、标准化音频、分块和前一 attempt 已成功的 ASR 分块响应；不会复用不完整 `.part` 文件。
+
+可在 `.env` 调整：
+
+```dotenv
+VIDEO2DOC_MEDIA_TIMEOUT_SECONDS=3600
+VIDEO2DOC_ASR_TIMEOUT_SECONDS=300
+VIDEO2DOC_ASR_MAX_RETRIES=2
+VIDEO2DOC_AUDIO_CHUNK_SECONDS=600
+VIDEO2DOC_PROCESS_POLL_SECONDS=0.20
 ```
 
-不要使用 `Base.metadata.create_all()` 替代生产迁移；它只在隔离测试 fixture 中用于快速建库。
+第一版分块策略为固定 600 秒、PCM WAV、无重叠。无重叠是有意选择，用于避免产生不可控的重复文本；每块保存原媒体全局时间偏移。
 
-## 前端安装与启动
+## API
 
-```powershell
-Set-Location D:\Projects\Video2Doc\frontend
-pnpm install
-pnpm dev --host 127.0.0.1
-```
+在原有任务、队列、取消、重试、快照和 SSE API 之外，新增：
 
-打开 <http://127.0.0.1:5173>。默认 API 地址为 `http://127.0.0.1:8000/api/v1`；需要覆盖时在仓库根目录 `.env` 中设置 `VITE_API_BASE_URL`，或启动前设置同名环境变量。
+- `GET /api/v1/tasks/{id}/media`
+- `GET /api/v1/tasks/{id}/transcript`
+- `GET /api/v1/tasks/{id}/artifacts`
 
-也可以从根目录运行：
+任务详情响应也包含媒体摘要、转写预览、真实阶段进度和产物清单。技术错误与用户可读错误分离，完整 stderr 不直接作为用户提示。
 
-```powershell
-.\scripts\start_frontend.ps1
-```
-
-## 同时启动前后端
-
-完成 `setup.ps1` 后：
-
-```powershell
-Set-Location D:\Projects\Video2Doc
-.\scripts\start_dev.ps1
-```
-
-脚本在当前控制台管理两个 PowerShell Job，并分别显示带 `Backend`/`Frontend` 前缀的日志。Alembic、Uvicorn 或 Vite 写入 stderr 的普通日志不会被误判为失败；任一服务真正退出时，脚本会报告退出方并停止另一项。为避免 Uvicorn 的 reload 父进程掩盖子进程失败，联合启动直接监督不带 reload 的后端进程；如需后端热重载，可单独运行 `start_backend.ps1`。按 `Ctrl+C` 会停止并清理两项 Job，释放本地服务端口。
-
-## 测试和构建
-
-### 后端
+## 测试与构建
 
 ```powershell
 Set-Location D:\Projects\Video2Doc\backend
 .\.venv\Scripts\python.exe -m pytest -q
-```
 
-测试每次会在唯一的 `backend/data/test-runtime-*` 忽略目录中创建隔离 SQLite 和模拟工作区，覆盖：
-
-- 健康检查、模型能力过滤、处理方案能力校验和设置；
-- 任务快照在方案修改后保持不变；
-- 三个任务严格串行执行、执行时间不重叠且生成持久化输出；
-- 取消等待任务与运行任务；
-- 取消与完成的两种竞态顺序都只产生一个一致终态；
-- 模拟失败、失败后重试、重试 attempt 增加且保留原始快照；
-- OCR 关闭时跳过 OCR 阶段；
-- 后端启动时把遗留运行任务识别为 `INTERRUPTED` 并允许重试；
-- SQLite 约束拒绝同时存在两个 `PROCESSING` 任务。
-
-### 前端
-
-```powershell
 Set-Location D:\Projects\Video2Doc\frontend
 pnpm typecheck
 pnpm test
 pnpm build
 ```
 
-生产文件输出到被忽略的 `frontend/dist`。
+自动化测试不依赖公网或真实凭据：使用短生命周期受控进程、假的 yt-dlp/FFmpeg Provider、httpx MockTransport 和受控完整 Pipeline 验证成功、错误、超时、取消、时间轴、脱敏、重试快照与队列行为。
 
-## 配置
+## Windows 手工验收
 
-根目录 `.env.example` 提供：
+准备几秒钟的短 WAV、带音频的短 MP4，以及一个可公开访问且 yt-dlp 支持的短视频 URL：
 
-- `VIDEO2DOC_DATABASE_URL`：SQLite URL
-- `VIDEO2DOC_DATA_DIR`：任务资料目录
-- `VIDEO2DOC_INBOX_DIR`：模拟成品 Inbox
-- `VIDEO2DOC_CORS_ORIGINS`：允许的本地前端来源
-- `VIDEO2DOC_SIMULATION_STEP_SECONDS`：模拟阶段进度间隔
-- `ONEAPI_BASE_URL` / `ONEAPI_API_KEY`：仅为后续真实阶段预留，本轮不调用
-- `VITE_API_BASE_URL`：前端 API 地址
+1. 运行 `check_media_tools.ps1`。
+2. 配置 OneAPI 和 ASR 模型。
+3. 分别创建本地音频、本地视频和 URL 任务。
+4. 在任务详情核对媒体流、阶段进度、分块数、转写预览和工作区产物。
+5. 分别在下载、FFmpeg、ASR 阶段取消任务，确认任务停止、文件句柄释放且任务管理器中无残留进程。
+6. 对失败/中断任务执行重试，核对 attempt 增加且快照不变。
+7. 运行联合启动，验证前端、健康检查、OpenAPI、SSE 和 `Ctrl+C` 清理。
 
-设置页不会接收或返回 API Key 明文。后端只检查 `ONEAPI_API_KEY` 环境变量是否存在，不把密钥写入数据库、日志、快照或 HTTP 响应。
+没有真实 OneAPI 凭据时，仍可完成媒体获取、探测、标准化之前的自动化和环境检查；真实 ASR 手工验收必须由用户提供本地凭据。
 
-## 当前可操作功能
+## 已知限制
 
-- 总览队列计数和最近任务；
-- 一次创建多个 URL/本地路径模拟任务；
-- 处理方案选择、任务级 OCR 覆盖和测试失败模式；
-- 查看等待、处理、完成、失败、取消和中断状态；
-- 查看阶段、错误、配置快照、工作区和输出路径；
-- 取消等待/运行任务，重试失败/中断任务；
-- 模型增删、启停、固定能力标签；
-- 处理方案创建、默认设置、按能力过滤模型；
-- 应用路径和默认值持久化。
-
-## 尚未实现的真实功能
-
-按计划留到后续阶段：
-
-- yt-dlp、网页解析、URL 元数据和媒体下载；
-- FFmpeg 音频提取、视频抽帧和真实文件检查；
-- ASR、OCR、OneAPI、Ollama 或任何模型调用；
-- ASR/OCR 清洗、内容融合、长文本分块；
-- 符合最终内容规范的真实 Obsidian Markdown Pipeline；
-- Windows 子进程树取消、原生目录选择、打开文件/文件夹；
-- 总结、核心观点、学习笔记、问答、RAG、向量库、知识图谱和自动双链（产品明确不做）；
-- 多任务并发、多用户、云部署和浏览器插件。
-
-## 常见问题与已知限制
-
-### 启动时报 `no such table`
-
-先执行迁移，或使用会自动迁移的 `start_backend.ps1`：
-
-```powershell
-Set-Location D:\Projects\Video2Doc\backend
-.\.venv\Scripts\python.exe -m alembic upgrade head
-```
-
-### 前端显示无法连接后端
-
-确认健康检查可访问，且 `.env` 中 `VITE_API_BASE_URL` 与后端地址一致。修改 Vite 环境变量后需重启前端。
-
-### pnpm 阻止 esbuild 脚本
-
-仓库的 `frontend/pnpm-workspace.yaml` 只允许 `esbuild` 执行安装脚本。不要删除该最小白名单；它是 Vite 构建所需。
-
-### 为什么运行中任务重启后不自动继续
-
-真实外部命令未来可能有副作用，当前采用保守策略：启动时将遗留 `PROCESSING` 标记为 `INTERRUPTED`，由用户显式重试。等待任务会继续按顺序执行。
-
-### 是否可以同时运行多个后端实例
-
-不可以。第一版是单用户、单后端进程，串行保证以此为边界。未来若支持多实例，需要数据库租约或分布式锁，但不应为当前本地版本引入该复杂度。
-
-### 模拟输出是否代表真实识别内容
-
-不代表。模拟 Markdown 只说明队列和文件写入成功，并明确声明没有媒体处理或模型调用。
+- 当前只支持单后端进程、单任务并发；不支持多实例或分布式队列。
+- 固定时长分块暂不做静音边界检测，也不使用重叠。
+- Provider 若只返回整段文本而不返回 segment 时间戳，对应标准字段保持 `null`，不会伪造时间。
+- SSE 是轻量状态快照，不是可重放事件日志。
+- 还未实现 OCR、文本清洗/融合、最终 Obsidian Markdown 正文、原生文件选择器或桌面打包。
