@@ -203,6 +203,31 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# Video2Doc runtime state
+data/*
+!data/.gitkeep
+backend/data/*
+!backend/data/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+logs/
+
+# Frontend dependencies and build output
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.pnpm-store/
+*.tsbuildinfo
+
+# Local editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
 # Ruff stuff:
 .ruff_cache/
 
