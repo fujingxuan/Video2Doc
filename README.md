@@ -108,6 +108,7 @@ Set-Location D:\Projects\Video2Doc
 Set-Location D:\Projects\Video2Doc\backend
 .\.venv\Scripts\python.exe -m alembic current
 .\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m alembic check
 ```
 
 创建新迁移时，应先修改 SQLAlchemy 模型，再审阅自动生成的迁移：
@@ -154,14 +155,17 @@ Set-Location D:\Projects\Video2Doc\backend
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-测试会在 `backend/data/test-runtime` 创建隔离 SQLite 和模拟工作区，覆盖：
+测试每次会在唯一的 `backend/data/test-runtime-*` 忽略目录中创建隔离 SQLite 和模拟工作区，覆盖：
 
 - 健康检查、模型能力过滤、处理方案能力校验和设置；
 - 任务快照在方案修改后保持不变；
-- 三个任务严格串行执行且生成持久化输出；
+- 三个任务严格串行执行、执行时间不重叠且生成持久化输出；
 - 取消等待任务与运行任务；
-- 模拟失败后重试成功；
-- 后端重启时把运行任务识别为 `INTERRUPTED` 并允许重试。
+- 取消与完成的两种竞态顺序都只产生一个一致终态；
+- 模拟失败、失败后重试、重试 attempt 增加且保留原始快照；
+- OCR 关闭时跳过 OCR 阶段；
+- 后端启动时把遗留运行任务识别为 `INTERRUPTED` 并允许重试；
+- SQLite 约束拒绝同时存在两个 `PROCESSING` 任务。
 
 ### 前端
 

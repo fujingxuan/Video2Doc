@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.db.session import SessionLocal
 from app.models import Task, TaskStageRun
@@ -29,7 +30,11 @@ class SerialQueueWorker:
     async def start(self) -> None:
         if self.running:
             return
-        self._stop_event.clear()
+        # A FastAPI app can be started again in the same process (tests, local
+        # reloads, or an embedded host). asyncio primitives are loop-bound once
+        # awaited, so every lifecycle needs fresh events.
+        self._wake_event = asyncio.Event()
+        self._stop_event = asyncio.Event()
         self.recover_interrupted()
         self._runner = asyncio.create_task(self._run(), name="video2doc-serial-worker")
         self.notify()
@@ -98,7 +103,12 @@ class SerialQueueWorker:
             item.current_stage = "PREPARING"
             item.started_at = datetime.now(timezone.utc)
             item.completed_at = None
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                logger.info("Another worker claimed a task before this worker committed")
+                return None
             return item.id
 
 

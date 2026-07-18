@@ -42,7 +42,9 @@ def test_three_tasks_execute_serially_and_persist_outputs(client: TestClient) ->
     assert all(item["status"] == "COMPLETED" for item in states.values())
     assert 1 in observed_running_counts
     started = [datetime.fromisoformat(states[task_id]["started_at"]) for task_id in task_ids]
+    completed = [datetime.fromisoformat(states[task_id]["completed_at"]) for task_id in task_ids]
     assert started == sorted(started)
+    assert all(completed[index] <= started[index + 1] for index in range(len(task_ids) - 1))
     for task_id in task_ids:
         detail = states[task_id]
         assert Path(detail["workspace_path"], "task_config.json").is_file()
@@ -50,7 +52,7 @@ def test_three_tasks_execute_serially_and_persist_outputs(client: TestClient) ->
         assert Path(detail["output_path"]).is_file()
 
 
-def test_cancel_waiting_and_processing_tasks(client: TestClient) -> None:
+def test_cancel_waiting_task(client: TestClient) -> None:
     created = client.post(
         "/api/v1/tasks",
         json={
@@ -60,11 +62,23 @@ def test_cancel_waiting_and_processing_tasks(client: TestClient) -> None:
             ]
         },
     ).json()
-    running_id, waiting_id = created[0]["id"], created[1]["id"]
+    waiting_id = created[1]["id"]
 
     waiting_cancel = client.post(f"/api/v1/tasks/{waiting_id}/cancel")
     assert waiting_cancel.status_code == 200
     assert waiting_cancel.json()["status"] == "CANCELLED"
+
+
+def test_cancel_processing_task(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "inputs": [
+                {"source": "cancel-running-only", "source_type": "LOCAL_FILE", "title": "Cancel running"}
+            ]
+        },
+    ).json()
+    running_id = created[0]["id"]
 
     wait_for_status(client, running_id, {"PROCESSING"})
     running_cancel = client.post(f"/api/v1/tasks/{running_id}/cancel")

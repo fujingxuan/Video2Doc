@@ -20,7 +20,7 @@ FastAPI API 层
         └── SimulatedPipelineRunner ── 任务工作区 / 模拟 Markdown
 ```
 
-前后端可独立启动。FastAPI 负责进程生命周期，后台 Worker 不依赖浏览器是否打开；React 首次通过 REST 读取持久化状态，随后通过 SSE `/api/v1/events` 接收变化。SSE 仅推送状态发生变化时的完整轻量视图，并发送低频 keep-alive。
+前后端可独立启动。FastAPI 负责进程生命周期，后台 Worker 不依赖浏览器是否打开；React 首次通过 REST 读取持久化状态，随后通过 SSE `/api/v1/events` 接收变化。SSE 仅推送状态发生变化时的完整轻量视图，并发送低频 keep-alive；浏览器自动重连期间，前端每两秒通过 REST 回退刷新，并在 SSE 或 REST 恢复时清除旧错误态，因此断线不会让页面永久停止更新。
 
 ## 3. 后端模块
 
@@ -75,7 +75,7 @@ SQLite 保存小型结构化事实和任务索引，不存媒体 BLOB 或大段�
 
 ## 8. 持久化单并发队列
 
-队列事实源是 `tasks.status`，内存中只保留一个唤醒事件和 Worker 协程。Worker 每次领取最早的 `QUEUED` 任务；领取前若数据库已有 `PROCESSING` 任务则不再领取。因此同一应用进程中并发固定为 1。第一轮只支持一个后端实例；多实例部署不在产品范围，若未来支持则需数据库级租约/锁。
+队列事实源是 `tasks.status`，内存中只保留一个唤醒事件和 Worker 协程。Worker 每次领取最早的 `QUEUED` 任务；领取前若数据库已有 `PROCESSING` 任务则不再领取，SQLite 部分唯一索引 `uq_tasks_single_processing` 还会从数据库层拒绝第二条 `PROCESSING` 记录。因此同一应用进程中并发固定为 1，并且数据库状态始终满足单执行约束。第一轮只支持一个后端实例；多实例部署不在产品范围，若未来支持仍需任务领取租约/锁以避免两个进程重复领取同一行。
 
 处理完成、失败或取消后，Worker 自动领取下一项。每个模拟阶段在数据库创建 `task_stage_runs`，分段更新总进度与阶段进度，并同步 `task_state.json` 和任务日志。OCR 关闭时不执行 `OCR_PROCESSING`，工作区仍创建 `03_ocr/DISABLED.txt`，以保持目录结构一致且明确说明未启用。
 

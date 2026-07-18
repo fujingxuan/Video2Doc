@@ -47,13 +47,29 @@ export default function App() {
   useEffect(() => {
     const stream = new EventSource(`${API_BASE}/events`);
     stream.addEventListener("state", event => {
-      const payload = JSON.parse((event as MessageEvent<string>).data) as { tasks: Task[]; queue: QueueState };
-      setTasks(payload.tasks); setQueue(payload.queue); setConnected(true);
+      try {
+        const payload = JSON.parse((event as MessageEvent<string>).data) as { tasks: Task[]; queue: QueueState };
+        setTasks(payload.tasks); setQueue(payload.queue); setConnected(true); setError(null); setLoading(false);
+      } catch {
+        setConnected(false);
+      }
     });
     stream.onerror = () => setConnected(false);
     stream.onopen = () => setConnected(true);
     return () => stream.close();
   }, []);
+
+  useEffect(() => {
+    if (connected) return;
+    const recover = () => {
+      void refreshTasks()
+        .then(() => { setError(null); setLoading(false); })
+        .catch(() => { /* EventSource and the next fallback poll will retry. */ });
+    };
+    recover();
+    const timer = window.setInterval(recover, 2000);
+    return () => window.clearInterval(timer);
+  }, [connected, refreshTasks]);
 
   const content = useMemo(() => {
     const detail = path.match(/^\/tasks\/(\d+)$/);

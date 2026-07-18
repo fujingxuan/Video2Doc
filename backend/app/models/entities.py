@@ -3,7 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -102,6 +114,14 @@ class AppSetting(TimestampMixin, Base):
 
 class Task(TimestampMixin, Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        Index(
+            "uq_tasks_single_processing",
+            "status",
+            unique=True,
+            sqlite_where=text("status = 'PROCESSING'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source: Mapped[str] = mapped_column(Text)
