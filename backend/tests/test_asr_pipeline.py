@@ -47,11 +47,11 @@ def segment(chunk: int, local_start: float | None, local_end: float | None, text
 
 def test_chunk_offsets_map_local_segments_to_global_timeline_in_stable_order() -> None:
     chunks = [
-        AudioChunk(0, 0.0, 600.0, "chunk0.wav"),
-        AudioChunk(1, 600.0, 900.0, "chunk1.wav"),
+        AudioChunk(0, 0.0, 60.0, "chunk0.wav", overlap_after_seconds=5.0),
+        AudioChunk(1, 55.0, 90.0, "chunk1.wav", overlap_before_seconds=5.0),
     ]
     results = [
-        AsrResult("test", "m", "zh", 1, "raw1", (segment(1, 1.5, 3.0, "第二块"),)),
+        AsrResult("test", "m", "zh", 1, "raw1", (segment(1, 6.5, 8.0, "第二块"),)),
         AsrResult(
             "test",
             "m",
@@ -62,10 +62,10 @@ def test_chunk_offsets_map_local_segments_to_global_timeline_in_stable_order() -
         ),
     ]
     combined = combine_asr_results(results, chunks)
-    assert [item.text for item in combined] == ["第一块", "无时间戳", "第二块"]
+    assert [item.text for item in combined] == ["第一块", "第二块", "无时间戳"]
     assert combined[0].start_time == 2.0
-    assert combined[1].start_time is None
-    assert combined[2].start_time == 601.5
+    assert combined[1].start_time == 61.5
+    assert combined[2].start_time is None
     assert [item.segment_id for item in combined] == [
         "segment-000001",
         "segment-000002",
@@ -95,15 +95,16 @@ async def test_audio_chunker_single_chunk_writes_manifest(tmp_path: Path) -> Non
         audio,
         12.0,
         paths,
-        chunk_seconds=600,
+        chunk_seconds=60,
         cancel_check=lambda: False,
         progress=lambda value, _message: progress.append(value),
     )
     assert len(chunks) == 1
     assert Path(chunks[0].path).read_bytes() == audio.read_bytes()
     manifest = json.loads((paths.chunks / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["overlap_seconds"] == 0
-    assert manifest["chunks"][0]["start_time"] == 0
+    assert manifest["overlap_seconds"] == 5
+    assert manifest["chunks"][0]["source_start_seconds"] == 0
+    assert manifest["chunks"][0]["overlap_after_seconds"] == 0
     assert progress == [1.0]
 
 

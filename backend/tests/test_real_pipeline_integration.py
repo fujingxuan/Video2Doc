@@ -38,20 +38,33 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
 ) -> None:
     source = tmp_path / "真实 输入.mp4"
     source.write_bytes(b"not-a-real-video-but-provider-is-controlled")
-    monkeypatch.setenv("ONEAPI_API_KEY", "integration-secret")
-
+    gateway = client.post(
+        "/api/v1/gateways",
+        json={
+            "name": "integration-asr-gateway",
+            "gateway_type": "ASR",
+            "protocol": "video2doc-asr-http-v1",
+            "base_url": "http://127.0.0.1:18111",
+        },
+    ).json()
     model = client.post(
-        "/api/v1/models",
-        json={"name": "integration-whisper", "capabilities": ["ASR"], "enabled": True},
+        "/api/v1/gateway-models",
+        json={
+            "gateway_id": gateway["id"],
+            "model_name": "integration-whisper",
+            "display_name": "Integration Whisper",
+            "max_chunk_seconds": 30,
+            "supports_segment_timestamps": True,
+        },
     ).json()
     profile = client.post(
         "/api/v1/profiles",
-        json={"name": "integration-real", "asr_model_id": model["id"], "ocr_enabled": False},
+        json={
+            "name": "integration-real",
+            "asr_gateway_model_id": model["id"],
+            "ocr_enabled": False,
+        },
     ).json()
-    settings = client.put(
-        "/api/v1/settings", json={"oneapi_base_url": "http://oneapi.integration/v1"}
-    )
-    assert settings.status_code == 200
 
     async def fake_probe(self, media_path, paths, *, cancel_check, artifact_name="ffprobe"):
         return media_info(paths.metadata / f"{artifact_name}.json", video=Path(media_path) == source)
@@ -96,7 +109,7 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
     monkeypatch.setattr("app.pipeline.real.FfprobeProvider.probe", fake_probe)
     monkeypatch.setattr("app.pipeline.real.FfmpegProvider.normalize_audio", fake_normalize)
     monkeypatch.setattr(
-        "app.pipeline.real.OpenAICompatibleAsrProvider.transcribe", fake_transcribe
+        "app.pipeline.real.UnifiedAsrGatewayProvider.transcribe", fake_transcribe
     )
 
     created = client.post(
