@@ -35,6 +35,7 @@ class Settings:
     asr_request_timeout_seconds: float
     asr_max_retries: int
     audio_chunk_seconds: float
+    asr_overlap_seconds: float
 
 
 @lru_cache
@@ -68,6 +69,9 @@ def get_settings() -> Settings:
         ),
         asr_max_retries=max(0, int(os.getenv("VIDEO2DOC_ASR_MAX_RETRIES", "2"))),
         audio_chunk_seconds=max(
-            30.0, float(os.getenv("VIDEO2DOC_AUDIO_CHUNK_SECONDS", "600"))
+            30.0, float(os.getenv("VIDEO2DOC_AUDIO_CHUNK_SECONDS", "60"))
+        ),
+        asr_overlap_seconds=max(
+            0.0, float(os.getenv("VIDEO2DOC_ASR_OVERLAP_SECONDS", "5"))
         ),
     )

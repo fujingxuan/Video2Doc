@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,10 +18,14 @@ from app.providers.asr import (
     AsrResult,
     AudioChunk,
     AudioChunker,
+    DashScopeFunAsrProvider,
     OpenAICompatibleAsrProvider,
+    UnifiedAsrGatewayProvider,
     combine_asr_results,
+    load_asr_gateway_credentials,
     load_asr_credentials,
     normalize_asr_response,
+    normalize_dashscope_response,
     save_transcript_artifacts,
     validate_segments,
 )
@@ -311,56 +316,140 @@ async def run_real_pipeline(task_id: int) -> None:
             raise PipelineError("AUDIO_EXTRACTION_FAILED", "标准化音频完整性检查失败")
         tracker.complete(message="标准化音频有效", output_artifacts=[str(audio_path)])
 
-        chunk_seconds = float(
-            snapshot.get("processing", {}).get(
-                "audio_chunk_seconds", get_settings().audio_chunk_seconds
-            )
-        )
-        tracker.start(
-            "AUDIO_CHUNK", message="正在为长音频生成稳定分块", input_artifacts=[str(audio_path)]
-        )
-        chunks = _load_chunks(paths.chunks / "manifest.json")
-        if not chunks or any(not Path(chunk.path).is_file() for chunk in chunks):
-            chunks = await AudioChunker(ffmpeg_executable).split(
-                audio_path,
-                audio_info.duration,
-                paths,
-                chunk_seconds=chunk_seconds,
-                cancel_check=cancelled,
-                progress=tracker.progress,
-            )
+        asr_config = snapshot.get("asr") if isinstance(snapshot.get("asr"), dict) else {}
+        protocol = str(asr_config.get("provider") or "oneapi-openai-compatible")
+        if protocol == "oneapi-openai-compatible":
+            base_url, api_key, model = load_asr_credentials(snapshot)
         else:
-            tracker.progress(1.0, f"复用 {len(chunks)} 个现有音频分块")
+            asr_config, api_key = load_asr_gateway_credentials(snapshot)
+            base_url = str(asr_config["base_url"])
+            model = str(asr_config["model"])
+        continuous_stream = bool(
+            protocol == "dashscope-fun-asr-websocket" and asr_config.get("streaming")
+        )
+        raw_chunk_seconds = snapshot.get("processing", {}).get(
+            "audio_chunk_seconds", get_settings().audio_chunk_seconds
+        )
+        chunk_seconds = None if continuous_stream else float(raw_chunk_seconds)
+        tracker.start(
+            "AUDIO_CHUNK",
+            message=("Fun-ASR 将使用单个连续音频流" if continuous_stream else "正在为长音频生成稳定分块"),
+            input_artifacts=[str(audio_path)],
+        )
+        overlap_seconds = 0.0 if continuous_stream else float(asr_config.get("overlap_seconds", 5.0))
+        if continuous_stream:
+            if audio_info.duration is None:
+                raise PipelineError("AUDIO_EXTRACTION_FAILED", "无法确定连续音频流时长")
+            chunks = [
+                AudioChunk(
+                    0,
+                    0.0,
+                    audio_info.duration,
+                    str(audio_path),
+                    provider=protocol,
+                    model=model,
+                    attempt=attempt,
+                )
+            ]
+            write_json(
+                paths.chunks / "manifest.json",
+                {
+                    "schema_version": 2,
+                    "strategy": "continuous_stream_no_overlap",
+                    "chunk_seconds": None,
+                    "step_seconds": None,
+                    "overlap_seconds": 0.0,
+                    "chunks": [chunks[0].to_manifest_dict()],
+                },
+            )
+            tracker.progress(1.0, "连续流不重复发送音频，不创建人为重叠分块")
+        else:
+            chunks = _load_chunks(
+                paths.chunks / "manifest.json",
+                expected_chunk_seconds=chunk_seconds,
+                expected_overlap_seconds=overlap_seconds,
+            )
+            if not chunks or any(not Path(chunk.path).is_file() for chunk in chunks):
+                chunks = await AudioChunker(ffmpeg_executable).split(
+                    audio_path,
+                    audio_info.duration,
+                    paths,
+                    chunk_seconds=chunk_seconds,
+                    overlap_seconds=overlap_seconds,
+                    provider=protocol,
+                    model=model,
+                    attempt=attempt,
+                    cancel_check=cancelled,
+                    progress=tracker.progress,
+                )
+            else:
+                tracker.progress(1.0, f"复用 {len(chunks)} 个现有音频分块")
         tracker.complete(
             message=f"音频分块完成，共 {len(chunks)} 块",
             output_artifacts=[chunk.path for chunk in chunks] + [str(paths.chunks / "manifest.json")],
         )
 
-        base_url, api_key, model = load_asr_credentials(snapshot)
         attempt_raw = paths.asr_raw / f"attempt_{attempt:04d}"
         attempt_paths = replace(paths, asr_raw=attempt_raw)
         attempt_paths.asr_raw.mkdir(parents=True, exist_ok=True)
-        provider = OpenAICompatibleAsrProvider(
-            base_url=base_url,
-            api_key=api_key,
-            timeout_seconds=float(
-                snapshot.get("asr", {}).get(
-                    "timeout_seconds", get_settings().asr_request_timeout_seconds
-                )
+        provider: OpenAICompatibleAsrProvider | UnifiedAsrGatewayProvider | DashScopeFunAsrProvider
+        provider_options = {
+            "base_url": base_url,
+            "api_key": api_key,
+            "timeout_seconds": float(
+                asr_config.get("timeout_seconds", get_settings().asr_request_timeout_seconds)
             ),
-            max_retries=int(
-                snapshot.get("asr", {}).get("max_retries", get_settings().asr_max_retries)
-            ),
-        )
+            "max_retries": int(asr_config.get("max_retries", get_settings().asr_max_retries)),
+        }
+        if protocol == "dashscope-fun-asr-websocket":
+            provider = DashScopeFunAsrProvider(
+                **provider_options,
+                workspace_id=os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip() or None,
+            )
+        elif protocol == "video2doc-asr-http-v1":
+            provider = UnifiedAsrGatewayProvider(**provider_options)
+        elif protocol == "oneapi-openai-compatible":
+            provider = OpenAICompatibleAsrProvider(**provider_options)
+        else:
+            raise PipelineError("ASR_CONFIG_INVALID", f"不支持的 ASR Gateway 协议：{protocol}")
         tracker.start(
             "ASR_TRANSCRIBE",
             message="正在提交 ASR 分块",
             input_artifacts=[chunk.path for chunk in chunks],
         )
         results: list[AsrResult] = []
-        language = snapshot.get("asr", {}).get("language")
+        language = asr_config.get("language")
+        timestamp_granularity = (
+            snapshot.get("gateways", {}).get("asr", {}).get("timestamp_strategy") or "segment"
+        )
+        if continuous_stream:
+            reusable = _find_reusable_asr_response(paths.asr_raw, attempt, 0)
+            request = AsrRequest(chunks[0], model, language, timestamp_granularity)
+            if reusable:
+                result = normalize_dashscope_response(
+                    read_json(reusable) or {}, request, reusable, provider.name
+                )
+            else:
+                result = await provider.transcribe_stream(
+                    audio_path,
+                    model=model,
+                    language=language,
+                    paths=attempt_paths,
+                    cancel_check=cancelled,
+                )
+            results.append(result)
+            _update_chunk_manifest_status(paths.chunks / "manifest.json", 0, "COMPLETED", attempt)
+            tracker.progress(1.0, "Fun-ASR 连续音频流识别完成")
         for index, chunk in enumerate(chunks):
-            request = AsrRequest(chunk=chunk, model=model, language=language)
+            if continuous_stream:
+                break
+            request = AsrRequest(
+                chunk=chunk,
+                model=model,
+                language=language,
+                timestamp_granularity=timestamp_granularity,
+                request_id=f"task-{task_id}-attempt-{attempt}-chunk-{chunk.index}",
+            )
             reusable = _find_reusable_asr_response(paths.asr_raw, attempt, chunk.index)
             if reusable:
                 payload = read_json(reusable)
@@ -368,6 +457,9 @@ async def run_real_pipeline(task_id: int) -> None:
             else:
                 result = await provider.transcribe(request, attempt_paths, cancel_check=cancelled)
             results.append(result)
+            _update_chunk_manifest_status(
+                paths.chunks / "manifest.json", chunk.index, "COMPLETED", attempt
+            )
             tracker.progress(
                 (index + 1) / len(chunks), f"ASR 已完成 {index + 1}/{len(chunks)} 个分块"
             )
@@ -377,7 +469,8 @@ async def run_real_pipeline(task_id: int) -> None:
         )
 
         tracker.start("ASR_COMBINE", message="正在映射全局时间轴并合并结果")
-        segments = combine_asr_results(results, chunks)
+        merge_diagnostics: list[dict] = []
+        segments = combine_asr_results(results, chunks, diagnostics=merge_diagnostics)
         artifacts = save_transcript_artifacts(
             paths,
             segments,
@@ -385,6 +478,7 @@ async def run_real_pipeline(task_id: int) -> None:
             model=model,
             language=next((item.language for item in results if item.language), None),
             chunk_count=len(chunks),
+            merge_diagnostics=merge_diagnostics,
         )
         tracker.complete(
             message=f"已按原媒体时间轴合并 {len(segments)} 个分段",
@@ -527,14 +621,59 @@ def _load_media_info(path: Path) -> MediaInfo | None:
         return None
 
 
-def _load_chunks(path: Path) -> list[AudioChunk]:
+def _load_chunks(
+    path: Path,
+    *,
+    expected_chunk_seconds: float | None = None,
+    expected_overlap_seconds: float | None = None,
+) -> list[AudioChunk]:
     payload = read_json(path)
     if not payload or not isinstance(payload.get("chunks"), list):
         return []
+    if expected_chunk_seconds is not None and abs(
+        float(payload.get("chunk_seconds", -1)) - expected_chunk_seconds
+    ) > 0.001:
+        return []
+    if expected_overlap_seconds is not None and abs(
+        float(payload.get("overlap_seconds", -1)) - expected_overlap_seconds
+    ) > 0.001:
+        return []
     try:
-        return [AudioChunk(**item) for item in payload["chunks"]]
+        chunks: list[AudioChunk] = []
+        for item in payload["chunks"]:
+            if "chunk_index" in item:
+                chunks.append(
+                    AudioChunk(
+                        index=int(item["chunk_index"]),
+                        start_time=float(item["source_start_seconds"]),
+                        end_time=float(item["source_end_seconds"]),
+                        path=str(item["audio_path"]),
+                        overlap_before_seconds=float(item.get("overlap_before_seconds", 0)),
+                        overlap_after_seconds=float(item.get("overlap_after_seconds", 0)),
+                        provider=item.get("provider"),
+                        model=item.get("model"),
+                        attempt=int(item.get("attempt", 1)),
+                        status=str(item.get("status", "READY")),
+                    )
+                )
+            else:
+                chunks.append(AudioChunk(**item))
+        return chunks
     except (TypeError, ValueError):
         return []
+
+
+def _update_chunk_manifest_status(path: Path, chunk_index: int, status: str, attempt: int) -> None:
+    payload = read_json(path)
+    if not payload or not isinstance(payload.get("chunks"), list):
+        return
+    for item in payload["chunks"]:
+        item_index = item.get("chunk_index", item.get("index"))
+        if item_index == chunk_index:
+            item["status"] = status
+            item["attempt"] = attempt
+            break
+    write_json(path, payload)
 
 
 def _find_reusable_asr_response(root: Path, attempt: int, chunk_index: int) -> Path | None:

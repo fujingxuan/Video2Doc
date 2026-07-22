@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any
+from urllib.parse import urlparse
+
+import httpx
+import websockets
+
+from app.models import GatewayConfig
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayProbeResult:
+    status: str
+    detail: str | None
+    checked_at: datetime
+
+
+def gateway_endpoint(base_url: str, suffix: str) -> str:
+    base = base_url.strip().rstrip("/")
+    parsed = urlparse(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Gateway Base URL must be an absolute HTTP(S) URL")
+    if parsed.username or parsed.password:
+        raise ValueError("Gateway Base URL cannot contain credentials")
+    return f"{base}{suffix}"
+
+
+def trust_environment_proxy(url: str) -> bool:
+    hostname = (urlparse(url).hostname or "").casefold()
+    return hostname not in {"127.0.0.1", "localhost", "::1"}
+
+
+async def probe_gateway(
+    gateway: GatewayConfig,
+    *,
+    timeout_seconds: float = 10.0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> GatewayProbeResult:
+    checked_at = datetime.now(timezone.utc)
+    secret = os.getenv(gateway.secret_env_name, "") if gateway.secret_env_name else ""
+    if gateway.secret_env_name and not secret:
+        return GatewayProbeResult("MISSING_SECRET", f"缺少环境变量 {gateway.secret_env_name}", checked_at)
+    try:
+        if gateway.protocol == "dashscope-fun-asr-websocket":
+            parsed = urlparse(gateway.base_url)
+            if parsed.scheme != "wss" or not parsed.netloc:
+                return GatewayProbeResult("INVALID_CONFIG", "DashScope 地址必须使用 wss://", checked_at)
+            headers = {"Authorization": f"Bearer {secret}", "user-agent": "Video2Doc/0.3"}
+            workspace_id = os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip()
+            if workspace_id:
+                headers["X-DashScope-WorkSpace"] = workspace_id
+            async with websockets.connect(
+                gateway.base_url,
+                additional_headers=headers,
+                open_timeout=timeout_seconds,
+                close_timeout=2,
+            ):
+                return GatewayProbeResult("HEALTHY", "WebSocket 握手成功", checked_at)
+        endpoint = gateway_endpoint(gateway.base_url, "/health")
+        headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout_seconds),
+            transport=transport,
+            trust_env=trust_environment_proxy(endpoint),
+        ) as client:
+            response = await client.get(endpoint, headers=headers)
+        if response.status_code in {401, 403}:
+            return GatewayProbeResult("AUTH_FAILED", f"HTTP {response.status_code}", checked_at)
+        if response.status_code >= 400:
+            return GatewayProbeResult("UNHEALTHY", f"HTTP {response.status_code}", checked_at)
+        return GatewayProbeResult("HEALTHY", "健康检查通过", checked_at)
+    except (OSError, httpx.HTTPError, TimeoutError, ValueError) as exc:
+        return GatewayProbeResult("UNREACHABLE", f"{type(exc).__name__}: {exc}", checked_at)
+    except Exception as exc:  # WebSocket implementations expose several handshake exception types.
+        return GatewayProbeResult("UNREACHABLE", f"{type(exc).__name__}: {exc}", checked_at)
+
+
+async def discover_gateway_models(
+    gateway: GatewayConfig,
+    *,
+    timeout_seconds: float = 15.0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> list[dict[str, Any]]:
+    if gateway.protocol == "dashscope-fun-asr-websocket":
+        return []
+    endpoint = gateway_endpoint(gateway.base_url, "/v1/models")
+    secret = os.getenv(gateway.secret_env_name, "") if gateway.secret_env_name else ""
+    headers = {"Authorization": f"Bearer {secret}"} if secret else {}
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(timeout_seconds),
+        transport=transport,
+        trust_env=trust_environment_proxy(endpoint),
+    ) as client:
+        response = await client.get(endpoint, headers=headers)
+    response.raise_for_status()
+    payload = response.json()
+    raw_models = payload.get("data", payload.get("models", payload)) if isinstance(payload, dict) else payload
+    if not isinstance(raw_models, list):
+        raise ValueError("Gateway model discovery response must contain a list")
+    normalized: list[dict[str, Any]] = []
+    for item in raw_models:
+        if isinstance(item, str):
+            normalized.append({"model_name": item, "display_name": item})
+        elif isinstance(item, dict):
+            model_name = str(item.get("id") or item.get("model_name") or item.get("name") or "").strip()
+            if model_name:
+                normalized.append(
+                    {
+                        "model_name": model_name,
+                        "display_name": str(item.get("display_name") or item.get("name") or model_name),
+                        "capabilities": item.get("capabilities") or {},
+                    }
+                )
+    return normalized

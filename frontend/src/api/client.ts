@@ -1,6 +1,9 @@
 import type {
   AppSettings,
   Capability,
+  GatewayConfig,
+  GatewayModel,
+  GatewayType,
   ModelConfig,
   ProcessingProfile,
   QueueState,
@@ -54,6 +57,33 @@ export const api = {
   updateModel: (id: number, payload: Partial<ModelConfig>) =>
     request<ModelConfig>(`/models/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteModel: (id: number) => request<void>(`/models/${id}`, { method: "DELETE" }),
+  gateways: (gatewayType?: GatewayType) =>
+    request<GatewayConfig[]>(`/gateways${gatewayType ? `?gateway_type=${gatewayType}` : ""}`),
+  createGateway: (payload: Record<string, unknown>) =>
+    request<GatewayConfig>("/gateways", { method: "POST", body: JSON.stringify(payload) }),
+  updateGateway: (id: number, payload: Record<string, unknown>) =>
+    request<GatewayConfig>(`/gateways/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteGateway: (id: number) => request<void>(`/gateways/${id}`, { method: "DELETE" }),
+  checkGateway: (id: number) =>
+    request<{ gateway_id: number; status: string; detail: string | null }>(
+      `/gateways/${id}/health`,
+      { method: "POST" },
+    ),
+  discoverGateway: (id: number) =>
+    request<GatewayModel[]>(`/gateways/${id}/discover`, { method: "POST" }),
+  gatewayModels: (gatewayType?: GatewayType) =>
+    request<GatewayModel[]>(
+      `/gateway-models${gatewayType ? `?gateway_type=${gatewayType}` : ""}`,
+    ),
+  createGatewayModel: (payload: Record<string, unknown>) =>
+    request<GatewayModel>("/gateway-models", { method: "POST", body: JSON.stringify(payload) }),
+  updateGatewayModel: (id: number, payload: Record<string, unknown>) =>
+    request<GatewayModel>(`/gateway-models/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  deleteGatewayModel: (id: number) =>
+    request<void>(`/gateway-models/${id}`, { method: "DELETE" }),
   profiles: () => request<ProcessingProfile[]>("/profiles"),
   createProfile: (payload: Record<string, unknown>) =>
     request<ProcessingProfile>("/profiles", { method: "POST", body: JSON.stringify(payload) }),

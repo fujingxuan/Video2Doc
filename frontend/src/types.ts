@@ -17,6 +17,51 @@ export interface ModelConfig {
   updated_at: string;
 }
 
+export type GatewayType = "ASR" | "OCR";
+
+export interface GatewayConfig {
+  id: number;
+  name: string;
+  gateway_type: GatewayType;
+  protocol: string;
+  base_url: string;
+  secret_env_name: string | null;
+  secret_configured: boolean;
+  enabled: boolean;
+  health_status: string;
+  last_checked_at: string | null;
+  settings: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GatewayModel {
+  id: number;
+  gateway_id: number;
+  gateway_name: string;
+  gateway_type: GatewayType;
+  gateway_base_url: string;
+  protocol: string;
+  model_name: string;
+  display_name: string;
+  enabled: boolean;
+  capabilities: Record<string, unknown>;
+  max_chunk_seconds: number | null;
+  max_alignment_seconds: number | null;
+  supports_native_long_audio: boolean;
+  supports_streaming: boolean;
+  supports_segment_timestamps: boolean;
+  supports_word_timestamps: boolean;
+  supports_confidence: boolean;
+  supports_language_detection: boolean;
+  timestamp_granularity: string[];
+  languages: string[];
+  health_status: string;
+  settings: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProcessingProfile {
   id: number;
   name: string;
@@ -27,6 +72,8 @@ export interface ProcessingProfile {
   asr_model_id: number | null;
   ocr_model_id: number | null;
   text_model_id: number | null;
+  asr_gateway_model_id: number | null;
+  ocr_gateway_model_id: number | null;
   ocr_enabled: boolean;
   remove_fillers: boolean;
   fix_sentences: boolean;

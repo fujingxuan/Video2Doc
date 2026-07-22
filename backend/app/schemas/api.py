@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+import re
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -12,6 +14,209 @@ class Capability(StrEnum):
     OCR = "OCR"
     TEXT_PROCESSING = "TEXT_PROCESSING"
     VISION = "VISION"
+
+
+class GatewayType(StrEnum):
+    ASR = "ASR"
+    OCR = "OCR"
+
+
+class GatewayCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    gateway_type: GatewayType
+    protocol: str = Field(min_length=1, max_length=64)
+    base_url: str = Field(min_length=1)
+    secret_env_name: str | None = Field(default=None, max_length=200)
+    enabled: bool = True
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_base_url(cls, value: str) -> str:
+        return _validate_gateway_base_url(value)
+
+    @field_validator("secret_env_name")
+    @classmethod
+    def valid_secret_env_name(cls, value: str | None) -> str | None:
+        return _validate_secret_env_name(value)
+
+    @field_validator("settings")
+    @classmethod
+    def settings_do_not_contain_secrets(cls, value: dict[str, Any]) -> dict[str, Any]:
+        _reject_sensitive_metadata(value, "settings")
+        return value
+
+
+class GatewayUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    gateway_type: GatewayType | None = None
+    protocol: str | None = Field(default=None, min_length=1, max_length=64)
+    base_url: str | None = Field(default=None, min_length=1)
+    secret_env_name: str | None = Field(default=None, max_length=200)
+    enabled: bool | None = None
+    settings: dict[str, Any] | None = None
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_base_url(cls, value: str | None) -> str | None:
+        return _validate_gateway_base_url(value) if value is not None else None
+
+    @field_validator("secret_env_name")
+    @classmethod
+    def valid_secret_env_name(cls, value: str | None) -> str | None:
+        return _validate_secret_env_name(value)
+
+    @field_validator("settings")
+    @classmethod
+    def settings_do_not_contain_secrets(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        if value is not None:
+            _reject_sensitive_metadata(value, "settings")
+        return value
+
+
+class GatewayRead(BaseModel):
+    id: int
+    name: str
+    gateway_type: GatewayType
+    protocol: str
+    base_url: str
+    secret_env_name: str | None
+    secret_configured: bool
+    enabled: bool
+    health_status: str
+    last_checked_at: datetime | None
+    settings: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class GatewayModelFields(BaseModel):
+    gateway_id: int
+    model_name: str = Field(min_length=1, max_length=300)
+    display_name: str = Field(min_length=1, max_length=300)
+    enabled: bool = True
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    max_chunk_seconds: float | None = Field(default=None, gt=0)
+    max_alignment_seconds: float | None = Field(default=None, gt=0)
+    supports_native_long_audio: bool = False
+    supports_streaming: bool = False
+    supports_segment_timestamps: bool = False
+    supports_word_timestamps: bool = False
+    supports_confidence: bool = False
+    supports_language_detection: bool = False
+    timestamp_granularity: list[str] = Field(default_factory=list)
+    languages: list[str] = Field(default_factory=list)
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("capabilities", "settings")
+    @classmethod
+    def metadata_does_not_contain_secrets(cls, value: dict[str, Any]) -> dict[str, Any]:
+        _reject_sensitive_metadata(value, "gateway model metadata")
+        return value
+
+
+class GatewayModelCreate(GatewayModelFields):
+    pass
+
+
+class GatewayModelUpdate(BaseModel):
+    gateway_id: int | None = None
+    model_name: str | None = Field(default=None, min_length=1, max_length=300)
+    display_name: str | None = Field(default=None, min_length=1, max_length=300)
+    enabled: bool | None = None
+    capabilities: dict[str, Any] | None = None
+    max_chunk_seconds: float | None = Field(default=None, gt=0)
+    max_alignment_seconds: float | None = Field(default=None, gt=0)
+    supports_native_long_audio: bool | None = None
+    supports_streaming: bool | None = None
+    supports_segment_timestamps: bool | None = None
+    supports_word_timestamps: bool | None = None
+    supports_confidence: bool | None = None
+    supports_language_detection: bool | None = None
+    timestamp_granularity: list[str] | None = None
+    languages: list[str] | None = None
+    settings: dict[str, Any] | None = None
+
+    @field_validator("capabilities", "settings")
+    @classmethod
+    def metadata_does_not_contain_secrets(
+        cls, value: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        if value is not None:
+            _reject_sensitive_metadata(value, "gateway model metadata")
+        return value
+
+
+class GatewayModelRead(GatewayModelFields):
+    id: int
+    gateway_name: str
+    gateway_type: GatewayType
+    gateway_base_url: str
+    protocol: str
+    health_status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class GatewayHealthRead(BaseModel):
+    gateway_id: int
+    status: str
+    detail: str | None = None
+    checked_at: datetime
+
+
+def _validate_gateway_base_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https", "ws", "wss"} or not parsed.netloc:
+        raise ValueError("Gateway Base URL must be an absolute HTTP(S) or WS(S) URL")
+    if parsed.username or parsed.password:
+        raise ValueError("Gateway Base URL cannot contain credentials")
+    return normalized
+
+
+def _validate_secret_env_name(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    normalized = value.strip()
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", normalized) is None:
+        raise ValueError("Secret reference must be an environment variable name")
+    return normalized
+
+
+def _reject_sensitive_metadata(value: Any, location: str) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if is_sensitive_metadata_key(str(key)):
+                raise ValueError(
+                    f"{location} cannot store credentials; use secret_env_name instead"
+                )
+            _reject_sensitive_metadata(item, location)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_sensitive_metadata(item, location)
+
+
+def is_sensitive_metadata_key(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", key.casefold()).strip("_")
+    if normalized in {
+        "api_key",
+        "apikey",
+        "authorization",
+        "token",
+        "bearer_token",
+        "access_token",
+        "password",
+        "secret",
+        "credential",
+        "credentials",
+    }:
+        return True
+    return normalized.startswith(("secret_", "password_", "credential_")) or normalized.endswith(
+        ("_api_key", "_access_token", "_bearer_token", "_password", "_secret")
+    )
 
 
 class ModelCreate(BaseModel):
@@ -51,6 +256,8 @@ class ProfileFields(BaseModel):
     asr_model_id: int | None = None
     ocr_model_id: int | None = None
     text_model_id: int | None = None
+    asr_gateway_model_id: int | None = None
+    ocr_gateway_model_id: int | None = None
     ocr_enabled: bool = False
     remove_fillers: bool = True
     fix_sentences: bool = True
@@ -77,6 +284,8 @@ class ProfileUpdate(BaseModel):
     asr_model_id: int | None = None
     ocr_model_id: int | None = None
     text_model_id: int | None = None
+    asr_gateway_model_id: int | None = None
+    ocr_gateway_model_id: int | None = None
     ocr_enabled: bool | None = None
     remove_fillers: bool | None = None
     fix_sentences: bool | None = None
@@ -157,6 +366,8 @@ class TaskBatchCreate(BaseModel):
     config_overrides: dict[str, Any] = Field(default_factory=dict)
     pipeline_mode: Literal["REAL", "SIMULATED"] = "REAL"
     asr_model_id: int | None = None
+    asr_gateway_model_id: int | None = None
+    ocr_gateway_model_id: int | None = None
 
 
 class SnapshotRead(BaseModel):
