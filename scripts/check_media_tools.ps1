@@ -20,20 +20,41 @@ function Test-ExternalTool {
         if (Test-Path -LiteralPath $Executable -PathType Leaf) { $resolved = $Executable }
     }
     else {
-        $command = Get-Command $Executable -ErrorAction SilentlyContinue
-        if ($command) { $resolved = $command.Source }
+        $command = Get-Command $Executable -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($command) { $resolved = $command.Path }
     }
     if (-not $resolved) {
         Write-Host "[MISSING] $Name ($Executable)"
         $script:missing += $Name
         return
     }
-    & $resolved @Arguments 2>&1 | Select-Object -First 1 | ForEach-Object {
-        Write-Host "[OK] $Name - $_"
-    }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[FAILED] $Name returned exit code $LASTEXITCODE"
+    # Windows PowerShell 5.1 can set $LASTEXITCODE to -1 when a downstream
+    # Select-Object -First stops a native-process pipeline before it is fully
+    # drained. Buffer the complete output first so the process has exited before
+    # capturing its exit code, then select the display line from memory.
+    $global:LASTEXITCODE = $null
+    $toolOutput = @(& $resolved @Arguments 2>&1)
+    $exitCode = $global:LASTEXITCODE
+    $firstOutputLine = $toolOutput | Select-Object -First 1
+
+    if ($null -eq $exitCode) {
+        Write-Host "[FAILED] $Name could not be started"
+        if ($null -ne $firstOutputLine) { Write-Host "         $firstOutputLine" }
         $script:missing += $Name
+        return
+    }
+    if ($exitCode -ne 0) {
+        Write-Host "[FAILED] $Name returned exit code $exitCode"
+        if ($null -ne $firstOutputLine) { Write-Host "         $firstOutputLine" }
+        $script:missing += $Name
+        return
+    }
+    if ($null -ne $firstOutputLine) {
+        Write-Host "[OK] $Name - $firstOutputLine"
+    }
+    else {
+        Write-Host "[OK] $Name"
     }
 }
 

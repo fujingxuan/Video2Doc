@@ -219,6 +219,9 @@ VIDEO2DOC_PROCESS_POLL_SECONDS=0.20
 ## 测试与构建
 
 ```powershell
+Set-Location D:\Projects\Video2Doc
+.\scripts\test_check_media_tools.ps1
+
 Set-Location D:\Projects\Video2Doc\backend
 .\.venv\Scripts\python.exe -m ruff check --no-cache app tests
 .\.venv\Scripts\python.exe -m pytest -q
