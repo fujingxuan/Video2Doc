@@ -1,6 +1,6 @@
 # Video2Doc 实施计划
 
-更新日期：2026-07-18
+更新日期：2026-07-23
 
 ## 状态标记
 
@@ -34,12 +34,12 @@
 - [x] 集中的真实工作区路径服务和产物索引
 - [x] `INPUT_VALIDATE` 到 `AUDIO_VALIDATE` 阶段持久化
 - [x] 检查点 A 专项自动化测试
-- [~] 使用本机真实 FFmpeg/ffprobe/yt-dlp 的三类手工媒体验收
+- [x] 使用本机真实 FFmpeg/ffprobe/yt-dlp 的本地视频与 Bilibili URL 验收
 
 ## 阶段 5：真实 ASR（第二阶段检查点 B）
 
 - [x] `AsrRequest`、`AsrSegment`、`AsrResult` Provider 边界
-- [x] OneAPI/OpenAI 兼容 multipart 音频转写 Provider
+- [x] OneAPI/OpenAI 兼容 multipart 音频转写 Provider（只保留旧快照兼容）
 - [x] Base URL、模型、密钥引用、超时和重试配置
 - [x] 认证、限流、超时、网络和 Provider 错误分类
 - [x] HTTP 请求取消和后端关闭中断
@@ -51,7 +51,7 @@
 - [x] `AUDIO_CHUNK` 到 `ASR_VALIDATE` 阶段持久化
 - [x] 检查点 B 专项自动化测试
 - [x] 受控数据库 Worker 全链路集成测试
-- [~] 使用真实 OneAPI ASR 凭据的手工转写验收
+- [x] 使用独立 DashScope、本地 FireRed、Whisper 与 Qwen Gateway 的真实转写验收
 
 ## 阶段 6：API 与必要前端
 
@@ -62,9 +62,26 @@
 - [x] 用户错误与技术详情分离
 - [x] 保留取消、重试、SSE 和 REST 回退
 
+## 阶段 6.1：独立模型 Gateway 与重叠分块
+
+- [x] ASR/OCR Gateway 数据库、CRUD、健康检查和模型发现
+- [x] Gateway/模型分离与版本 3 不可变任务快照
+- [x] OneAPI 限定为文本处理；ASR/OCR 不再依赖 OneAPI
+- [x] DashScope Fun-ASR 连续 WebSocket、最终事件、词级时间戳与取消
+- [x] 离线模型能力驱动块长与默认 5 秒重叠
+- [x] segment/word 全局时间映射、确定性边界去重和冲突诊断
+- [x] manifest 记录前后重叠、Provider、模型、attempt 与状态
+- [x] 本地 FireRed/Qwen/Whisper 统一 Gateway 服务和按需单模型加载
+- [x] PowerShell/WSL 安装、下载、启动、停止、健康与推理脚本
+- [x] Gateway 管理与处理方案前端
+- [x] 自动化覆盖重叠、去重、取消、重试复用、快照兼容和模型切换
+- [x] Fun-ASR 真实短音频、完整 9 分钟连续流与取消
+- [x] FireRed、Whisper、Qwen ASR + ForcedAligner 均已在本机 GPU 真实部署并完成短片段与长视频验收
+- [x] Bilibili URL 下载、完整多块 ASR、合并和重试真实验收
+
 ## 阶段 7：迁移、测试与文档
 
-- [x] 仅新增 `0004_core_pipeline_artifacts` migration
+- [x] `0004_core_pipeline_artifacts` 与 `0005_independent_model_gateways` migrations
 - [x] 单元测试覆盖输入、工作区、进度解析、探测标准化、时间轴、合并和脱敏
 - [x] 进程集成测试覆盖 stdout/stderr、退出码、超时和取消
 - [x] HTTP mock 覆盖 ASR 成功、认证、超时和取消

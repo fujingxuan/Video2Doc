@@ -1,4 +1,4 @@
-# Video2Doc 第二阶段架构
+# Video2Doc 独立模型 Gateway 架构
 
 ## 1. 范围与不变量
 
@@ -11,7 +11,7 @@
 - SSE 发布数据库状态，断线时前端使用 REST 回退。
 - 大型媒体、日志和转写保存在工作区；SQLite 只保存索引和小型事实。
 
-本阶段明确不包含 OCR、文本清洗、融合、Markdown 正文生成、总结和知识提炼。
+本阶段包含 OCR Gateway 架构但不包含真实 OCR 模型；文本清洗、融合、Markdown 正文生成、总结和知识提炼仍不在范围内。
 
 ## 2. 总体结构
 
@@ -35,9 +35,17 @@ Pipeline dispatcher
          ├── FfprobeProvider
          ├── FfmpegProvider
          ├── AudioChunker
-         └── OpenAICompatibleAsrProvider
-                │
-                └── OneAPI /v1/audio/transcriptions
+         ├── AudioChunker + StructuredOverlapMerger
+         ├── DashScopeFunAsrProvider ── DashScope WebSocket
+         └── UnifiedAsrGatewayProvider
+                ├── FireRedASR2-AED :8101
+                ├── Qwen3-ASR + ForcedAligner :8102
+                └── faster-whisper :8103
+
+GatewayService ── gateway_configs / gateway_models
+       └── ASR 与 OCR 各自拥有协议、健康检查、模型发现和密钥引用
+
+OneAPI ── 仅后续文本处理模型
 ```
 
 真实 Provider 不引用 FastAPI 路由或前端类型。Pipeline 负责阶段编排和持久化，Provider 只负责外部能力及标准化输入输出。
@@ -87,28 +95,29 @@ Windows 子进程使用新进程组启动。取消/超时/关机时，`PlatformP
 
 ## 6. ASR 与分块
 
-`AudioChunker` 使用固定时长、确定性文件名和全局偏移：
+`AudioChunker` 使用模型能力上限、确定性文件名、全局偏移和默认 5 秒重叠：
 
 ```text
-chunk_0000.wav: [0, 600)
-chunk_0001.wav: [600, 1200)
+chunk_0000.wav: [0, 60)
+chunk_0001.wav: [55, 115)
+chunk_0002.wav: [110, 170)
 ...
 ```
 
-第一版默认 600 秒、无重叠。无重叠用于避免重复文本；manifest 明确记录该决定。单块音频直接复制标准 WAV，多块用 FFmpeg 精确截取。最后不足 600 秒的块保留实际结束时间。
+离线模型统一 `step_seconds = chunk_seconds - 5`，最后一块允许不足完整长度。块长由 `GatewayModel` 的 `max_chunk_seconds`、`max_alignment_seconds`、`supports_native_long_audio` 和 `supports_streaming` 决定。manifest 记录每块源起止、前后重叠、路径、Provider、模型、attempt 和状态。
 
-`OpenAICompatibleAsrProvider` 接收 `AsrRequest`，向 OneAPI/OpenAI 兼容 multipart endpoint 提交 WAV。Base URL、模型、超时和重试数来自任务快照；API Key 只在执行时读取 `ONEAPI_API_KEY`。
+`UnifiedAsrGatewayProvider` 向独立 Gateway 的 `/v1/asr/transcriptions` 提交 WAV；`DashScopeFunAsrProvider` 用单一 WebSocket 连续发送 PCM，完成后只接受最终句子。连续 Fun-ASR 会话的重叠为 0，不重复发送音频。Base URL、协议、模型、能力、超时、重试和密钥环境变量名称来自不可变任务快照。
 
 Provider 对超时、网络错误、429 和 5xx 做有限指数退避；401/403 映射为认证错误，其他 4xx 不自动重试。取消后不会提交新分块，已取消请求的晚到结果不会持久化。
 
-标准 `AsrSegment` 字段：
+标准 `AsrSegment` 还包含结构化 words：
 
 ```text
 segment_id, start_time, end_time, text, confidence,
-language, provider, model, chunk_index, raw_response_reference
+language, provider, model, chunk_index, raw_response_reference, words
 ```
 
-Provider 未返回置信度或时间戳时字段保持 `null`。局部时间戳仅在存在时加上 chunk 全局偏移，不伪造数据。合并按 `chunk_index` 和 Provider 原始分段顺序稳定执行。
+Provider 未返回置信度或时间戳时字段保持 `null`。局部 segment/word 时间戳仅在存在时加上 chunk 全局偏移，不伪造数据。合并先在重叠窗口用时间戳和规范化文本去重；只有词级时间戳时可裁掉已确认的重复词。同一源时间窗内足够长的词前缀即使有少量 ASR 拼写漂移，也可用规范化相似度确定消重，但最后一个匹配块之后的未匹配边缘词必须保留，避免前一块漏词。短而相似、语义不确定的内容保留并写 `boundary_conflict_retained` 诊断；若两条保留内容的词时间互相矛盾，只把冲突词时间置 `null` 并收窄 SRT segment 到下一段可靠时间，不删除文本也不编造时间。最终结果按全局时间排序，TXT、SRT 和 normalized JSON 使用同一结构化 segment 集合。
 
 ## 7. Pipeline 阶段和进度
 
@@ -148,29 +157,24 @@ SQLite 的任务行只保存 `media_info_path`、`transcript_path` 和 `artifact
 
 ## 10. 数据库迁移
 
-`0004_core_pipeline_artifacts` 只新增可空列，兼容第一轮数据：
+`0005_independent_model_gateways` 在 `0004` 之后新增：
 
-- `tasks.media_info_path`
-- `tasks.transcript_path`
-- `tasks.artifacts_index_path`
-- `task_stage_runs.message`
-- `task_stage_runs.technical_error`
-- `task_stage_runs.retryable`
-- `task_stage_runs.input_artifacts`
-- `task_stage_runs.output_artifacts`
-- `task_stage_runs.log_path`
+- `gateway_configs`：类型、协议、Base URL、密钥环境变量名称、健康状态与设置
+- `gateway_models`：Gateway 引用、模型名、分块/对齐上限、流式与时间戳等能力
+- `processing_profiles.asr_gateway_model_id`
+- `processing_profiles.ocr_gateway_model_id`
 
-原表、状态枚举语义、快照和单执行唯一索引不修改。
+旧任务快照仍可由兼容 Provider 执行；新快照版本为 3，数据库与快照都只保存密钥环境变量名称。
 
 ## 11. API 与前端
 
-原任务 API 保持兼容。创建任务新增 `pipeline_mode`（默认 `REAL`）和可选 `asr_model_id`。模拟模式只供显式自动化兼容测试。
+原任务 API 保持兼容。真实任务选择 `asr_gateway_model_id`，处理方案分别引用 ASR/OCR Gateway 模型；模拟模式仍供显式自动化兼容测试。
 
-新增媒体、转写和产物读取 API。任务详情聚合媒体摘要、转写预览和产物列表。前端创建页强制本地/URL 二选一，支持方案和 ASR 模型选择；详情显示总进度、阶段进度、媒体流、分块完成数、转写预览、用户错误和可展开技术信息。SSE 和 REST 回退没有改变。
+新增 Gateway CRUD、健康检查、模型发现和 Gateway 模型 API。前端 Gateway 页分别管理 ASR/OCR 连接；模型页只保留 OneAPI 文本/视觉模型；处理方案和新任务页选择独立 Gateway 模型。SSE 和 REST 回退没有改变。
 
 ## 12. 安全边界
 
-- API Key 不进入请求响应、SQLite、快照、日志或测试 fixture。
+- API Key 值不进入请求响应、SQLite、快照、日志或测试 fixture；仅保存环境变量名称。
 - 外部命令不用 shell，不拼接用户输入。
 - URL 拒绝内嵌凭据，命令展示隐藏 URL 查询参数。
 - 本地输入只读，拒绝目录、相对路径和不存在文件。
@@ -184,4 +188,5 @@ SQLite 的任务行只保存 `media_info_path`、`transcript_path` 和 `artifact
 - 浏览器没有原生绝对路径选择器，当前使用路径输入。
 - SSE 不是可重放事件日志。
 - URL 下载成功仍依赖站点和本机 yt-dlp 版本。
-- OneAPI 端必须实际支持 OpenAI 兼容音频转写协议和所选模型。
+- OCR Gateway 当前只有完整抽象与 mock，没有宣称真实 OCR 部署。
+- 本地大模型是否可运行取决于 GPU 显存、驱动、WSL 内存与具体依赖，按需单模型驻留。

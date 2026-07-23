@@ -4,7 +4,7 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
 
 ## 当前阶段
 
-第二阶段已经接入真实媒体与 ASR 核心链路：
+第三阶段已经把媒体链路升级为独立 ASR/OCR Gateway 架构：
 
 ```text
 本地视频 / 本地音频 / 媒体网页 URL
@@ -12,13 +12,13 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
   → 本地只读引用或 yt-dlp 下载
   → ffprobe 探测
   → FFmpeg 提取为 PCM 16kHz 单声道 WAV
-  → 固定时长分块
-  → OneAPI 的 OpenAI 兼容音频转写接口
-  → 全局时间轴合并
+  → 模型能力驱动分块（离线模型默认 5 秒重叠）
+  → 独立 ASR Gateway（DashScope / FireRed / Qwen3 / Whisper）
+  → 结构化边界去重与全局时间轴合并
   → raw JSON / normalized JSON / TXT / SRT / 前端预览
 ```
 
-现有 SQLite 单并发队列、不可变任务快照、取消、失败、重试、启动恢复、SSE 实时更新和 REST 回退均继续使用。OCR、ASR 文本清洗、内容融合、Markdown 正文生成不在本阶段实现。
+现有 SQLite 单并发队列、不可变任务快照、取消、失败、重试、启动恢复、SSE 实时更新和 REST 回退均继续使用。OCR Gateway 的数据库、API、前端与 mock 集成已完成，但本阶段没有擅自选择真实 OCR 模型。OneAPI 只保留给后续文本处理模型。
 
 完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。
 
@@ -27,7 +27,8 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
 - 后端：Python 3.11+、FastAPI、Pydantic、SQLAlchemy 2、Alembic、SQLite、httpx
 - 前端：React 19、TypeScript 5、Vite 7
 - 外部程序：FFmpeg、ffprobe、yt-dlp
-- ASR：OneAPI/OpenAI 兼容 `POST /v1/audio/transcriptions`
+- ASR：统一 Gateway `POST /v1/asr/transcriptions`；Fun-ASR 使用 DashScope WebSocket
+- OCR：独立 Gateway `POST /v1/ocr/recognitions`（当前仅架构与 mock）
 - 状态通信：REST + Server-Sent Events（SSE）
 - 测试：pytest、受控外部进程、httpx MockTransport、Vitest
 
@@ -39,7 +40,7 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
 - pnpm 10+
 - FFmpeg 与 ffprobe（同一发行包）
 - yt-dlp 独立可执行文件或 PATH 命令
-- 可用的 OneAPI Base URL、API Key 和带 `ASR` 能力标签的模型
+- 云端 ASR 可选 `DASHSCOPE_API_KEY`；本地大模型可选 WSL2 + NVIDIA GPU
 
 项目把 FFmpeg、ffprobe 和 yt-dlp 当作外部程序，而不提交大型二进制文件。yt-dlp 也采用外部程序方式，以便三类媒体命令统一使用异步流式日志、超时、取消和 Windows 进程树终止。
 
@@ -65,8 +66,10 @@ Copy-Item .env.example .env
 编辑 `.env`：
 
 ```dotenv
-ONEAPI_BASE_URL=https://your-oneapi.example/v1
+ONEAPI_BASE_URL=https://your-oneapi.example/v1  # 仅文本处理
 ONEAPI_API_KEY=replace-with-local-secret
+DASHSCOPE_API_KEY=replace-with-local-secret
+# DASHSCOPE_WORKSPACE_ID=optional-workspace-id
 ```
 
 真实密钥只能保留在未提交的 `.env` 或进程环境变量中。前端响应、SQLite、任务快照和日志均不保存密钥。
@@ -80,7 +83,7 @@ Set-Location D:\Projects\Video2Doc\backend
 .\.venv\Scripts\python.exe -m alembic check
 ```
 
-第二阶段迁移 `0004_core_pipeline_artifacts` 新增任务媒体/转写/产物索引引用，以及阶段消息、技术错误、输入产物、输出产物和日志路径。大型媒体和转写仍只保存在文件系统中。
+`0005_independent_model_gateways` 新增 `gateway_configs`、`gateway_models` 与处理方案的独立 ASR/OCR Gateway 外键。旧任务 JSON 快照继续兼容；新任务保存 Gateway、协议、模型能力、分块/时间戳策略、超时、重试和密钥环境变量名称，不保存密钥值。
 
 ## 启动
 
@@ -123,11 +126,12 @@ Set-Location D:\Projects\Video2Doc
 
 ## ASR 配置
 
-1. 在模型管理中创建模型，模型名称必须是 OneAPI 调用使用的模型 ID，并添加 `ASR` 标签。
-2. 在处理方案中选择该 ASR 模型，或在新建任务页为本批任务显式选择 ASR 模型。
-3. 在设置页填写 OneAPI Base URL；密钥仅通过 `ONEAPI_API_KEY` 提供。
+1. 在“Gateway”页面创建或启用 ASR Gateway，填写协议、Base URL 与密钥环境变量名称。
+2. 执行健康检查和模型发现，或手动添加模型及其能力上限。
+3. 在处理方案中分别选择 ASR Gateway 模型、OCR Gateway 模型与 OneAPI 文本模型。
+4. 云端密钥只通过 Gateway 记录的环境变量名称（例如 `DASHSCOPE_API_KEY`）在执行时读取。
 
-Provider 使用 OpenAI 兼容协议：multipart 文件字段 `file`、`model`、`response_format=verbose_json` 和 segment 时间戳请求。厂商差异封装在 Provider 内，Pipeline 不依赖具体服务商。
+统一 ASR 协议使用 multipart 字段 `file`、`model`、`language`、`timestamp_granularity`、`prompt` 和 `task`。Fun-ASR 对完整音频保持单一连续流；只有连接限制或恢复需要拆会话时才使用 5 秒重叠，连续会话绝不重复发送音频。
 
 ## 真实 Pipeline 阶段与进度
 
@@ -200,11 +204,12 @@ Provider 使用 OpenAI 兼容协议：multipart 文件字段 `file`、`model`、
 VIDEO2DOC_MEDIA_TIMEOUT_SECONDS=3600
 VIDEO2DOC_ASR_TIMEOUT_SECONDS=300
 VIDEO2DOC_ASR_MAX_RETRIES=2
-VIDEO2DOC_AUDIO_CHUNK_SECONDS=600
+VIDEO2DOC_AUDIO_CHUNK_SECONDS=60
+VIDEO2DOC_ASR_OVERLAP_SECONDS=5
 VIDEO2DOC_PROCESS_POLL_SECONDS=0.20
 ```
 
-第一版分块策略为固定 600 秒、PCM WAV、无重叠。无重叠是有意选择，用于避免产生不可控的重复文本；每块保存原媒体全局时间偏移。
+`VIDEO2DOC_AUDIO_CHUNK_SECONDS` 只是兼容回退值，实际块长受 Gateway 模型能力上限约束。所有离线分块默认 5 秒重叠，`step_seconds = chunk_seconds - 5`；manifest 保存源时间范围、前后重叠、Provider、模型、attempt 和状态。合并层先用时间戳与规范化文本做确定性去重，不把边界重复留给后续大模型清洗；同一源窗口内足够长的相似词前缀可消除 ASR 拼写漂移造成的重复，但未匹配的边缘新词会保留。不确定冲突写入诊断，互相矛盾的词时间置 `null` 而不伪造新时间。
 
 ## API
 
@@ -213,6 +218,10 @@ VIDEO2DOC_PROCESS_POLL_SECONDS=0.20
 - `GET /api/v1/tasks/{id}/media`
 - `GET /api/v1/tasks/{id}/transcript`
 - `GET /api/v1/tasks/{id}/artifacts`
+- `GET/POST/PUT/DELETE /api/v1/gateways`
+- `POST /api/v1/gateways/{id}/health`
+- `POST /api/v1/gateways/{id}/discover`
+- `GET/POST/PUT/DELETE /api/v1/gateway-models`
 
 任务详情响应也包含媒体摘要、转写预览、真实阶段进度和产物清单。技术错误与用户可读错误分离，完整 stderr 不直接作为用户提示。
 
@@ -236,22 +245,22 @@ pnpm build
 
 ## Windows 手工验收
 
-准备几秒钟的短 WAV、带音频的短 MP4，以及一个可公开访问且 yt-dlp 支持的短视频 URL：
+仓库验收使用 `D:\Video2Doc-Test\sample.mp4`、自动提取的 `sample-asr-short.wav` 与文档记录的公开 URL：
 
 1. 运行 `check_media_tools.ps1`。
-2. 配置 OneAPI 和 ASR 模型。
+2. 配置独立 ASR Gateway；OneAPI 只配置文本模型。
 3. 分别创建本地音频、本地视频和 URL 任务。
 4. 在任务详情核对媒体流、阶段进度、分块数、转写预览和工作区产物。
 5. 分别在下载、FFmpeg、ASR 阶段取消任务，确认任务停止、文件句柄释放且任务管理器中无残留进程。
 6. 对失败/中断任务执行重试，核对 attempt 增加且快照不变。
 7. 运行联合启动，验证前端、健康检查、OpenAPI、SSE 和 `Ctrl+C` 清理。
 
-没有真实 OneAPI 凭据时，仍可完成媒体获取、探测、标准化之前的自动化和环境检查；真实 ASR 手工验收必须由用户提供本地凭据。
+真实部署结果、硬件约束与命令见 `docs/MODEL_DEPLOYMENT_REPORT.md`；横向结果见 `docs/ASR_MODEL_COMPARISON.md`。
 
 ## 已知限制
 
 - 当前只支持单后端进程、单任务并发；不支持多实例或分布式队列。
-- 固定时长分块暂不做静音边界检测，也不使用重叠。
+- 当前离线分块使用固定能力上限与 5 秒重叠，尚未加入 VAD 边界微调。
 - Provider 若只返回整段文本而不返回 segment 时间戳，对应标准字段保持 `null`，不会伪造时间。
 - SSE 是轻量状态快照，不是可重放事件日志。
-- 还未实现 OCR、文本清洗/融合、最终 Obsidian Markdown 正文、原生文件选择器或桌面打包。
+- 真实 OCR Provider/模型、文本清洗/融合、最终 Obsidian Markdown 正文、原生文件选择器和桌面打包尚未实现。
