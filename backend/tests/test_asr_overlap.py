@@ -193,6 +193,64 @@ def test_partial_word_overlap_keeps_uncertain_boundary_word_and_reports_conflict
     } in diagnostics
 
 
+def test_long_timestamped_overlap_with_asr_spelling_drift_removes_duplicate_prefix() -> None:
+    chunks = [
+        AudioChunk(0, 0, 60, "a", overlap_after_seconds=5),
+        AudioChunk(1, 55, 115, "b", overlap_before_seconds=5),
+    ]
+    prior_words = (
+        AsrWord(55, 56, "continue"),
+        AsrWord(56, 57, "open"),
+        AsrWord(57, 58, "eagle"),
+        AsrWord(58, 59, "browser"),
+        AsrWord(59, 60, "skill"),
+    )
+    next_words = (
+        AsrWord(0, 1, "continue"),
+        AsrWord(1, 2, "open"),
+        AsrWord(2, 3, "ego"),
+        AsrWord(3, 4, "brother"),
+        AsrWord(4, 5, "skill"),
+        AsrWord(4.8, 5.8, "next"),
+    )
+    results = [
+        AsrResult(
+            "test",
+            "m",
+            "en",
+            0,
+            "a",
+            (make_segment(0, 55, 60, "continue open eagle browser skill", words=prior_words),),
+        ),
+        AsrResult(
+            "test",
+            "m",
+            "en",
+            1,
+            "b",
+            (
+                make_segment(
+                    1,
+                    0,
+                    6.2,
+                    "continue open ego brother skill next",
+                    words=next_words,
+                ),
+            ),
+        ),
+    ]
+    diagnostics: list[dict] = []
+    combined = combine_asr_results(results, chunks, diagnostics=diagnostics)
+    assert [item.text for item in combined] == [
+        "continue open eagle browser skill",
+        "next",
+    ]
+    assert any(
+        item.get("method") == "overlap_window_and_normalized_similarity"
+        for item in diagnostics
+    )
+
+
 def test_segment_only_and_no_timestamp_duplicates_are_deterministic() -> None:
     chunks = [
         AudioChunk(0, 0, 60, "a", overlap_after_seconds=5),

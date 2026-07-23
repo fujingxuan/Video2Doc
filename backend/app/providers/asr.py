@@ -978,8 +978,38 @@ def _deduplicate_boundary_segment(
             word
             for item in previous
             for word in item.words
-            if word.start_time is not None and word.start_time <= boundary_end + 0.25
+            if (
+                word.start_time is not None
+                and (word.end_time if word.end_time is not None else word.start_time)
+                >= boundary_start - 0.25
+                and word.start_time <= boundary_end + 0.25
+            )
         ]
+        approximate_prefix_count, approximate_similarity = _matching_overlap_prefix(
+            list(candidate.words), prior_words, boundary_end
+        )
+        if approximate_prefix_count:
+            removed_prefix = list(candidate.words[:approximate_prefix_count])
+            retained_prefix_tail = list(candidate.words[approximate_prefix_count:])
+            diagnostics.append(
+                {
+                    "type": "word_overlap_removed",
+                    "method": "overlap_window_and_normalized_similarity",
+                    "chunk_index": chunk.index,
+                    "normalized_similarity": round(approximate_similarity, 4),
+                    "removed_words": [word.text for word in removed_prefix],
+                }
+            )
+            if not retained_prefix_tail:
+                return None
+            candidate = replace(
+                candidate,
+                text=_join_words(retained_prefix_tail),
+                start_time=retained_prefix_tail[0].start_time,
+                end_time=retained_prefix_tail[-1].end_time,
+                words=tuple(retained_prefix_tail),
+            )
+
         retained_words: list[AsrWord] = []
         removed_words: list[AsrWord] = []
         for word in candidate.words:
@@ -1038,6 +1068,63 @@ def _deduplicate_boundary_segment(
             )
             break
     return candidate
+
+
+def _matching_overlap_prefix(
+    candidate_words: list[AsrWord], prior_words: list[AsrWord], boundary_end: float
+) -> tuple[int, float]:
+    """Find a long, timestamp-backed duplicate prefix with minor ASR spelling drift.
+
+    The compared words all describe the same source-audio overlap window. A fairly
+    long normalized string and a conservative similarity floor are required so a
+    short phrase such as "model deployment" / "model training" is never discarded.
+    """
+    prefix: list[AsrWord] = []
+    for word in candidate_words:
+        if word.start_time is None or word.start_time >= boundary_end - 1e-6:
+            break
+        prefix.append(word)
+    if not prefix or not prior_words:
+        return 0, 0.0
+
+    prior_text = normalize_text_for_overlap(_join_words(prior_words))
+    prefix_text = normalize_text_for_overlap(_join_words(prefix))
+    if min(len(prior_text), len(prefix_text)) < 12:
+        return 0, 0.0
+
+    prefix_start = prefix[0].start_time
+    prefix_end = prefix[-1].end_time or prefix[-1].start_time
+    prior_start = prior_words[0].start_time
+    prior_end = prior_words[-1].end_time or prior_words[-1].start_time
+    if None in {prefix_start, prefix_end, prior_start, prior_end}:
+        return 0, 0.0
+    time_overlap = min(prefix_end, prior_end) - max(prefix_start, prior_start)
+    if time_overlap < 1.0:
+        return 0, 0.0
+
+    matcher = SequenceMatcher(None, prior_text, prefix_text)
+    similarity = matcher.ratio()
+    if similarity < 0.65:
+        return 0, similarity
+
+    # Preserve an unmatched tail at the exact edge. It may be the first word that
+    # the previous chunk failed to emit, even though its timestamp begins just
+    # before the nominal boundary. Internal spelling drift is still removed when
+    # a later matching block anchors it to the same source-audio passage.
+    last_match_end = max(
+        (block.b + block.size for block in matcher.get_matching_blocks() if block.size),
+        default=0,
+    )
+    removable_count = 0
+    normalized_end = 0
+    for word in prefix:
+        normalized_end += len(normalize_text_for_overlap(word.text))
+        if normalized_end > last_match_end:
+            break
+        removable_count += 1
+    if removable_count == 0:
+        return 0, similarity
+    return removable_count, similarity
 
 
 def normalize_text_for_overlap(value: str) -> str:
