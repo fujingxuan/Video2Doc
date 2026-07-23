@@ -200,8 +200,10 @@ WSL 系统 Python 3.14.4 缺少 `python3.14-venv`，且 sudo 非免密。脚本�
 
 ## 15. 提交、push、PR 和当前状态
 
-**最终 Git 状态将在最终回归和文档提交后更新**
+**真实环境验证通过**
 
-- 当前分支：`codex/core-pipeline-v1`。
-- 已创建本地提交：`67f354f feat: add independent capability-driven model gateways`、`711b893 feat: add local ASR model runtime services`、`e3a4e92 test: cover gateway integrations and ASR overlap`。
-- 不自动合并 `main`；push 和 PR 仅在最终回归全部通过后执行。
+- 当前分支：`codex/core-pipeline-v1`，跟踪 `origin/codex/core-pipeline-v1`。
+- 新增提交：`67f354f feat: add independent capability-driven model gateways`、`711b893 feat: add local ASR model runtime services`、`e3a4e92 test: cover gateway integrations and ASR overlap`、`f4b69a9 fix: deduplicate timestamped ASR boundary drift`、`76bcb74 docs: record ASR model deployment acceptance`，以及本节所属的最终状态文档提交。
+- 分支已使用普通 `git push` 推送，没有 force push。
+- Pull Request：[#2 feat: add independent ASR/OCR gateways and local model runtimes](https://github.com/fujingxuan/Video2Doc/pull/2)，状态 open、非 draft，head 为 `codex/core-pipeline-v1`、base 为 `main`。
+- 未合并 `main`；最终状态提交推送后再次检查工作区和本地/远端同步状态。
