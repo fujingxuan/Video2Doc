@@ -1,6 +1,6 @@
 # Video2Doc 实施计划
 
-更新日期：2026-07-23
+更新日期：2026-07-27
 
 ## 状态标记
 
@@ -79,9 +79,39 @@
 - [x] FireRed、Whisper、Qwen ASR + ForcedAligner 均已在本机 GPU 真实部署并完成短片段与长视频验收
 - [x] Bilibili URL 下载、完整多块 ASR、合并和重试真实验收
 
+## 阶段 6.2：视频抽帧与真实 OCR
+
+- [x] 固定间隔、画面变化和混合抽帧策略
+- [x] 从 FFmpeg 媒体 PTS 保存单调时间戳，不用循环序号伪造时间
+- [x] 根据媒体时长与候选上限推导最小间隔，扫描完整视频而不提前截断
+- [x] 原始帧、规范化帧、尺寸、大小、SHA-256、dHash、scene score 和决策清单
+- [x] 底部字幕区裁剪后的感知哈希与视觉像素差异双层去重
+- [x] 相似连续页和短暂转场过滤；不确定边缘按保留优先
+- [x] 抽帧取消、超时、进程树终止和 `.part` 清理
+- [x] Windows CPU PaddlePaddle 3.3.0 + PaddleOCR 3.7.0 隔离 Runtime
+- [x] PP-OCRv5 server detection/recognition 真实中文英文推理
+- [x] Provider、模型、帧 ID、媒体时间、完整原始响应、文本块、置信度、框、多边形和顺序统一协议
+- [x] 每帧原始响应、Provider 无关规范化 JSON、预览和错误记录
+- [x] 请求取消、网络/超时/429/5xx 重试和晚到结果丢弃
+- [x] 帧/配置指纹与逐帧 OCR 重试复用
+
+## 阶段 6.3：OCR 时间线与 ASR/OCR 融合
+
+- [x] 仅做确定性空白清理、换行统一和同位置重复块删除
+- [x] 综合时间、文本、空间位置和图像哈希合并稳定同页事件
+- [x] 小范围文字变化保留为 `incremental_update` 并关联前一事件
+- [x] 事件保存首次/最后出现时间、来源帧/图像、块、置信度、重复组和不确定性
+- [x] `asr_segment`、`ocr_event`、`frame_event` 统一结构化时间线
+- [x] OCR 与临近 ASR segment 时间窗关联；相似文字仍保留两种来源
+- [x] 融合事件排序、ID、媒体时长、结束时间和产物引用验证
+- [x] 帧/OCR/融合 API、任务详情统计与关键产物打开
+- [x] 新任务页 OCR Gateway/模型与必要抽帧参数
+- [x] `FRAME_EXTRACT` 到 `FUSION_VALIDATE` 阶段和真实进度
+- [x] 数据库 Worker、不可变快照、失败/取消/重试语义贯穿 OCR 分支
+
 ## 阶段 7：迁移、测试与文档
 
-- [x] `0004_core_pipeline_artifacts` 与 `0005_independent_model_gateways` migrations
+- [x] `0004_core_pipeline_artifacts`、`0005_independent_model_gateways` 与 `0006_ocr_fusion_artifacts` migrations
 - [x] 单元测试覆盖输入、工作区、进度解析、探测标准化、时间轴、合并和脱敏
 - [x] 进程集成测试覆盖 stdout/stderr、退出码、超时和取消
 - [x] HTTP mock 覆盖 ASR 成功、认证、超时和取消
@@ -89,21 +119,21 @@
 - [x] Ruff 后端 lint、前端 typecheck/test/build
 - [x] README、架构和实施计划更新
 - [x] 媒体工具环境检查脚本
+- [x] 抽帧、视觉去重、OCR 规范化/取消/复用、OCR 时间线和融合单元测试
+- [x] 空数据库 Alembic 升级测试与 OCR Worker/API 集成测试
+- [x] 本地 PP-OCRv5 真实帧推理：40 块，全部含置信度、矩形框和多边形
+- [x] `D:\Video2Doc-Test\sample.mp4` 真实数据库 Worker 全链路
+- [x] 真实 OCR Gateway 中断后结构化失败、重启和逐帧 OCR 复用完成
+- [x] 后端 68 tests、前端 typecheck/test/build、Alembic heads/check、脚本语法和 diff 检查
 
 ## 后续阶段（不属于本次范围）
-
-### OCR
-
-- [ ] 抽帧与 OCR Provider
-- [ ] OCR 原始结果、时间戳和帧关联
-- [ ] OCR 去重与清洗
 
 ### 文本轻度编辑与融合
 
 - [ ] ASR/OCR/fusion 独立提示词
 - [ ] OneAPI TextModelProvider
 - [ ] 只执行 PRD 允许的轻度编辑
-- [ ] ASR 主线与 OCR 缺失信息补充
+- [ ] 基于当前结构化融合结果做忠实轻度编辑，不删除来源差异
 
 ### Markdown 与 Obsidian
 
