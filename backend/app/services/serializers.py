@@ -65,6 +65,27 @@ def task_detail(item: Task) -> TaskDetail:
     media_info = read_json(Path(item.media_info_path)) if item.media_info_path else None
     preview_path = workspace / "02_asr/preview.json" if workspace else None
     transcript_preview = read_json(preview_path) if preview_path else None
+    frame_manifest = (
+        read_json(Path(item.frames_manifest_path)) if item.frames_manifest_path else None
+    )
+    frame_summary = (
+        {
+            key: frame_manifest.get(key)
+            for key in (
+                "candidate_count",
+                "kept_count",
+                "dropped_count",
+                "drop_reasons",
+                "config",
+            )
+        }
+        if frame_manifest
+        else None
+    )
+    ocr_preview = read_json(workspace / "03_ocr/preview.json") if workspace else None
+    fusion_preview = (
+        read_json(workspace / "04_fusion/preview.json") if workspace else None
+    )
     return TaskDetail(
         **base,
         snapshot=SnapshotRead(
@@ -75,5 +96,8 @@ def task_detail(item: Task) -> TaskDetail:
         stages=[StageRead.model_validate(stage) for stage in item.stages],
         media_info=media_info,
         transcript_preview=transcript_preview,
+        frame_summary=frame_summary,
+        ocr_preview=ocr_preview,
+        fusion_preview=fusion_preview,
         artifacts=list_artifacts(workspace) if workspace else [],
     )
