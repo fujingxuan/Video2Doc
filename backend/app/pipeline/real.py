@@ -11,7 +11,18 @@ from sqlalchemy import select, update
 from app.core.config import get_settings
 from app.core.errors import PipelineCancelled, PipelineError, PipelineInterrupted
 from app.db.session import SessionLocal
-from app.models import Task, TaskStageRun
+from app.documents.builder import build_document
+from app.documents.editor import FaithfulTextEditor, PROMPT_VERSION
+from app.documents.exporter import ExportConfig, ExportResult, export_document_bundle
+from app.documents.faithfulness import validate_document_faithfulness
+from app.documents.ir import Document
+from app.models import (
+    DocumentArtifact,
+    MarkdownExport,
+    Task,
+    TaskStageRun,
+    TextEditRun,
+)
 from app.models.entities import utcnow
 from app.providers.asr import (
     AsrRequest,
@@ -60,21 +71,26 @@ logger = logging.getLogger(__name__)
 
 
 STAGE_RANGES: dict[str, tuple[int, int]] = {
-    "INPUT_VALIDATE": (0, 3),
-    "MEDIA_ACQUIRE": (3, 12),
-    "MEDIA_PROBE": (12, 18),
-    "AUDIO_EXTRACT": (18, 30),
-    "AUDIO_VALIDATE": (30, 33),
-    "AUDIO_CHUNK": (33, 38),
-    "ASR_TRANSCRIBE": (38, 58),
-    "ASR_COMBINE": (58, 63),
-    "ASR_VALIDATE": (63, 66),
-    "FRAME_EXTRACT": (66, 75),
-    "FRAME_DEDUP": (75, 79),
-    "OCR_RECOGNIZE": (79, 91),
-    "OCR_TIMELINE": (91, 95),
-    "FUSION_BUILD": (95, 99),
-    "FUSION_VALIDATE": (99, 100),
+    "INPUT_VALIDATE": (0, 2),
+    "MEDIA_ACQUIRE": (2, 9),
+    "MEDIA_PROBE": (9, 14),
+    "AUDIO_EXTRACT": (14, 23),
+    "AUDIO_VALIDATE": (23, 25),
+    "AUDIO_CHUNK": (25, 29),
+    "ASR_TRANSCRIBE": (29, 47),
+    "ASR_COMBINE": (47, 51),
+    "ASR_VALIDATE": (51, 54),
+    "FRAME_EXTRACT": (54, 63),
+    "FRAME_DEDUP": (63, 67),
+    "OCR_RECOGNIZE": (67, 79),
+    "OCR_TIMELINE": (79, 83),
+    "FUSION_BUILD": (83, 87),
+    "FUSION_VALIDATE": (87, 89),
+    "DOCUMENT_BUILD": (89, 92),
+    "TEXT_EDIT": (92, 94),
+    "MARKDOWN_RENDER": (94, 97),
+    "OBSIDIAN_EXPORT": (97, 99),
+    "FINALIZE": (99, 100),
 }
 
 
@@ -504,22 +520,82 @@ async def run_real_pipeline(task_id: int) -> None:
             input_artifacts=[artifacts["normalized"]],
         )
         validate_segments(segments)
+        processing = snapshot.get("processing", {})
         ocr_enabled = bool(snapshot.get("processing", {}).get("ocr_enabled"))
         if not ocr_enabled:
-            artifact_index = write_artifact_index(workspace)
             tracker.complete(
-                message="真实媒体与 ASR 核心链路完成；任务快照未启用 OCR",
-                output_artifacts=[
-                    artifacts["normalized"],
-                    artifacts["preview"],
-                    str(artifact_index),
-                ],
+                message="标准化 ASR 结果有效；任务快照未启用 OCR",
+                output_artifacts=[artifacts["normalized"], artifacts["preview"]],
             )
-            _complete_task(
+            tracker.start(
+                "FUSION_BUILD",
+                message="正在构建仅含 ASR 来源的统一时间线",
+                input_artifacts=[artifacts["normalized"]],
+            )
+            asr_payload = read_json(Path(artifacts["normalized"]))
+            if asr_payload is None:
+                raise PipelineError("FUSION_INPUT_INVALID", "无法读取标准化 ASR 产物")
+            disabled_ocr_path = paths.ocr / "disabled_timeline.json"
+            disabled_frames_path = paths.frames / "disabled_manifest.json"
+            write_json(
+                disabled_ocr_path,
+                {"schema_version": 1, "event_count": 0, "events": []},
+            )
+            write_json(
+                disabled_frames_path,
+                {
+                    "schema_version": 1,
+                    "candidate_count": 0,
+                    "kept_count": 0,
+                    "frames": [],
+                },
+            )
+            fusion_payload = build_fusion_timeline(
+                asr_payload,
+                {"events": []},
+                {"frames": []},
+                media_duration=media_info.duration,
+                association_window_seconds=float(
+                    processing.get("fusion_window_seconds", 8.0)
+                ),
+            )
+            fusion_artifacts = save_fusion_artifacts(
+                paths,
+                fusion_payload,
+                asr_path=artifacts["normalized"],
+                ocr_path=str(disabled_ocr_path),
+                frames_path=str(disabled_frames_path),
+            )
+            tracker.complete(
+                message=f"ASR-only 时间线包含 {fusion_payload['event_count']} 个事件",
+                output_artifacts=list(fusion_artifacts.values()),
+            )
+            tracker.start(
+                "FUSION_VALIDATE",
+                message="正在验证 ASR-only 时间线与来源引用",
+                input_artifacts=[fusion_artifacts["timeline"]],
+            )
+            with SessionLocal() as session:
+                db_task = session.get(Task, task_id)
+                if db_task:
+                    db_task.fusion_timeline_path = fusion_artifacts["timeline"]
+                    session.commit()
+            tracker.complete(
+                message="ASR-only 结构化融合时间线有效",
+                output_artifacts=[fusion_artifacts["timeline"]],
+            )
+            await _run_document_pipeline(
                 task_id,
-                artifacts["preview"],
-                artifacts["normalized"],
-                artifact_index,
+                attempt=attempt,
+                tracker=tracker,
+                paths=paths,
+                snapshot=snapshot,
+                acquisition=acquisition,
+                media_info=media_info,
+                transcript_artifacts=artifacts,
+                fusion_payload=fusion_payload,
+                fusion_artifacts=fusion_artifacts,
+                cancelled=cancelled,
             )
             return
         tracker.complete(
@@ -531,8 +607,6 @@ async def run_real_pipeline(task_id: int) -> None:
                 "NO_VIDEO_STREAM",
                 "任务启用了 OCR，但媒体中没有可用视频流或可靠时长",
             )
-
-        processing = snapshot.get("processing", {})
         frame_config = FrameExtractionConfig(
             strategy=str(processing.get("frame_sampling_strategy") or "hybrid"),
             interval_seconds=float(
@@ -701,29 +775,32 @@ async def run_real_pipeline(task_id: int) -> None:
             message="正在验证融合时间、来源引用和产物完整性",
             input_artifacts=[fusion_artifacts["timeline"]],
         )
-        artifact_index = write_artifact_index(workspace)
         with SessionLocal() as session:
             db_task = session.get(Task, task_id)
             if db_task:
                 db_task.fusion_timeline_path = fusion_artifacts["timeline"]
-                db_task.artifacts_index_path = str(artifact_index)
                 session.commit()
         tracker.complete(
             message="OCR 与 ASR/OCR 结构化融合链路完成",
             output_artifacts=[
                 fusion_artifacts["timeline"],
                 fusion_artifacts["preview"],
-                str(artifact_index),
             ],
         )
-        _complete_task(
+        await _run_document_pipeline(
             task_id,
-            fusion_artifacts["preview"],
-            artifacts["normalized"],
-            artifact_index,
+            attempt=attempt,
+            tracker=tracker,
+            paths=paths,
+            snapshot=snapshot,
+            acquisition=acquisition,
+            media_info=media_info,
+            transcript_artifacts=artifacts,
+            fusion_payload=fusion_payload,
+            fusion_artifacts=fusion_artifacts,
+            cancelled=cancelled,
             frames_manifest_path=frame_result.manifest_path,
             ocr_timeline_path=ocr_timeline_path,
-            fusion_timeline_path=fusion_artifacts["timeline"],
         )
     except PipelineError as exc:
         if not exc.stage:
@@ -755,6 +832,479 @@ async def run_real_pipeline(task_id: int) -> None:
         _finish_task(task_id, "FAILED", failure)
 
 
+async def _run_document_pipeline(
+    task_id: int,
+    *,
+    attempt: int,
+    tracker: StageTracker,
+    paths: WorkspacePaths,
+    snapshot: dict,
+    acquisition: MediaAcquisitionResult,
+    media_info: MediaInfo,
+    transcript_artifacts: dict[str, str],
+    fusion_payload: dict,
+    fusion_artifacts: dict[str, str],
+    cancelled,
+    frames_manifest_path: str | None = None,
+    ocr_timeline_path: str | None = None,
+) -> None:
+    processing = snapshot.get("processing")
+    if not isinstance(processing, dict):
+        processing = {}
+    with SessionLocal() as session:
+        task = session.get(Task, task_id)
+        if not task:
+            raise PipelineError("WORKSPACE_ERROR", "任务已不存在")
+        title = task.title
+
+    original_document_path = paths.output / "document.original.json"
+    tracker.start(
+        "DOCUMENT_BUILD",
+        message="正在从 ASR、OCR、帧和媒体元数据构建结构化文档",
+        input_artifacts=[
+            transcript_artifacts["normalized"],
+            fusion_artifacts["timeline"],
+        ],
+    )
+    document = build_document(
+        fusion_payload,
+        title=title,
+        source=acquisition.original_input,
+        source_type=acquisition.source_type,
+        media_info=media_info.to_dict(),
+        models=snapshot.get("models") or {},
+        processing=processing,
+        artifact_references={
+            "transcript": transcript_artifacts["normalized"],
+            "fusion_timeline": fusion_artifacts["timeline"],
+            **(
+                {"frames_manifest": frames_manifest_path}
+                if frames_manifest_path
+                else {}
+            ),
+            **(
+                {"ocr_timeline": ocr_timeline_path}
+                if ocr_timeline_path
+                else {}
+            ),
+        },
+        document_id=f"task-{task_id:06d}-attempt-{attempt:04d}",
+        image_min_gap_seconds=float(processing.get("image_min_gap_seconds", 8.0)),
+    )
+    write_json(original_document_path, document.model_dump(mode="json"))
+    tracker.progress(
+        1.0,
+        f"结构化文档包含 {len(document.sections)} 节、"
+        f"{len(document.all_blocks())} 个块",
+    )
+    tracker.complete(
+        message="结构化文档原始版本已生成，所有块均保留来源引用",
+        output_artifacts=[str(original_document_path)],
+    )
+
+    tracker.start(
+        "TEXT_EDIT",
+        message="正在执行受约束的忠实文本整理或无模型回退",
+        input_artifacts=[str(original_document_path)],
+    )
+    text_config = snapshot.get("text_processing")
+    if not isinstance(text_config, dict):
+        text_config = {}
+    edit_enabled = bool(text_config.get("enabled", processing.get("text_edit_enabled", False)))
+    edit_raw_path: Path | None = None
+    if edit_enabled:
+        base_url = str(text_config.get("base_url") or "").strip()
+        model = str(text_config.get("model") or "").strip()
+        secret_env_name = str(
+            text_config.get("secret_env_name") or "ONEAPI_API_KEY"
+        )
+        api_key = os.getenv(secret_env_name, "").strip()
+        if not base_url or not model:
+            raise PipelineError(
+                "TEXT_CONFIG_INVALID",
+                "任务快照启用了文本整理，但缺少 Gateway Base URL 或模型",
+            )
+        if not api_key:
+            raise PipelineError(
+                "TEXT_GATEWAY_SECRET_MISSING",
+                f"缺少文本整理 Gateway 密钥环境变量 {secret_env_name}",
+            )
+        edit_raw_path = (
+            paths.output
+            / "text_edit"
+            / f"attempt_{attempt:04d}_provider_raw.json"
+        )
+        document, edit_run = await FaithfulTextEditor(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+        ).edit(
+            document,
+            raw_path=edit_raw_path,
+            minimum_length_ratio=float(
+                text_config.get("minimum_length_ratio", 0.72)
+            ),
+            formula_symbol_ratio=float(
+                text_config.get("formula_symbol_ratio", 0.8)
+            ),
+            cancel_check=cancelled,
+        )
+        edit_run["provider"] = str(
+            text_config.get("provider") or "oneapi-openai-compatible"
+        )
+    else:
+        edit_run = {
+            "schema_version": 1,
+            "provider": "none",
+            "model": None,
+            "prompt_version": str(
+                text_config.get("prompt_version")
+                or processing.get("prompt_version")
+                or PROMPT_VERSION
+            ),
+            "enabled": False,
+            "accepted": True,
+            "fallback_used": False,
+            "reason": "no_model_mode",
+            "elapsed_seconds": 0.0,
+            "block_runs": [],
+        }
+    document.edit_metadata = edit_run
+    report = validate_document_faithfulness(
+        document,
+        minimum_length_ratio=float(
+            text_config.get("minimum_length_ratio", 0.72)
+        ),
+        formula_symbol_ratio=float(
+            text_config.get("formula_symbol_ratio", 0.8)
+        ),
+    )
+    if not report.accepted:
+        raise PipelineError(
+            "DOCUMENT_FAITHFULNESS_FAILED",
+            "文档忠实性自动检查失败",
+            technical_detail="; ".join(
+                f"{item.code}:{item.block_id or '-'}" for item in report.issues
+            ),
+        )
+    document_path = paths.output / "document.json"
+    validation_path = paths.output / "text_edit" / (
+        f"attempt_{attempt:04d}_validation.json"
+    )
+    write_json(document_path, document.model_dump(mode="json"))
+    write_json(
+        validation_path,
+        {
+            "schema_version": 1,
+            "edit_run": edit_run,
+            "faithfulness": {
+                "accepted": report.accepted,
+                "metrics": report.metrics,
+                "issues": [
+                    {
+                        "code": item.code,
+                        "message": item.message,
+                        "block_id": item.block_id,
+                    }
+                    for item in report.issues
+                ],
+            },
+        },
+    )
+    _record_document_and_edit(
+        task_id,
+        attempt,
+        document,
+        document_path,
+        validation_path,
+        edit_raw_path,
+        edit_run,
+    )
+    tracker.complete(
+        message=(
+            "文本整理已通过忠实性校验"
+            if edit_enabled and edit_run.get("accepted")
+            else (
+                "文本模型响应被拒绝，已忠实回退到未整理文本"
+                if edit_enabled
+                else "未启用文本模型，已使用确定性忠实整理"
+            )
+        ),
+        output_artifacts=[
+            str(document_path),
+            str(validation_path),
+            *([str(edit_raw_path)] if edit_raw_path else []),
+        ],
+    )
+
+    source_sidecar = {
+        "schema_version": 1,
+        "document_id": document.document_id,
+        "source_references": [
+            reference.model_dump(mode="json")
+            for block in document.all_blocks()
+            for reference in block.source_references
+        ],
+    }
+    sidecars = {
+        "timeline.json": fusion_payload,
+        "sources.json": source_sidecar,
+    }
+    additional_files: dict[str, Path] = {}
+    export_snapshot = _export_snapshot(snapshot)
+    if export_snapshot.copy_transcript:
+        additional_files["transcript.normalized.json"] = Path(
+            transcript_artifacts["normalized"]
+        )
+
+    tracker.start(
+        "MARKDOWN_RENDER",
+        message="正在渲染工作区 Markdown 并复制相对路径附件",
+        input_artifacts=[str(document_path)],
+    )
+    workspace_config = export_snapshot.model_copy(
+        update={
+            "vault_path": str(paths.output),
+            "inbox_relative_path": ".",
+            "conflict_policy": "overwrite",
+            "keep_json_sidecar": True,
+        }
+    )
+    workspace_result = export_document_bundle(
+        document,
+        workspace_config,
+        sidecars=sidecars,
+        additional_files=additional_files,
+        cancel_check=cancelled,
+    )
+    _validate_rendered_markdown(Path(workspace_result.markdown_path), document)
+    _record_export(
+        task_id,
+        attempt,
+        "WORKSPACE",
+        "COMPLETED",
+        workspace_config,
+        workspace_result,
+    )
+    with SessionLocal() as session:
+        task = session.get(Task, task_id)
+        if task:
+            task.markdown_path = workspace_result.markdown_path
+            session.commit()
+    tracker.complete(
+        message=f"工作区 Markdown 已生成，包含 {workspace_result.image_count} 张图片",
+        output_artifacts=[
+            workspace_result.markdown_path,
+            *(
+                [workspace_result.attachment_directory]
+                if workspace_result.attachment_directory
+                else []
+            ),
+            *(
+                [workspace_result.data_directory]
+                if workspace_result.data_directory
+                else []
+            ),
+        ],
+    )
+
+    tracker.start(
+        "OBSIDIAN_EXPORT",
+        message="正在原子导出 Markdown、附件和追溯 sidecar 到 Obsidian Inbox",
+        input_artifacts=[workspace_result.markdown_path],
+    )
+    try:
+        export_result = export_document_bundle(
+            document,
+            export_snapshot,
+            sidecars=sidecars,
+            additional_files=additional_files,
+            cancel_check=cancelled,
+        )
+    except PipelineError as exc:
+        _record_export(
+            task_id,
+            attempt,
+            "OBSIDIAN",
+            "FAILED",
+            export_snapshot,
+            error_message=exc.user_message,
+        )
+        raise
+    _record_export(
+        task_id,
+        attempt,
+        "OBSIDIAN",
+        "COMPLETED",
+        export_snapshot,
+        export_result,
+    )
+    with SessionLocal() as session:
+        task = session.get(Task, task_id)
+        if task:
+            task.export_path = export_result.markdown_path
+            session.commit()
+    tracker.complete(
+        message=(
+            f"Obsidian 导出完成：图片 {export_result.image_count}，"
+            f"sidecar/原始产物 {export_result.sidecar_count}"
+        ),
+        output_artifacts=[
+            export_result.markdown_path,
+            *(
+                [export_result.attachment_directory]
+                if export_result.attachment_directory
+                else []
+            ),
+            *(
+                [export_result.data_directory]
+                if export_result.data_directory
+                else []
+            ),
+        ],
+    )
+
+    tracker.start(
+        "FINALIZE",
+        message="正在更新任务索引并完成可恢复状态",
+        input_artifacts=[
+            document_path.as_posix(),
+            workspace_result.markdown_path,
+            export_result.markdown_path,
+        ],
+    )
+    artifact_index = write_artifact_index(paths.root)
+    tracker.complete(
+        message="完整转换与 Obsidian 导出链路完成",
+        output_artifacts=[str(artifact_index)],
+    )
+    _complete_task(
+        task_id,
+        export_result.markdown_path,
+        transcript_artifacts["normalized"],
+        artifact_index,
+        frames_manifest_path=frames_manifest_path,
+        ocr_timeline_path=ocr_timeline_path,
+        fusion_timeline_path=fusion_artifacts["timeline"],
+        document_path=str(document_path),
+        markdown_path=workspace_result.markdown_path,
+        export_path=export_result.markdown_path,
+    )
+
+
+def _export_snapshot(snapshot: dict) -> ExportConfig:
+    raw = snapshot.get("export")
+    if isinstance(raw, dict):
+        return ExportConfig.model_validate(raw)
+    inbox = Path(str((snapshot.get("paths") or {}).get("inbox") or "")).resolve()
+    return ExportConfig(
+        vault_path=str(inbox.parent),
+        inbox_relative_path=inbox.name,
+        filename_template="{title}",
+        conflict_policy="rename",
+        keep_json_sidecar=True,
+    )
+
+
+def _record_document_and_edit(
+    task_id: int,
+    attempt: int,
+    document: Document,
+    document_path: Path,
+    validation_path: Path,
+    edit_raw_path: Path | None,
+    edit_run: dict,
+) -> None:
+    with SessionLocal() as session:
+        session.add(
+            DocumentArtifact(
+                task_id=task_id,
+                attempt=attempt,
+                schema_version=document.schema_version,
+                document_path=str(document_path),
+                block_count=len(document.all_blocks()),
+                source_reference_count=len(document.source_ids()),
+            )
+        )
+        session.add(
+            TextEditRun(
+                task_id=task_id,
+                attempt=attempt,
+                provider=str(edit_run.get("provider") or "none"),
+                model=(
+                    str(edit_run["model"])
+                    if edit_run.get("model") is not None
+                    else None
+                ),
+                prompt_version=str(edit_run.get("prompt_version") or PROMPT_VERSION),
+                accepted=bool(edit_run.get("accepted")),
+                fallback_used=bool(edit_run.get("fallback_used")),
+                raw_response_path=str(edit_raw_path) if edit_raw_path else None,
+                validation_path=str(validation_path),
+                elapsed_seconds=float(edit_run.get("elapsed_seconds") or 0.0),
+            )
+        )
+        task = session.get(Task, task_id)
+        if task:
+            task.document_path = str(document_path)
+        session.commit()
+
+
+def _record_export(
+    task_id: int,
+    attempt: int,
+    target_type: str,
+    status: str,
+    config: ExportConfig,
+    result: ExportResult | None = None,
+    *,
+    error_message: str | None = None,
+) -> None:
+    with SessionLocal() as session:
+        session.add(
+            MarkdownExport(
+                task_id=task_id,
+                attempt=attempt,
+                target_type=target_type,
+                status=status,
+                markdown_path=result.markdown_path if result else None,
+                attachment_directory=(
+                    result.attachment_directory if result else None
+                ),
+                data_directory=result.data_directory if result else None,
+                config_json=config.model_dump(mode="json"),
+                image_count=result.image_count if result else 0,
+                sidecar_count=result.sidecar_count if result else 0,
+                error_message=error_message,
+            )
+        )
+        session.commit()
+
+
+def _validate_rendered_markdown(path: Path, document: Document) -> None:
+    try:
+        markdown = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise PipelineError(
+            "MARKDOWN_READ_FAILED",
+            "无法读取已渲染 Markdown",
+            technical_detail=str(exc),
+        ) from exc
+    if not markdown.startswith("---\n") or "\n---\n" not in markdown[4:]:
+        raise PipelineError("MARKDOWN_INVALID", "Markdown YAML frontmatter 不完整")
+    transcript_text = [
+        block.display_text
+        for block in document.all_blocks()
+        if block.block_type == "transcript"
+    ]
+    if not transcript_text or not all(text in markdown for text in transcript_text):
+        raise PipelineError("MARKDOWN_TRANSCRIPT_LOST", "Markdown 未完整保留转写正文")
+    for block in document.all_blocks():
+        if block.block_type == "image" and block.image_source_path:
+            if block.image_alt and block.image_alt not in markdown:
+                raise PipelineError("MARKDOWN_IMAGE_LOST", "Markdown 缺少应插入的相关画面")
+
+
 def _current_stage(session, task_id: int, attempt: int, stage: str) -> TaskStageRun | None:
     return session.scalar(
         select(TaskStageRun).where(
@@ -767,13 +1317,16 @@ def _current_stage(session, task_id: int, attempt: int, stage: str) -> TaskStage
 
 def _complete_task(
     task_id: int,
-    preview_path: str,
+    output_path: str,
     transcript_path: str,
     index_path: Path,
     *,
     frames_manifest_path: str | None = None,
     ocr_timeline_path: str | None = None,
     fusion_timeline_path: str | None = None,
+    document_path: str | None = None,
+    markdown_path: str | None = None,
+    export_path: str | None = None,
 ) -> None:
     with SessionLocal() as session:
         result = session.execute(
@@ -784,11 +1337,14 @@ def _complete_task(
                 current_stage="COMPLETED",
                 progress=100,
                 completed_at=utcnow(),
-                output_path=preview_path,
+                output_path=output_path,
                 transcript_path=transcript_path,
                 frames_manifest_path=frames_manifest_path,
                 ocr_timeline_path=ocr_timeline_path,
                 fusion_timeline_path=fusion_timeline_path,
+                document_path=document_path,
+                markdown_path=markdown_path,
+                export_path=export_path,
                 artifacts_index_path=str(index_path),
                 error_code=None,
                 error_message=None,
@@ -796,7 +1352,7 @@ def _complete_task(
         )
         session.commit()
         if result.rowcount != 1:
-            raise PipelineCancelled(stage="ASR_VALIDATE")
+            raise PipelineCancelled(stage="FINALIZE")
 
 
 def _finish_task(task_id: int, status: str, error: PipelineError) -> None:

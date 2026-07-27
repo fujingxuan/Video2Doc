@@ -142,7 +142,33 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
         "ASR_TRANSCRIBE",
         "ASR_COMBINE",
         "ASR_VALIDATE",
+        "FUSION_BUILD",
+        "FUSION_VALIDATE",
+        "DOCUMENT_BUILD",
+        "TEXT_EDIT",
+        "MARKDOWN_RENDER",
+        "OBSIDIAN_EXPORT",
+        "FINALIZE",
     ]
+    assert completed["document_path"] and Path(completed["document_path"]).is_file()
+    assert completed["markdown_path"] and Path(completed["markdown_path"]).is_file()
+    assert completed["export_path"] and Path(completed["export_path"]).is_file()
+    markdown = Path(completed["export_path"]).read_text(encoding="utf-8")
+    assert "受控转写" in markdown
+    assert "未启用（忠实原文回退）" in markdown
+    assert {item["target_type"] for item in completed["exports"]} == {
+        "WORKSPACE",
+        "OBSIDIAN",
+    }
+    assert client.get(f"/api/v1/tasks/{task_id}/document").status_code == 200
+    markdown_response = client.get(f"/api/v1/tasks/{task_id}/markdown")
+    assert markdown_response.status_code == 200
+    assert "受控转写" in markdown_response.text
+    opened: list[str] = []
+    monkeypatch.setattr("app.services.tasks.os.startfile", opened.append)
+    opened_response = client.post(f"/api/v1/tasks/{task_id}/open/markdown")
+    assert opened_response.status_code == 200
+    assert opened == [str(Path(completed["export_path"]).resolve())]
     transcript = client.get(f"/api/v1/tasks/{task_id}/transcript")
     assert transcript.status_code == 200
     assert transcript.json()["segments"][0]["start_time"] == 0.5
@@ -364,14 +390,26 @@ def test_database_worker_runs_ocr_fusion_stages_and_serves_traceable_artifacts(
         "ocr_event": 1,
         "frame_event": 1,
     }
-    assert [stage["stage"] for stage in completed["stages"]][-6:] == [
+    assert [stage["stage"] for stage in completed["stages"]][-11:] == [
         "FRAME_EXTRACT",
         "FRAME_DEDUP",
         "OCR_RECOGNIZE",
         "OCR_TIMELINE",
         "FUSION_BUILD",
         "FUSION_VALIDATE",
+        "DOCUMENT_BUILD",
+        "TEXT_EDIT",
+        "MARKDOWN_RENDER",
+        "OBSIDIAN_EXPORT",
+        "FINALIZE",
     ]
+    assert completed["document_path"] and Path(completed["document_path"]).is_file()
+    assert completed["export_path"] and Path(completed["export_path"]).is_file()
+    markdown = Path(completed["export_path"]).read_text(encoding="utf-8")
+    assert "画面文字（OCR）" in markdown
+    assert "frame_000000" in markdown
+    assert client.get(f"/api/v1/tasks/{task_id}/document").status_code == 200
+    assert client.get(f"/api/v1/tasks/{task_id}/markdown").status_code == 200
     assert client.get(f"/api/v1/tasks/{task_id}/frames").status_code == 200
     assert client.get(f"/api/v1/tasks/{task_id}/ocr").status_code == 200
     timeline = client.get(f"/api/v1/tasks/{task_id}/timeline")

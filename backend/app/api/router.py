@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -265,6 +265,31 @@ def get_task_ocr(task_id: int, session: Session = Depends(get_db)) -> dict:
 @router.get("/tasks/{task_id}/timeline", response_model=dict, tags=["tasks"])
 def get_task_timeline(task_id: int, session: Session = Depends(get_db)) -> dict:
     return TaskService(session).fusion(task_id)
+
+
+@router.get("/tasks/{task_id}/document", response_model=dict, tags=["tasks"])
+def get_task_document(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session).document(task_id)
+
+
+@router.get("/tasks/{task_id}/markdown", tags=["tasks"])
+def get_task_markdown(
+    task_id: int,
+    session: Session = Depends(get_db),
+) -> PlainTextResponse:
+    return PlainTextResponse(
+        TaskService(session).markdown(task_id),
+        media_type="text/markdown; charset=utf-8",
+    )
+
+
+@router.post("/tasks/{task_id}/open/{target}", response_model=dict, tags=["tasks"])
+def open_task_target(
+    task_id: int,
+    target: str,
+    session: Session = Depends(get_db),
+) -> dict[str, str]:
+    return TaskService(session).open_target(task_id, target)
 
 
 @router.get("/tasks/{task_id}/artifacts/{artifact_path:path}", tags=["tasks"])
