@@ -47,6 +47,7 @@ class TaskService:
             payload.asr_model_id,
             payload.asr_gateway_model_id,
             payload.ocr_gateway_model_id,
+            payload.text_model_id,
         )
         tasks: list[Task] = []
         for task_input in payload.inputs:
@@ -70,7 +71,7 @@ class TaskService:
             )
             self.session.add(item)
             self.session.flush()
-            item.snapshot = TaskConfigSnapshot(schema_version=4, snapshot_json=snapshot)
+            item.snapshot = TaskConfigSnapshot(schema_version=5, snapshot_json=snapshot)
             data_root = Path(settings.data_path) if settings.data_path else get_settings().data_dir
             item.workspace_path = str(
                 create_workspace(data_root, task_id=item.id, title=title, snapshot=snapshot)
@@ -130,6 +131,47 @@ class TaskService:
 
     def fusion(self, task_id: int) -> dict[str, Any]:
         return self._artifact_json(task_id, "fusion_timeline_path", "Task fusion timeline")
+
+    def document(self, task_id: int) -> dict[str, Any]:
+        return self._artifact_json(task_id, "document_path", "Task document")
+
+    def markdown(self, task_id: int) -> str:
+        item = self.repo.get(task_id)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        value = item.markdown_path or item.export_path
+        if not value:
+            raise NotFoundError("Task Markdown", task_id)
+        try:
+            path = Path(value).resolve(strict=True)
+            if not path.is_file():
+                raise OSError("not a file")
+            return path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise NotFoundError("Task Markdown", task_id) from exc
+
+    def open_target(self, task_id: int, target: str) -> dict[str, str]:
+        item = self.repo.get(task_id)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        if target == "workspace":
+            value = item.workspace_path
+        elif target == "export_directory":
+            value = str(Path(item.export_path).parent) if item.export_path else None
+        elif target == "markdown":
+            value = item.export_path or item.markdown_path
+        else:
+            raise NotFoundError("Task open target", target)
+        if not value:
+            raise NotFoundError("Task open target", target)
+        try:
+            path = Path(value).resolve(strict=True)
+        except OSError as exc:
+            raise NotFoundError("Task open target", target) from exc
+        if os.name != "nt":
+            raise ConflictError("Opening task paths is supported only on Windows")
+        os.startfile(str(path))  # type: ignore[attr-defined]
+        return {"target": target, "path": str(path)}
 
     def artifact_path(self, task_id: int, relative_path: str) -> Path:
         item = self.repo.get(task_id)
@@ -201,6 +243,9 @@ class TaskService:
         item.started_at = None
         item.completed_at = None
         item.output_path = None
+        item.document_path = None
+        item.markdown_path = None
+        item.export_path = None
         item.attempt += 1
         self.session.commit()
         if self.worker:
@@ -271,6 +316,7 @@ class TaskService:
         asr_model_id: int | None,
         asr_gateway_model_id: int | None,
         ocr_gateway_model_id: int | None,
+        text_model_id: int | None,
     ) -> dict[str, Any]:
         processing = {
             "ocr_enabled": settings.default_ocr_enabled,
@@ -299,6 +345,24 @@ class TaskService:
             "markdown_template": settings.default_markdown_template,
             "audio_chunk_seconds": get_settings().audio_chunk_seconds,
             "asr_language": None,
+            "text_edit_enabled": settings.default_text_edit_enabled,
+            "prompt_version": settings.text_prompt_version,
+            "faithfulness_min_length_ratio": settings.faithfulness_min_length_ratio,
+            "faithfulness_formula_symbol_ratio": (
+                settings.faithfulness_formula_symbol_ratio
+            ),
+            "markdown_template_version": settings.markdown_template_version,
+            "image_insertion_policy": settings.image_insertion_policy,
+            "image_min_gap_seconds": settings.image_min_gap_seconds,
+            "export_filename_template": settings.export_filename_template,
+            "export_attachment_directory_template": (
+                settings.export_attachment_directory_template
+            ),
+            "export_data_directory_template": settings.export_data_directory_template,
+            "export_conflict_policy": settings.export_conflict_policy,
+            "export_keep_json_sidecar": settings.export_keep_json_sidecar,
+            "export_copy_transcript": settings.export_copy_transcript,
+            "export_copy_subtitles": settings.export_copy_subtitles,
         }
         models: dict[str, str | None] = {"asr": None, "ocr": None, "text_processing": None}
         profile_data: dict[str, Any] | None = None
@@ -325,6 +389,22 @@ class TaskService:
             ):
                 raise ConflictError("Selected ASR model is unavailable or lacks the ASR capability")
             models["asr"] = asr_model.name
+        if text_model_id is not None:
+            text_model = self.session.get(ModelConfig, text_model_id)
+            if (
+                text_model is None
+                or not text_model.enabled
+                or not any(
+                    item.capability == "TEXT_PROCESSING"
+                    for item in text_model.capabilities
+                )
+            ):
+                raise ConflictError(
+                    "Selected text model is unavailable or lacks TEXT_PROCESSING"
+                )
+            models["text_processing"] = text_model.name
+        elif settings.default_text_model_name and not models["text_processing"]:
+            models["text_processing"] = settings.default_text_model_name
         asr_gateway_model = self._resolve_gateway_model(
             asr_gateway_model_id
             if asr_gateway_model_id is not None
@@ -346,6 +426,11 @@ class TaskService:
             raise ConflictError("A real task must select an independent ASR gateway model")
         if processing.get("ocr_enabled") and ocr_gateway_model is None:
             raise ConflictError("An OCR-enabled task must select an independent OCR gateway model")
+        if processing.get("text_edit_enabled"):
+            if not models["text_processing"]:
+                raise ConflictError("Text editing requires a configured text model")
+            if not (settings.oneapi_base_url or os.getenv("ONEAPI_BASE_URL")):
+                raise ConflictError("Text editing requires a configured OneAPI Base URL")
         if asr_gateway_model:
             models["asr"] = asr_gateway_model.model_name
         if ocr_gateway_model:
@@ -366,14 +451,32 @@ class TaskService:
         )
         if asr_gateway_snapshot:
             processing["audio_chunk_seconds"] = asr_gateway_snapshot["chunking"]["chunk_seconds"]
+        vault_path, inbox_relative_path = _export_target(settings)
         return {
-            "schema_version": 4,
+            "schema_version": 5,
             "profile": profile_data,
             "models": models,
             "processing": processing,
             "paths": {
-                "inbox": settings.inbox_path or str(get_settings().inbox_dir),
+                "inbox": str(Path(vault_path) / inbox_relative_path),
                 "data": settings.data_path or str(get_settings().data_dir),
+            },
+            "export": {
+                "vault_path": vault_path,
+                "inbox_relative_path": inbox_relative_path,
+                "filename_template": processing["export_filename_template"],
+                "attachment_directory_template": (
+                    processing["export_attachment_directory_template"]
+                ),
+                "data_directory_template": processing[
+                    "export_data_directory_template"
+                ],
+                "conflict_policy": processing["export_conflict_policy"],
+                "keep_json_sidecar": bool(
+                    processing["export_keep_json_sidecar"]
+                ),
+                "copy_transcript": bool(processing["export_copy_transcript"]),
+                "copy_subtitles": bool(processing["export_copy_subtitles"]),
             },
             "pipeline": pipeline_mode,
             "tools": {
@@ -417,6 +520,14 @@ class TaskService:
                 "base_url": settings.oneapi_base_url or os.getenv("ONEAPI_BASE_URL", ""),
                 "secret_env_name": "ONEAPI_API_KEY",
                 "model": models["text_processing"],
+                "enabled": bool(processing["text_edit_enabled"]),
+                "prompt_version": processing["prompt_version"],
+                "minimum_length_ratio": processing[
+                    "faithfulness_min_length_ratio"
+                ],
+                "formula_symbol_ratio": processing[
+                    "faithfulness_formula_symbol_ratio"
+                ],
             },
         }
 
@@ -455,6 +566,35 @@ def _ffprobe_for(ffmpeg_path: str | None) -> str:
         return "ffprobe"
     suffix = path.suffix or (".exe" if os.name == "nt" else "")
     return str(path.with_name(f"ffprobe{suffix}"))
+
+
+def _export_target(settings: AppSetting) -> tuple[str, str]:
+    configured_inbox = settings.inbox_path
+    if settings.obsidian_vault_path:
+        vault = Path(settings.obsidian_vault_path)
+        if configured_inbox and Path(configured_inbox).is_absolute():
+            inbox = Path(configured_inbox)
+            try:
+                relative = inbox.relative_to(vault)
+            except ValueError as exc:
+                raise ConflictError(
+                    "Absolute Inbox path must be inside the configured Obsidian Vault"
+                ) from exc
+            return str(vault), relative.as_posix() or "."
+        relative = Path(configured_inbox or "Inbox")
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ConflictError("Inbox path must be relative to the configured Vault")
+        return str(vault), relative.as_posix()
+    inbox = (
+        Path(configured_inbox)
+        if configured_inbox
+        else get_settings().inbox_dir
+    )
+    if not inbox.is_absolute():
+        raise ConflictError(
+            "A relative Inbox path requires a configured Obsidian Vault"
+        )
+    return str(inbox.parent), inbox.name
 
 
 def _gateway_model_snapshot(

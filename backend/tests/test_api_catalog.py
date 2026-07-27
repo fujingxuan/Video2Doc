@@ -107,6 +107,14 @@ def test_health_models_profiles_settings_and_immutable_snapshot(client: TestClie
     # the referenced credential itself.
     assert "oneapi_api_key" not in settings_response.json()
     assert "oneapi_api_key_ref" not in settings_response.json()
+    unsafe_inbox = client.put(
+        "/api/v1/settings",
+        json={
+            "obsidian_vault_path": "D:\\Video2Doc-Test\\Obsidian-Test-Vault",
+            "inbox_path": "..\\outside",
+        },
+    )
+    assert unsafe_inbox.status_code == 409
 
     created = client.post(
         "/api/v1/tasks",
@@ -120,7 +128,11 @@ def test_health_models_profiles_settings_and_immutable_snapshot(client: TestClie
     assert created.status_code == 201, created.text
     task_id = created.json()[0]["id"]
     snapshot_before = client.get(f"/api/v1/tasks/{task_id}/snapshot").json()
-    assert snapshot_before["schema_version"] == 4
+    assert snapshot_before["schema_version"] == 5
+    assert snapshot_before["processing"]["prompt_version"] == "faithful-edit-v1"
+    assert snapshot_before["processing"]["markdown_template_version"] == "obsidian-v1"
+    assert snapshot_before["export"]["conflict_policy"] == "rename"
+    assert snapshot_before["export"]["keep_json_sidecar"] is True
     assert snapshot_before["processing"]["frame_sampling_strategy"] == "hybrid"
     assert snapshot_before["processing"]["fusion_window_seconds"] == 8.0
     assert snapshot_before["models"]["asr"] == "test-asr"

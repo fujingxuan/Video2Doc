@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.core.errors import NotFoundError
+from app.core.errors import ConflictError, NotFoundError
 from app.models import AppSetting, ProcessingProfile
 from app.schemas.api import SettingsRead, SettingsUpdate
 from app.services.serializers import settings_read
@@ -26,6 +27,27 @@ class SettingsService:
         profile_id = values.get("last_profile_id")
         if profile_id is not None and self.session.get(ProcessingProfile, profile_id) is None:
             raise NotFoundError("Processing profile", profile_id)
+        vault_value = values.get("obsidian_vault_path", item.obsidian_vault_path)
+        inbox_value = values.get("inbox_path", item.inbox_path)
+        if vault_value:
+            vault = Path(vault_value)
+            if not vault.is_absolute() or "\x00" in str(vault):
+                raise ConflictError("Obsidian Vault path must be an absolute safe path")
+            if inbox_value:
+                inbox = Path(inbox_value)
+                if inbox.is_absolute():
+                    try:
+                        inbox.relative_to(vault)
+                    except ValueError as exc:
+                        raise ConflictError(
+                            "Absolute Inbox path must be inside the Obsidian Vault"
+                        ) from exc
+                elif ".." in inbox.parts:
+                    raise ConflictError("Inbox path cannot traverse outside the Vault")
+        elif inbox_value and not Path(inbox_value).is_absolute():
+            raise ConflictError(
+                "A relative Inbox path requires an Obsidian Vault path"
+            )
         for key, value in values.items():
             setattr(item, key, value)
         self.session.commit()

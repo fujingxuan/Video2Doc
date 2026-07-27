@@ -51,6 +51,21 @@ def settings_read(item: AppSetting) -> SettingsRead:
         default_keep_timestamps=item.default_keep_timestamps,
         default_keep_downloaded_media=item.default_keep_downloaded_media,
         default_keep_frames=item.default_keep_frames,
+        default_text_edit_enabled=item.default_text_edit_enabled,
+        default_text_model_name=item.default_text_model_name,
+        text_prompt_version=item.text_prompt_version,
+        faithfulness_min_length_ratio=item.faithfulness_min_length_ratio,
+        faithfulness_formula_symbol_ratio=item.faithfulness_formula_symbol_ratio,
+        markdown_template_version=item.markdown_template_version,
+        image_insertion_policy=item.image_insertion_policy,
+        image_min_gap_seconds=item.image_min_gap_seconds,
+        export_filename_template=item.export_filename_template,
+        export_attachment_directory_template=item.export_attachment_directory_template,
+        export_data_directory_template=item.export_data_directory_template,
+        export_conflict_policy=item.export_conflict_policy,
+        export_keep_json_sidecar=item.export_keep_json_sidecar,
+        export_copy_transcript=item.export_copy_transcript,
+        export_copy_subtitles=item.export_copy_subtitles,
         updated_at=item.updated_at,
     )
 
@@ -86,6 +101,46 @@ def task_detail(item: Task) -> TaskDetail:
     fusion_preview = (
         read_json(workspace / "04_fusion/preview.json") if workspace else None
     )
+    document = read_json(Path(item.document_path)) if item.document_path else None
+    document_preview = (
+        {
+            "schema_version": document.get("schema_version"),
+            "document_id": document.get("document_id"),
+            "title": document.get("title"),
+            "media_duration_seconds": document.get("media_duration_seconds"),
+            "section_count": len(document.get("sections") or []),
+            "block_count": sum(
+                len(section.get("blocks") or [])
+                for section in document.get("sections") or []
+                if isinstance(section, dict)
+            ),
+            "edit_metadata": document.get("edit_metadata") or {},
+        }
+        if document
+        else None
+    )
+    markdown_preview = None
+    if item.markdown_path:
+        try:
+            markdown_preview = Path(item.markdown_path).read_text(encoding="utf-8")[:200_000]
+        except OSError:
+            markdown_preview = None
+    exports = [
+        {
+            "id": export.id,
+            "attempt": export.attempt,
+            "target_type": export.target_type,
+            "status": export.status,
+            "markdown_path": export.markdown_path,
+            "attachment_directory": export.attachment_directory,
+            "data_directory": export.data_directory,
+            "image_count": export.image_count,
+            "sidecar_count": export.sidecar_count,
+            "error_message": export.error_message,
+            "created_at": export.created_at,
+        }
+        for export in item.markdown_exports
+    ]
     return TaskDetail(
         **base,
         snapshot=SnapshotRead(
@@ -99,5 +154,8 @@ def task_detail(item: Task) -> TaskDetail:
         frame_summary=frame_summary,
         ocr_preview=ocr_preview,
         fusion_preview=fusion_preview,
+        document_preview=document_preview,
+        markdown_preview=markdown_preview,
+        exports=exports,
         artifacts=list_artifacts(workspace) if workspace else [],
     )
