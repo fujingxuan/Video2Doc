@@ -1,0 +1,6 @@
+-r requirements-common.txt
+# FireRedASR2S commit 4e7d9aaf imports these runtime packages but does not
+# declare them in pyproject.toml. Keep the repository's published versions so
+# a clean environment fails during setup instead of during the first request.
+kaldi-native-fbank==1.15
+peft>=0.13.2,<1

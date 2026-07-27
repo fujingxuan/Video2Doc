@@ -17,6 +17,51 @@ export interface ModelConfig {
   updated_at: string;
 }
 
+export type GatewayType = "ASR" | "OCR";
+
+export interface GatewayConfig {
+  id: number;
+  name: string;
+  gateway_type: GatewayType;
+  protocol: string;
+  base_url: string;
+  secret_env_name: string | null;
+  secret_configured: boolean;
+  enabled: boolean;
+  health_status: string;
+  last_checked_at: string | null;
+  settings: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GatewayModel {
+  id: number;
+  gateway_id: number;
+  gateway_name: string;
+  gateway_type: GatewayType;
+  gateway_base_url: string;
+  protocol: string;
+  model_name: string;
+  display_name: string;
+  enabled: boolean;
+  capabilities: Record<string, unknown>;
+  max_chunk_seconds: number | null;
+  max_alignment_seconds: number | null;
+  supports_native_long_audio: boolean;
+  supports_streaming: boolean;
+  supports_segment_timestamps: boolean;
+  supports_word_timestamps: boolean;
+  supports_confidence: boolean;
+  supports_language_detection: boolean;
+  timestamp_granularity: string[];
+  languages: string[];
+  health_status: string;
+  settings: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProcessingProfile {
   id: number;
   name: string;
@@ -27,6 +72,8 @@ export interface ProcessingProfile {
   asr_model_id: number | null;
   ocr_model_id: number | null;
   text_model_id: number | null;
+  asr_gateway_model_id: number | null;
+  ocr_gateway_model_id: number | null;
   ocr_enabled: boolean;
   remove_fillers: boolean;
   fix_sentences: boolean;
@@ -49,9 +96,14 @@ export interface StageRun {
   stage: string;
   status: string;
   progress: number;
+  message: string | null;
   started_at: string | null;
   finished_at: string | null;
   error_message: string | null;
+  technical_error: string | null;
+  input_artifacts: string[] | null;
+  output_artifacts: string[] | null;
+  log_path: string | null;
 }
 
 export interface Task {
@@ -68,6 +120,9 @@ export interface Task {
   error_message: string | null;
   workspace_path: string | null;
   output_path: string | null;
+  media_info_path: string | null;
+  transcript_path: string | null;
+  artifacts_index_path: string | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -81,6 +136,26 @@ export interface TaskDetail extends Task {
     created_at: string;
   };
   stages: StageRun[];
+  media_info: {
+    title?: string | null;
+    duration?: number | null;
+    container?: string | null;
+    has_audio?: boolean;
+    has_video?: boolean;
+    audio_streams?: Array<Record<string, unknown>>;
+    video_streams?: Array<Record<string, unknown>>;
+  } | null;
+  transcript_preview: {
+    provider?: string;
+    model?: string;
+    language?: string | null;
+    chunk_count?: number;
+    completed_chunks?: number;
+    segment_count?: number;
+    text?: string;
+    truncated?: boolean;
+  } | null;
+  artifacts: Array<{ path: string; size: number }>;
 }
 
 export interface QueueState {

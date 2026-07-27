@@ -12,6 +12,14 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal, get_db
 from app.schemas.api import (
     Capability,
+    GatewayCreate,
+    GatewayHealthRead,
+    GatewayModelCreate,
+    GatewayModelRead,
+    GatewayModelUpdate,
+    GatewayRead,
+    GatewayType,
+    GatewayUpdate,
     HealthRead,
     ModelCreate,
     ModelRead,
@@ -27,6 +35,7 @@ from app.schemas.api import (
     TaskRead,
 )
 from app.services.catalog import CatalogService
+from app.services.gateways import GatewayService
 from app.services.settings import SettingsService
 from app.services.tasks import TaskService
 from app.workers.queue import queue_worker
@@ -35,13 +44,101 @@ from app.workers.queue import queue_worker
 router = APIRouter()
 
 
+@router.get("/gateways", response_model=list[GatewayRead], tags=["gateways"])
+def list_gateways(
+    gateway_type: GatewayType | None = Query(default=None), session: Session = Depends(get_db)
+) -> list[GatewayRead]:
+    return GatewayService(session).list_gateways(gateway_type.value if gateway_type else None)
+
+
+@router.post(
+    "/gateways", response_model=GatewayRead, status_code=status.HTTP_201_CREATED, tags=["gateways"]
+)
+def create_gateway(payload: GatewayCreate, session: Session = Depends(get_db)) -> GatewayRead:
+    return GatewayService(session).create_gateway(payload)
+
+
+@router.get("/gateways/{gateway_id}", response_model=GatewayRead, tags=["gateways"])
+def get_gateway(gateway_id: int, session: Session = Depends(get_db)) -> GatewayRead:
+    return GatewayService(session).get_gateway(gateway_id)
+
+
+@router.put("/gateways/{gateway_id}", response_model=GatewayRead, tags=["gateways"])
+def update_gateway(
+    gateway_id: int, payload: GatewayUpdate, session: Session = Depends(get_db)
+) -> GatewayRead:
+    return GatewayService(session).update_gateway(gateway_id, payload)
+
+
+@router.delete("/gateways/{gateway_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["gateways"])
+def delete_gateway(gateway_id: int, session: Session = Depends(get_db)) -> Response:
+    GatewayService(session).delete_gateway(gateway_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/gateways/{gateway_id}/health", response_model=GatewayHealthRead, tags=["gateways"]
+)
+async def check_gateway_health(
+    gateway_id: int, session: Session = Depends(get_db)
+) -> GatewayHealthRead:
+    return await GatewayService(session).health(gateway_id)
+
+
+@router.post(
+    "/gateways/{gateway_id}/discover", response_model=list[GatewayModelRead], tags=["gateways"]
+)
+async def discover_models(
+    gateway_id: int, session: Session = Depends(get_db)
+) -> list[GatewayModelRead]:
+    return await GatewayService(session).discover(gateway_id)
+
+
+@router.get("/gateway-models", response_model=list[GatewayModelRead], tags=["gateways"])
+def list_gateway_models(
+    gateway_id: int | None = Query(default=None),
+    gateway_type: GatewayType | None = Query(default=None),
+    session: Session = Depends(get_db),
+) -> list[GatewayModelRead]:
+    return GatewayService(session).list_models(
+        gateway_id=gateway_id, gateway_type=gateway_type.value if gateway_type else None
+    )
+
+
+@router.post(
+    "/gateway-models",
+    response_model=GatewayModelRead,
+    status_code=status.HTTP_201_CREATED,
+    tags=["gateways"],
+)
+def create_gateway_model(
+    payload: GatewayModelCreate, session: Session = Depends(get_db)
+) -> GatewayModelRead:
+    return GatewayService(session).create_model(payload)
+
+
+@router.put("/gateway-models/{model_id}", response_model=GatewayModelRead, tags=["gateways"])
+def update_gateway_model(
+    model_id: int, payload: GatewayModelUpdate, session: Session = Depends(get_db)
+) -> GatewayModelRead:
+    return GatewayService(session).update_model(model_id, payload)
+
+
+@router.delete(
+    "/gateway-models/{model_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["gateways"]
+)
+def delete_gateway_model(model_id: int, session: Session = Depends(get_db)) -> Response:
+    GatewayService(session).delete_model(model_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/health", response_model=HealthRead, tags=["system"])
 def health(session: Session = Depends(get_db)) -> HealthRead:
     session.execute(text("SELECT 1"))
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="0.1.0",
+        version="0.2.0",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -138,6 +235,21 @@ def get_task(task_id: int, session: Session = Depends(get_db)) -> TaskDetail:
 @router.get("/tasks/{task_id}/snapshot", response_model=dict, tags=["tasks"])
 def get_task_snapshot(task_id: int, session: Session = Depends(get_db)) -> dict:
     return TaskService(session).snapshot(task_id)
+
+
+@router.get("/tasks/{task_id}/media", response_model=dict, tags=["tasks"])
+def get_task_media(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session).media(task_id)
+
+
+@router.get("/tasks/{task_id}/transcript", response_model=dict, tags=["tasks"])
+def get_task_transcript(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session).transcript(task_id)
+
+
+@router.get("/tasks/{task_id}/artifacts", response_model=list[dict], tags=["tasks"])
+def get_task_artifacts(task_id: int, session: Session = Depends(get_db)) -> list[dict]:
+    return TaskService(session).artifacts(task_id)
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskRead, tags=["tasks"])

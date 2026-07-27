@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import ConflictError, NotFoundError
-from app.models import ModelCapability, ModelConfig, ProcessingProfile
+from app.models import GatewayModel, ModelCapability, ModelConfig, ProcessingProfile
 from app.repositories.catalog import CatalogRepository
 from app.schemas.api import ModelCreate, ModelRead, ModelUpdate, ProfileCreate, ProfileRead, ProfileUpdate
 from app.services.serializers import model_read, profile_read
@@ -125,8 +125,28 @@ class CatalogService:
                 raise ConflictError(f"Model {model.name!r} does not have capability {capability}")
             if not model.enabled:
                 raise ConflictError(f"Model {model.name!r} is disabled")
-        if values.get("ocr_enabled") and values.get("ocr_model_id") is None:
-            raise ConflictError("An OCR-enabled profile must select an OCR model")
+        for field, gateway_type in (
+            ("asr_gateway_model_id", "ASR"),
+            ("ocr_gateway_model_id", "OCR"),
+        ):
+            gateway_model_id = values.get(field)
+            if gateway_model_id is None:
+                continue
+            gateway_model = self.session.get(GatewayModel, gateway_model_id)
+            if gateway_model is None:
+                raise NotFoundError("Gateway model", gateway_model_id)
+            if gateway_model.gateway.gateway_type != gateway_type:
+                raise ConflictError(
+                    f"Gateway model {gateway_model.display_name!r} is not a {gateway_type} model"
+                )
+            if not gateway_model.enabled or not gateway_model.gateway.enabled:
+                raise ConflictError(f"Gateway model {gateway_model.display_name!r} is disabled")
+        if (
+            values.get("ocr_enabled")
+            and values.get("ocr_model_id") is None
+            and values.get("ocr_gateway_model_id") is None
+        ):
+            raise ConflictError("An OCR-enabled profile must select an OCR gateway model")
 
     def _clear_default(self) -> None:
         for item in self.session.scalars(select(ProcessingProfile).where(ProcessingProfile.is_default.is_(True))):

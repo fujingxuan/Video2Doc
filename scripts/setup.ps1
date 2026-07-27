@@ -47,4 +47,11 @@ try {
 }
 finally { Pop-Location }
 
+Write-Host "Checking optional real-media command dependencies..."
+$powershellExecutable = (Get-Process -Id $PID).Path
+& $powershellExecutable -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check_media_tools.ps1")
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "Setup completed, but real media tasks require FFmpeg, ffprobe, and yt-dlp. Configure them before processing real input."
+}
+
 Write-Host "Setup complete. Run scripts\start_dev.ps1 from the repository root."

@@ -52,6 +52,53 @@ class ModelCapability(Base):
     model: Mapped[ModelConfig] = relationship(back_populates="capabilities")
 
 
+class GatewayConfig(TimestampMixin, Base):
+    __tablename__ = "gateway_configs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    gateway_type: Mapped[str] = mapped_column(String(16), index=True)
+    protocol: Mapped[str] = mapped_column(String(64), index=True)
+    base_url: Mapped[str] = mapped_column(Text)
+    secret_env_name: Mapped[str | None] = mapped_column(String(200))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    health_status: Mapped[str] = mapped_column(String(32), default="UNKNOWN", index=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    settings: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    models: Mapped[list[GatewayModel]] = relationship(
+        back_populates="gateway", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class GatewayModel(TimestampMixin, Base):
+    __tablename__ = "gateway_models"
+    __table_args__ = (UniqueConstraint("gateway_id", "model_name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    gateway_id: Mapped[int] = mapped_column(
+        ForeignKey("gateway_configs.id", ondelete="CASCADE"), index=True
+    )
+    model_name: Mapped[str] = mapped_column(String(300), index=True)
+    display_name: Mapped[str] = mapped_column(String(300))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    capabilities: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    max_chunk_seconds: Mapped[float | None] = mapped_column(Float)
+    max_alignment_seconds: Mapped[float | None] = mapped_column(Float)
+    supports_native_long_audio: Mapped[bool] = mapped_column(Boolean, default=False)
+    supports_streaming: Mapped[bool] = mapped_column(Boolean, default=False)
+    supports_segment_timestamps: Mapped[bool] = mapped_column(Boolean, default=False)
+    supports_word_timestamps: Mapped[bool] = mapped_column(Boolean, default=False)
+    supports_confidence: Mapped[bool] = mapped_column(Boolean, default=False)
+    supports_language_detection: Mapped[bool] = mapped_column(Boolean, default=False)
+    timestamp_granularity: Mapped[list[str]] = mapped_column(JSON, default=list)
+    languages: Mapped[list[str]] = mapped_column(JSON, default=list)
+    health_status: Mapped[str] = mapped_column(String(32), default="UNKNOWN", index=True)
+    settings: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    gateway: Mapped[GatewayConfig] = relationship(back_populates="models", lazy="selectin")
+
+
 class ProcessingProfile(TimestampMixin, Base):
     __tablename__ = "processing_profiles"
 
@@ -70,6 +117,12 @@ class ProcessingProfile(TimestampMixin, Base):
     text_model_id: Mapped[int | None] = mapped_column(
         ForeignKey("model_configs.id", ondelete="RESTRICT"), nullable=True
     )
+    asr_gateway_model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("gateway_models.id", ondelete="RESTRICT"), nullable=True
+    )
+    ocr_gateway_model_id: Mapped[int | None] = mapped_column(
+        ForeignKey("gateway_models.id", ondelete="RESTRICT"), nullable=True
+    )
     ocr_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     remove_fillers: Mapped[bool] = mapped_column(Boolean, default=True)
     fix_sentences: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -86,6 +139,12 @@ class ProcessingProfile(TimestampMixin, Base):
     asr_model: Mapped[ModelConfig | None] = relationship(foreign_keys=[asr_model_id], lazy="selectin")
     ocr_model: Mapped[ModelConfig | None] = relationship(foreign_keys=[ocr_model_id], lazy="selectin")
     text_model: Mapped[ModelConfig | None] = relationship(foreign_keys=[text_model_id], lazy="selectin")
+    asr_gateway_model: Mapped[GatewayModel | None] = relationship(
+        foreign_keys=[asr_gateway_model_id], lazy="selectin"
+    )
+    ocr_gateway_model: Mapped[GatewayModel | None] = relationship(
+        foreign_keys=[ocr_gateway_model_id], lazy="selectin"
+    )
 
 
 class AppSetting(TimestampMixin, Base):
@@ -136,6 +195,9 @@ class Task(TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     workspace_path: Mapped[str | None] = mapped_column(Text)
     output_path: Mapped[str | None] = mapped_column(Text)
+    media_info_path: Mapped[str | None] = mapped_column(Text)
+    transcript_path: Mapped[str | None] = mapped_column(Text)
+    artifacts_index_path: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -170,7 +232,13 @@ class TaskStageRun(Base):
     stage: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), default="PENDING")
     progress: Mapped[int] = mapped_column(Integer, default=0)
+    message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_message: Mapped[str | None] = mapped_column(Text)
+    technical_error: Mapped[str | None] = mapped_column(Text)
+    retryable: Mapped[bool | None] = mapped_column(Boolean)
+    input_artifacts: Mapped[list[str] | None] = mapped_column(JSON)
+    output_artifacts: Mapped[list[str] | None] = mapped_column(JSON)
+    log_path: Mapped[str | None] = mapped_column(Text)
     task: Mapped[Task] = relationship(back_populates="stages")

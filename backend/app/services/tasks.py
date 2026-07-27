@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -9,12 +10,20 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError
-from app.models import AppSetting, ProcessingProfile, Task, TaskConfigSnapshot
+from app.models import (
+    AppSetting,
+    GatewayModel,
+    ModelConfig,
+    ProcessingProfile,
+    Task,
+    TaskConfigSnapshot,
+)
 from app.models.entities import utcnow
 from app.repositories.tasks import TaskRepository
 from app.schemas.api import QueueStatus, TaskBatchCreate, TaskDetail, TaskRead
+from app.services.gateways import sanitize_gateway_metadata
 from app.services.serializers import task_detail, task_read
-from app.storage.workspace import create_workspace
+from app.storage.workspace import create_workspace, list_artifacts, read_json
 
 
 class WorkerNotifier(Protocol):
@@ -30,7 +39,15 @@ class TaskService:
     def create_batch(self, payload: TaskBatchCreate) -> list[TaskRead]:
         settings = self._get_or_create_settings()
         profile = self._resolve_profile(payload.profile_id, settings)
-        base_snapshot = self._build_snapshot(profile, settings, payload.config_overrides)
+        base_snapshot = self._build_snapshot(
+            profile,
+            settings,
+            payload.config_overrides,
+            payload.pipeline_mode,
+            payload.asr_model_id,
+            payload.asr_gateway_model_id,
+            payload.ocr_gateway_model_id,
+        )
         tasks: list[Task] = []
         for task_input in payload.inputs:
             title = task_input.title or Path(task_input.source).name or task_input.source[:100]
@@ -41,7 +58,7 @@ class TaskService:
                 "title": title,
             }
             snapshot["simulation"] = {
-                "enabled": True,
+                "enabled": payload.pipeline_mode == "SIMULATED",
                 "failure_mode": task_input.simulate_failure,
             }
             item = Task(
@@ -53,7 +70,7 @@ class TaskService:
             )
             self.session.add(item)
             self.session.flush()
-            item.snapshot = TaskConfigSnapshot(schema_version=1, snapshot_json=snapshot)
+            item.snapshot = TaskConfigSnapshot(schema_version=3, snapshot_json=snapshot)
             data_root = Path(settings.data_path) if settings.data_path else get_settings().data_dir
             item.workspace_path = str(
                 create_workspace(data_root, task_id=item.id, title=title, snapshot=snapshot)
@@ -80,6 +97,30 @@ class TaskService:
         if not item:
             raise NotFoundError("Task", task_id)
         return copy.deepcopy(item.snapshot.snapshot_json)
+
+    def media(self, task_id: int) -> dict[str, Any]:
+        item = self.repo.get(task_id)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        payload = read_json(Path(item.media_info_path)) if item.media_info_path else None
+        if payload is None:
+            raise NotFoundError("Task media information", task_id)
+        return payload
+
+    def transcript(self, task_id: int) -> dict[str, Any]:
+        item = self.repo.get(task_id)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        payload = read_json(Path(item.transcript_path)) if item.transcript_path else None
+        if payload is None:
+            raise NotFoundError("Task transcript", task_id)
+        return payload
+
+    def artifacts(self, task_id: int) -> list[dict[str, Any]]:
+        item = self.repo.get(task_id)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        return list_artifacts(Path(item.workspace_path)) if item.workspace_path else []
 
     def cancel(self, task_id: int) -> TaskRead:
         item = self.repo.get(task_id)
@@ -157,6 +198,12 @@ class TaskService:
                     selectinload(ProcessingProfile.asr_model),
                     selectinload(ProcessingProfile.ocr_model),
                     selectinload(ProcessingProfile.text_model),
+                    selectinload(ProcessingProfile.asr_gateway_model).selectinload(
+                        GatewayModel.gateway
+                    ),
+                    selectinload(ProcessingProfile.ocr_gateway_model).selectinload(
+                        GatewayModel.gateway
+                    ),
                 )
             )
             if not profile:
@@ -169,6 +216,12 @@ class TaskService:
                 selectinload(ProcessingProfile.asr_model),
                 selectinload(ProcessingProfile.ocr_model),
                 selectinload(ProcessingProfile.text_model),
+                selectinload(ProcessingProfile.asr_gateway_model).selectinload(
+                    GatewayModel.gateway
+                ),
+                selectinload(ProcessingProfile.ocr_gateway_model).selectinload(
+                    GatewayModel.gateway
+                ),
             )
             .limit(1)
         )
@@ -178,6 +231,10 @@ class TaskService:
         profile: ProcessingProfile | None,
         settings: AppSetting,
         overrides: dict[str, Any],
+        pipeline_mode: str,
+        asr_model_id: int | None,
+        asr_gateway_model_id: int | None,
+        ocr_gateway_model_id: int | None,
     ) -> dict[str, Any]:
         processing = {
             "ocr_enabled": settings.default_ocr_enabled,
@@ -190,6 +247,8 @@ class TaskService:
             "keep_downloaded_media": settings.default_keep_downloaded_media,
             "ocr_frame_interval_seconds": 5.0,
             "markdown_template": settings.default_markdown_template,
+            "audio_chunk_seconds": get_settings().audio_chunk_seconds,
+            "asr_language": None,
         }
         models: dict[str, str | None] = {"asr": None, "ocr": None, "text_processing": None}
         profile_data: dict[str, Any] | None = None
@@ -207,13 +266,58 @@ class TaskService:
                 "ocr": profile.ocr_model.name if profile.ocr_model else None,
                 "text_processing": profile.text_model.name if profile.text_model else None,
             }
+        if asr_model_id is not None:
+            asr_model = self.session.get(ModelConfig, asr_model_id)
+            if (
+                asr_model is None
+                or not asr_model.enabled
+                or not any(item.capability == "ASR" for item in asr_model.capabilities)
+            ):
+                raise ConflictError("Selected ASR model is unavailable or lacks the ASR capability")
+            models["asr"] = asr_model.name
+        asr_gateway_model = self._resolve_gateway_model(
+            asr_gateway_model_id
+            if asr_gateway_model_id is not None
+            else (profile.asr_gateway_model_id if profile else None),
+            "ASR",
+        )
+        ocr_gateway_model = self._resolve_gateway_model(
+            ocr_gateway_model_id
+            if ocr_gateway_model_id is not None
+            else (profile.ocr_gateway_model_id if profile else None),
+            "OCR",
+        )
         allowed_overrides = set(processing)
         unknown = set(overrides) - allowed_overrides
         if unknown:
             raise ConflictError(f"Unsupported task config overrides: {', '.join(sorted(unknown))}")
         processing.update(copy.deepcopy(overrides))
+        if pipeline_mode == "REAL" and asr_gateway_model is None:
+            raise ConflictError("A real task must select an independent ASR gateway model")
+        if processing.get("ocr_enabled") and ocr_gateway_model is None:
+            raise ConflictError("An OCR-enabled task must select an independent OCR gateway model")
+        if asr_gateway_model:
+            models["asr"] = asr_gateway_model.model_name
+        if ocr_gateway_model:
+            models["ocr"] = ocr_gateway_model.model_name
+        asr_gateway_snapshot = _gateway_model_snapshot(
+            asr_gateway_model,
+            timeout_seconds=get_settings().asr_request_timeout_seconds,
+            max_retries=get_settings().asr_max_retries,
+            requested_chunk_seconds=float(processing["audio_chunk_seconds"]),
+            overlap_seconds=get_settings().asr_overlap_seconds,
+        )
+        ocr_gateway_snapshot = _gateway_model_snapshot(
+            ocr_gateway_model,
+            timeout_seconds=get_settings().asr_request_timeout_seconds,
+            max_retries=get_settings().asr_max_retries,
+            requested_chunk_seconds=None,
+            overlap_seconds=0.0,
+        )
+        if asr_gateway_snapshot:
+            processing["audio_chunk_seconds"] = asr_gateway_snapshot["chunking"]["chunk_seconds"]
         return {
-            "schema_version": 1,
+            "schema_version": 3,
             "profile": profile_data,
             "models": models,
             "processing": processing,
@@ -221,8 +325,53 @@ class TaskService:
                 "inbox": settings.inbox_path or str(get_settings().inbox_dir),
                 "data": settings.data_path or str(get_settings().data_dir),
             },
-            "pipeline": "SIMULATED",
+            "pipeline": pipeline_mode,
+            "tools": {
+                "ffmpeg": settings.ffmpeg_path or "ffmpeg",
+                "ffprobe": _ffprobe_for(settings.ffmpeg_path),
+                "ytdlp": settings.ytdlp_path or "yt-dlp",
+            },
+            "gateways": {"asr": asr_gateway_snapshot, "ocr": ocr_gateway_snapshot},
+            "asr": (
+                {
+                    "provider": asr_gateway_snapshot["protocol"],
+                    "base_url": asr_gateway_snapshot["base_url"],
+                    "secret_env_name": asr_gateway_snapshot["secret_env_name"],
+                    "model": asr_gateway_snapshot["model_name"],
+                    "language": processing.get("asr_language"),
+                    "timeout_seconds": asr_gateway_snapshot["timeout_seconds"],
+                    "max_retries": asr_gateway_snapshot["max_retries"],
+                    "overlap_seconds": asr_gateway_snapshot["chunking"]["overlap_seconds"],
+                    "streaming": asr_gateway_snapshot["capabilities"]["supports_streaming"],
+                }
+                if asr_gateway_snapshot
+                else None
+            ),
+            "text_processing": {
+                "provider": "oneapi-openai-compatible",
+                "base_url": settings.oneapi_base_url or os.getenv("ONEAPI_BASE_URL", ""),
+                "secret_env_name": "ONEAPI_API_KEY",
+                "model": models["text_processing"],
+            },
         }
+
+    def _resolve_gateway_model(
+        self, gateway_model_id: int | None, gateway_type: str
+    ) -> GatewayModel | None:
+        if gateway_model_id is None:
+            return None
+        item = self.session.scalar(
+            select(GatewayModel)
+            .where(GatewayModel.id == gateway_model_id)
+            .options(selectinload(GatewayModel.gateway))
+        )
+        if item is None:
+            raise NotFoundError("Gateway model", gateway_model_id)
+        if item.gateway.gateway_type != gateway_type:
+            raise ConflictError(f"Selected gateway model is not an {gateway_type} model")
+        if not item.enabled or not item.gateway.enabled:
+            raise ConflictError("Selected gateway model or gateway is disabled")
+        return item
 
     def _get_or_create_settings(self) -> AppSetting:
         item = self.session.get(AppSetting, 1)
@@ -231,3 +380,96 @@ class TaskService:
             self.session.add(item)
             self.session.flush()
         return item
+
+
+def _ffprobe_for(ffmpeg_path: str | None) -> str:
+    if not ffmpeg_path:
+        return "ffprobe"
+    path = Path(ffmpeg_path)
+    if path.parent == Path("."):
+        return "ffprobe"
+    suffix = path.suffix or (".exe" if os.name == "nt" else "")
+    return str(path.with_name(f"ffprobe{suffix}"))
+
+
+def _gateway_model_snapshot(
+    item: GatewayModel | None,
+    *,
+    timeout_seconds: float,
+    max_retries: int,
+    requested_chunk_seconds: float | None,
+    overlap_seconds: float,
+) -> dict[str, Any] | None:
+    if item is None:
+        return None
+    gateway_settings = item.gateway.settings or {}
+    try:
+        effective_timeout_seconds = max(
+            1.0, min(float(gateway_settings.get("timeout_seconds", timeout_seconds)), 3600.0)
+        )
+    except (TypeError, ValueError):
+        effective_timeout_seconds = timeout_seconds
+    try:
+        effective_max_retries = max(
+            0, min(int(gateway_settings.get("max_retries", max_retries)), 10)
+        )
+    except (TypeError, ValueError):
+        effective_max_retries = max_retries
+    native_continuous_stream = bool(
+        item.supports_streaming and (item.capabilities or {}).get("continuous_session")
+    )
+    if native_continuous_stream:
+        chunk_seconds = None
+        effective_overlap_seconds = 0.0
+        mode = "continuous_stream"
+    else:
+        requested = requested_chunk_seconds or item.max_chunk_seconds or 60.0
+        if item.max_chunk_seconds is not None:
+            chunk_seconds = min(requested, item.max_chunk_seconds)
+        elif item.supports_native_long_audio:
+            chunk_seconds = requested
+        else:
+            chunk_seconds = min(requested, 60.0)
+        effective_overlap_seconds = min(overlap_seconds, max(0.0, chunk_seconds - 0.001))
+        mode = "offline_overlap"
+    if item.supports_word_timestamps:
+        timestamp_strategy = "word"
+    elif item.supports_segment_timestamps:
+        timestamp_strategy = "segment"
+    else:
+        timestamp_strategy = "none"
+    return {
+        "gateway_id": item.gateway_id,
+        "gateway_name": item.gateway.name,
+        "gateway_type": item.gateway.gateway_type,
+        "base_url": item.gateway.base_url,
+        "protocol": item.gateway.protocol,
+        "secret_env_name": item.gateway.secret_env_name,
+        "model_id": item.id,
+        "model_name": item.model_name,
+        "display_name": item.display_name,
+        "capabilities": {
+            **sanitize_gateway_metadata(item.capabilities or {}),
+            "max_chunk_seconds": item.max_chunk_seconds,
+            "max_alignment_seconds": item.max_alignment_seconds,
+            "supports_native_long_audio": item.supports_native_long_audio,
+            "supports_streaming": item.supports_streaming,
+            "supports_segment_timestamps": item.supports_segment_timestamps,
+            "supports_word_timestamps": item.supports_word_timestamps,
+            "supports_confidence": item.supports_confidence,
+            "supports_language_detection": item.supports_language_detection,
+            "timestamp_granularity": item.timestamp_granularity,
+            "languages": item.languages,
+        },
+        "chunking": {
+            "mode": mode,
+            "chunk_seconds": chunk_seconds,
+            "overlap_seconds": effective_overlap_seconds,
+            "step_seconds": (
+                chunk_seconds - effective_overlap_seconds if chunk_seconds is not None else None
+            ),
+        },
+        "timestamp_strategy": timestamp_strategy,
+        "timeout_seconds": effective_timeout_seconds,
+        "max_retries": effective_max_retries,
+    }

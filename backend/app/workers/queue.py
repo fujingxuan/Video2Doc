@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import SessionLocal
-from app.models import Task, TaskStageRun
-from app.pipeline.simulated import run_simulated_pipeline
+from app.models import Task
+from app.pipeline.runner import run_pipeline
+from app.providers.process import process_registry
 
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class SerialQueueWorker:
         self._wake_event = asyncio.Event()
         self._stop_event = asyncio.Event()
         self.recover_interrupted()
+        process_registry.begin_lifecycle()
         self._runner = asyncio.create_task(self._run(), name="video2doc-serial-worker")
         self.notify()
         logger.info("Serial queue worker started with max_concurrency=1")
@@ -43,6 +45,7 @@ class SerialQueueWorker:
     async def stop(self) -> None:
         self._stop_event.set()
         self.notify()
+        await process_registry.shutdown_all()
         if self._runner:
             await self._runner
         self._runner = None
@@ -76,9 +79,9 @@ class SerialQueueWorker:
             task_id = self._claim_next_task()
             if task_id is not None:
                 try:
-                    await run_simulated_pipeline(task_id)
+                    await run_pipeline(task_id)
                 except Exception:
-                    logger.exception("Unexpected failure escaped simulated Pipeline for task %s", task_id)
+                    logger.exception("Unexpected failure escaped Pipeline for task %s", task_id)
                 continue
             self._wake_event.clear()
             try:

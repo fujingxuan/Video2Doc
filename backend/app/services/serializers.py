@@ -10,6 +10,8 @@ from app.schemas.api import (
     TaskDetail,
     TaskRead,
 )
+from app.storage.workspace import list_artifacts, read_json
+from pathlib import Path
 
 
 def model_read(item: ModelConfig) -> ModelRead:
@@ -59,6 +61,10 @@ def task_read(item: Task) -> TaskRead:
 
 def task_detail(item: Task) -> TaskDetail:
     base = task_read(item).model_dump()
+    workspace = Path(item.workspace_path) if item.workspace_path else None
+    media_info = read_json(Path(item.media_info_path)) if item.media_info_path else None
+    preview_path = workspace / "02_asr/preview.json" if workspace else None
+    transcript_preview = read_json(preview_path) if preview_path else None
     return TaskDetail(
         **base,
         snapshot=SnapshotRead(
@@ -67,4 +73,7 @@ def task_detail(item: Task) -> TaskDetail:
             created_at=item.snapshot.created_at,
         ),
         stages=[StageRead.model_validate(stage) for stage in item.stages],
+        media_info=media_info,
+        transcript_preview=transcript_preview,
+        artifacts=list_artifacts(workspace) if workspace else [],
     )

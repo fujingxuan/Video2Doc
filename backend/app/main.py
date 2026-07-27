@@ -13,6 +13,8 @@ from app.api.router import router
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.logging import configure_logging
+from app.db.session import SessionLocal
+from app.services.gateways import seed_default_gateways
 from app.workers.queue import queue_worker
 
 
@@ -26,6 +28,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.inbox_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Starting Video2Doc backend")
+    with SessionLocal() as session:
+        seed_default_gateways(session)
     await queue_worker.start()
     yield
     await queue_worker.stop()
@@ -33,8 +37,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Video2Doc API",
-    version="0.1.0",
-    description="Local API with a persistent, serial simulated Pipeline.",
+    version="0.2.0",
+    description="Local API with a persistent serial real-media and ASR Pipeline.",
     lifespan=lifespan,
 )
 app.add_middleware(

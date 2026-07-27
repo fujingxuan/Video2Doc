@@ -4,13 +4,14 @@ import { API_BASE, api } from "./api/client";
 import { Layout } from "./components/Layout";
 import { StateView } from "./components/StateView";
 import { ModelsPage } from "./pages/ModelsPage";
+import { GatewaysPage } from "./pages/GatewaysPage";
 import { NewTaskPage } from "./pages/NewTaskPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { QueuePage } from "./pages/QueuePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
-import type { ModelConfig, ProcessingProfile, QueueState, Task } from "./types";
+import type { GatewayConfig, GatewayModel, ModelConfig, ProcessingProfile, QueueState, Task } from "./types";
 
 function currentPath(): string {
   return window.location.hash.replace(/^#/, "") || "/";
@@ -20,6 +21,8 @@ export default function App() {
   const [path, setPath] = useState(currentPath);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [models, setModels] = useState<ModelConfig[]>([]);
+  const [gateways, setGateways] = useState<GatewayConfig[]>([]);
+  const [gatewayModels, setGatewayModels] = useState<GatewayModel[]>([]);
   const [profiles, setProfiles] = useState<ProcessingProfile[]>([]);
   const [queue, setQueue] = useState<QueueState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -31,8 +34,10 @@ export default function App() {
     setTasks(nextTasks); setQueue(nextQueue);
   }, []);
   const refreshCatalog = useCallback(async () => {
-    const [nextModels, nextProfiles] = await Promise.all([api.models(), api.profiles()]);
-    setModels(nextModels); setProfiles(nextProfiles);
+    const [nextModels, nextProfiles, nextGateways, nextGatewayModels] = await Promise.all([
+      api.models(), api.profiles(), api.gateways(), api.gatewayModels(),
+    ]);
+    setModels(nextModels); setProfiles(nextProfiles); setGateways(nextGateways); setGatewayModels(nextGatewayModels);
   }, []);
 
   useEffect(() => {
@@ -76,14 +81,15 @@ export default function App() {
     if (detail) return <TaskDetailPage taskId={Number(detail[1])} />;
     switch (path) {
       case "/": return <OverviewPage queue={queue} tasks={tasks} connected={connected} />;
-      case "/new": return <NewTaskPage profiles={profiles} onCreated={refreshTasks} />;
+      case "/new": return <NewTaskPage profiles={profiles} gatewayModels={gatewayModels} onCreated={refreshTasks} />;
       case "/queue": return <QueuePage tasks={tasks} refresh={refreshTasks} />;
       case "/models": return <ModelsPage models={models} refresh={refreshCatalog} />;
-      case "/profiles": return <ProfilesPage profiles={profiles} models={models} refresh={refreshCatalog} />;
+      case "/gateways": return <GatewaysPage gateways={gateways} gatewayModels={gatewayModels} refresh={refreshCatalog} />;
+      case "/profiles": return <ProfilesPage profiles={profiles} models={models} gatewayModels={gatewayModels} refresh={refreshCatalog} />;
       case "/settings": return <SettingsPage />;
       default: return <div className="state-card">页面不存在。<button onClick={() => { window.location.hash = "/"; }}>返回总览</button></div>;
     }
-  }, [connected, models, path, profiles, queue, refreshCatalog, refreshTasks, tasks]);
+  }, [connected, gatewayModels, gateways, models, path, profiles, queue, refreshCatalog, refreshTasks, tasks]);
 
   const navPath = path.match(/^\/tasks\//) ? "/queue" : path;
   return <Layout path={navPath}><StateView loading={loading} error={error}>{content}</StateView></Layout>;

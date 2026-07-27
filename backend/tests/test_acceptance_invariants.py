@@ -103,6 +103,7 @@ def test_retry_preserves_original_snapshot_and_increments_attempt(client: TestCl
     created = client.post(
         "/api/v1/tasks",
         json={
+            "pipeline_mode": "SIMULATED",
             "inputs": [
                 {
                     "source": "snapshot-retry",
@@ -136,6 +137,7 @@ def test_ocr_disabled_skips_ocr_stage(client: TestClient) -> None:
     created = client.post(
         "/api/v1/tasks",
         json={
+            "pipeline_mode": "SIMULATED",
             "inputs": [{"source": "no-ocr", "source_type": "LOCAL_FILE"}],
             "config_overrides": {"ocr_enabled": False},
         },

@@ -1,137 +1,192 @@
-# Video2Doc 第一轮架构
+# Video2Doc 独立模型 Gateway 架构
 
-## 1. 范围与目标
+## 1. 范围与不变量
 
-当前版本是 Windows 优先的本地 Web 应用骨架。它验证模型/方案/设置管理、不可变任务配置快照、SQLite 持久化单并发队列、模拟阶段、取消、失败、重试、重启恢复和前端实时状态。所有运行结果均明确标注为“模拟 Pipeline”。
+第二阶段在第一轮骨架上加入真实媒体输入和真实 ASR，不改变以下不变量：
 
-本轮不读取媒体内容，不调用 yt-dlp、FFmpeg、ASR、OCR、OneAPI、Ollama 或远程模型，不解析网页，也不生成或伪造媒体正文。未来真实 Pipeline 必须替换适配器/runner，不能改变既有队列与快照语义。
+- SQLite `tasks.status` 是队列事实源；最大并发数固定为 1。
+- API 请求只创建/查询/控制任务，不在请求线程执行耗时 Pipeline。
+- 每个任务保存不可变配置快照；重试只增加 attempt。
+- Worker 启动时把遗留 `PROCESSING` 转为 `INTERRUPTED`，不猜测完成状态。
+- SSE 发布数据库状态，断线时前端使用 REST 回退。
+- 大型媒体、日志和转写保存在工作区；SQLite 只保存索引和小型事实。
 
-## 2. 总体架构
+本阶段包含 OCR Gateway 架构但不包含真实 OCR 模型；文本清洗、融合、Markdown 正文生成、总结和知识提炼仍不在范围内。
 
-```text
-React + TypeScript + Vite
-        │ HTTP JSON + SSE
-        ▼
-FastAPI API 层
-        ▼
-应用 Service 层
-        ├── Repository / SQLAlchemy ── SQLite
-        ├── SerialQueueWorker (并发固定为 1)
-        └── SimulatedPipelineRunner ── 任务工作区 / 模拟 Markdown
-```
-
-前后端可独立启动。FastAPI 负责进程生命周期，后台 Worker 不依赖浏览器是否打开；React 首次通过 REST 读取持久化状态，随后通过 SSE `/api/v1/events` 接收变化。SSE 仅推送状态发生变化时的完整轻量视图，并发送低频 keep-alive；浏览器自动重连期间，前端每两秒通过 REST 回退刷新，并在 SSE 或 REST 恢复时清除旧错误态，因此断线不会让页面永久停止更新。
-
-## 3. 后端模块
-
-- `app/api`：HTTP 路由、请求/响应协议和 SSE，不承载业务决策。
-- `app/schemas`：Pydantic 输入输出模型与固定能力枚举。
-- `app/services`：模型/处理方案校验、设置、批量任务、快照、取消与重试。
-- `app/repositories`：SQLAlchemy 查询封装。
-- `app/models`：数据库实体与关系。
-- `app/workers`：唯一的串行调度 Worker。
-- `app/pipeline`：可替换的 Pipeline 边界；当前只有模拟 runner。
-- `app/storage`：Windows 安全文件名、任务工作区、状态 JSON、日志和模拟输出。
-- `app/core`：环境配置、统一业务异常和日志。
-- `app/db`：引擎、Session 与 SQLite 外键/等待超时配置。
-
-未处理异常不会被静默吞掉：业务异常映射为统一 JSON；数据库异常记录堆栈并返回脱敏错误；runner 的未知异常会落为 `FAILED` 后继续记录完整应用日志。
-
-## 4. 前端模块
-
-- `api/client.ts`：唯一 REST 客户端和错误解析。
-- `types.ts`：与 API 对齐的数据类型。
-- `components`：布局、状态徽章与加载/空/错误态。
-- `pages`：总览、新建任务、队列、详情、模型、处理方案、设置。
-- `utils`：状态标签和时间格式化，并有 Vitest 测试。
-
-页面不是静态占位：模型、方案、设置、创建任务、取消、重试和详情均调用真实后端 API。浏览器无法提供任意本地绝对路径，因此第一轮采用路径输入；未来可由本地后台提供原生目录选择辅助接口。
-
-## 5. 数据库设计
-
-SQLite 保存小型结构化事实和任务索引，不存媒体 BLOB 或大段转写：
-
-| 表 | 职责 |
-| --- | --- |
-| `model_configs` | 用户手工模型 ID、备注、启停状态 |
-| `model_capabilities` | 模型的固定能力标签；同模型同标签唯一 |
-| `processing_profiles` | 可复用的完整工作流配置和三个模型外键 |
-| `app_settings` | 单例设置、上次方案和上次任务配置 |
-| `tasks` | 队列状态、阶段、进度、错误、路径、执行时间和重试次数 |
-| `task_config_snapshots` | 与任务一对一的完整 JSON 快照 |
-| `task_stage_runs` | 每次 attempt 的阶段状态、进度、时间和错误 |
-
-所有表由 Alembic 创建。外键在每个 SQLite 连接上启用；模型被方案引用时禁止删除，任务删除会级联清理快照和阶段记录。时间统一按 UTC 写入。JSON 用于有版本的配置快照，不用于媒体内容。
-
-## 6. 固定模型能力与处理方案
-
-能力只允许 `ASR`、`OCR`、`TEXT_PROCESSING`、`VISION`。创建/修改方案时，Service 验证每个所选模型已启用且拥有对应能力；OCR 开启时必须选择 OCR 模型。前端下拉框执行同样的能力过滤，但后端仍是最终校验边界。
-
-## 7. 配置快照
-
-创建任务时，Service 将处理方案解析为普通值，记录所选模型名称、全部处理开关、输出/资料路径、输入信息与显式覆盖值，然后深复制到 `task_config_snapshots.snapshot_json`，并写入工作区 `task_config.json`。快照不保存 API Key；密钥只允许通过 `ONEAPI_API_KEY` 环境变量提供。
-
-后续修改模型、方案或全局设置不会更新既有快照。重试沿用原快照并增加 `attempt`，保证历史可追溯。`app_settings.last_task_config` 保存上一次实际配置，供下次创建恢复，但它与每个任务的历史快照互不引用。
-
-## 8. 持久化单并发队列
-
-队列事实源是 `tasks.status`，内存中只保留一个唤醒事件和 Worker 协程。Worker 每次领取最早的 `QUEUED` 任务；领取前若数据库已有 `PROCESSING` 任务则不再领取，SQLite 部分唯一索引 `uq_tasks_single_processing` 还会从数据库层拒绝第二条 `PROCESSING` 记录。因此同一应用进程中并发固定为 1，并且数据库状态始终满足单执行约束。第一轮只支持一个后端实例；多实例部署不在产品范围，若未来支持仍需任务领取租约/锁以避免两个进程重复领取同一行。
-
-处理完成、失败或取消后，Worker 自动领取下一项。每个模拟阶段在数据库创建 `task_stage_runs`，分段更新总进度与阶段进度，并同步 `task_state.json` 和任务日志。OCR 关闭时不执行 `OCR_PROCESSING`，工作区仍创建 `03_ocr/DISABLED.txt`，以保持目录结构一致且明确说明未启用。
-
-### 取消竞态
-
-- 等待任务立即原子地变为 `CANCELLED`。
-- 运行任务设置持久化 `cancel_requested`；runner 在每个进度片段检查。
-- 最终完成使用带 `status=PROCESSING AND cancel_requested=false` 条件的更新，与取消提交竞争；只有一个更新能成功，避免“已完成但仍请求取消”的矛盾状态。
-
-### 失败与重试
-
-真实异常或测试用的显式失败模式把任务设为 `FAILED`，记录错误代码、用户可读消息和阶段错误。只有 `FAILED`/`INTERRUPTED` 可重试；重试清理当前运行字段、`attempt + 1`、重新入队，但保留旧阶段记录与原始快照。
-
-### 重启恢复
-
-FastAPI 启动 Worker 前，将遗留的 `PROCESSING` 任务和正在运行的阶段标记为 `INTERRUPTED`，错误代码为 `backend_restart`。它不会猜测任务已完成，也不会自动重放有副作用的阶段；用户可显式重试。`QUEUED`、`COMPLETED`、`FAILED`、`CANCELLED` 保持不变。
-
-## 9. 模拟 Pipeline 与工作区
-
-模拟阶段为：
+## 2. 总体结构
 
 ```text
-PREPARING → EXTRACTING → ASR_PROCESSING
-→ [OCR_PROCESSING，仅 OCR 开启]
-→ TEXT_PROCESSING → GENERATING_OUTPUT → COMPLETED
+React / TypeScript
+   │ REST + SSE
+   ▼
+FastAPI API
+   ▼
+TaskService ── Repository ── SQLite
+   │
+   ▼
+SerialQueueWorker (1)
+   ▼
+Pipeline dispatcher
+   ├── SimulatedPipelineRunner（仅显式测试兼容模式）
+   └── RealPipelineRunner
+         ├── MediaSourceResolver
+         │     ├── LocalFileSource
+         │     └── YtDlpSource
+         ├── FfprobeProvider
+         ├── FfmpegProvider
+         ├── AudioChunker
+         ├── AudioChunker + StructuredOverlapMerger
+         ├── DashScopeFunAsrProvider ── DashScope WebSocket
+         └── UnifiedAsrGatewayProvider
+                ├── FireRedASR2-AED :8101
+                ├── Qwen3-ASR + ForcedAligner :8102
+                └── faster-whisper :8103
+
+GatewayService ── gateway_configs / gateway_models
+       └── ASR 与 OCR 各自拥有协议、健康检查、模型发现和密钥引用
+
+OneAPI ── 仅后续文本处理模型
 ```
 
-它们仅休眠并持久化进度。每个任务创建带 UTC 时间戳、安全标题和任务 ID 的目录，包含 `00_source` 至 `05_output`、日志、`task_config.json` 和 `task_state.json`。完成时生成一份明确声明“未处理媒体、未调用模型”的模拟 Markdown，工作区保留副本，并以不覆盖同名文件的方式复制到 Inbox。资料目录不会复制到 Inbox。
+真实 Provider 不引用 FastAPI 路由或前端类型。Pipeline 负责阶段编排和持久化，Provider 只负责外部能力及标准化输入输出。
 
-## 10. API 组织
+## 3. 输入与媒体来源
 
-所有业务 API 位于 `/api/v1`：
+`MediaSourceResolver` 是唯一输入分类边界：
 
-- `GET /health`
-- `/models` CRUD 与 `GET /models/capabilities`
-- `/profiles` CRUD
-- `GET/PUT /settings`
-- `POST/GET /tasks`、`GET /tasks/{id}`、`POST .../cancel`、`POST .../retry`
-- `GET /tasks/{id}/snapshot`
-- `GET /queue`
-- `GET /events`（SSE）
+- URL 只允许 HTTP/HTTPS，拒绝内嵌用户名和密码，交给 yt-dlp。
+- 本地文件必须是存在的绝对文件路径，拒绝目录和 NUL 字符。
+- 本地文件采用只读引用策略，工作区记录规范化路径和大小，不复制原文件。
+- URL 下载到 `00_source/media`。
+- 扩展名仅作界面提示；最终媒体有效性、音视频流和容器以 ffprobe 为准。
 
-FastAPI 自动生成 `/docs` OpenAPI 页面。业务错误格式为 `{"error":{"code":"...","message":"..."}}`。
+统一 `MediaAcquisitionResult` 包含 `source_type`、`original_input`、`local_media_path`、`title`、`duration`、`container`、`has_audio`、`has_video`、`metadata_path` 和 `provider`。
 
-## 11. 技术选择
+## 4. 异步外部进程执行器
 
-- FastAPI/Pydantic：类型清晰、自动 OpenAPI、适合本地异步生命周期。
-- SQLAlchemy 2 + Alembic：模型和迁移职责分离，未来可演进 schema。
-- SQLite：单用户、单机、串行队列无需额外服务，部署最简单。
-- asyncio Worker + 同步短事务：任务调度简单可测，避免引入 Celery/Redis。
-- React/TypeScript/Vite：小型可维护 SPA；本轮不引入额外状态框架。
-- SSE：单向状态变化足够，复杂度低于 WebSocket，避免高频轮询。
-- JSON 快照 + 明确 schema version：保留完整历史，并为未来升级提供版本边界。
+`ExternalProcessRunner` 被 yt-dlp、ffprobe、FFmpeg 和分块器复用：
 
-## 12. 已知边界与后续真实 Pipeline
+- 使用 `asyncio.create_subprocess_exec` 和参数列表，不经过 shell。
+- 并发持续读取 stdout/stderr，逐行落盘并可触发进度回调。
+- 以短轮询检查数据库取消标记、超时和后端关闭。
+- stdout/stderr reader 与进程 wait 并行，避免管道缓冲区阻塞。
+- 日志命令行会隐藏密码参数、URL 用户信息和查询参数。
+- 非零退出码变成结构化错误，不静默忽略 stderr。
 
-当前 Worker 只支持单后端进程；SQLite 不作为媒体存储；SSE 目前推送轻量任务列表而非可重放事件日志；本轮没有操作系统文件夹选择和打开文件接口。模拟阶段名称与未来真实能力概念对应，但没有伪造任何识别结果。
+Windows 子进程使用新进程组启动。取消/超时/关机时，`PlatformProcessTreeTerminator` 使用 `taskkill /PID <pid> /T /F` 清理完整树，再以 `process.kill()` 作为父进程兜底。终止逻辑通过 `ProcessTreeTerminator` Protocol 可替换测试，不散落在业务 Provider 中。
 
-下一阶段接入真实媒体时，应先定义 `MediaDownloader`、`AudioExtractor`、`ASRProvider`、`OCRProvider`、`TextModelProvider`、`OutputWriter` 和 Windows 子进程管理器。Provider 的输入输出、阶段产物和取消契约必须独立于 API/Worker；真实能力不得直接写进路由或替换快照规则。
+全局 `ProcessRegistry` 跟踪当前子进程；FastAPI 关闭时 Worker 先调用 `shutdown_all()`，再等待 runner 结束。HTTP ASR 协程也观察同一关闭信号并取消请求。
+
+## 5. 媒体 Provider
+
+### yt-dlp
+
+第一步用 `--dump-single-json --no-playlist` 获取元数据；第二步用 `--newline` 下载。下载输出模板固定在工作区，`after_move` 标记返回最终文件路径。下载进度解析 `[download] xx%`，原始元数据、stdout 和 stderr 分别保存。
+
+采用外部可执行文件而不是 Python 内嵌包，是为了统一取消、超时、进程树、流式日志和部署检查；仓库不提交可执行文件。
+
+### ffprobe
+
+以 JSON 读取容器、时长、全部音频/视频流、codec、采样率、声道、分辨率和帧率。原媒体与标准化音频的原始探测 JSON 分开保存。第一版选择索引最小的第一条音频流，并把选择写入标准化对象。
+
+### FFmpeg
+
+明确指定所选音频流，生成 `pcm_s16le`、16 kHz、单声道 WAV。用 `.part.wav` 写入，成功且再次 ffprobe 验证后才原子改名。进度来自 `-progress pipe:1` 的 `out_time` 与媒体时长。无音频流直接报 `NO_AUDIO_STREAM`，不会生成伪造空音频。
+
+## 6. ASR 与分块
+
+`AudioChunker` 使用模型能力上限、确定性文件名、全局偏移和默认 5 秒重叠：
+
+```text
+chunk_0000.wav: [0, 60)
+chunk_0001.wav: [55, 115)
+chunk_0002.wav: [110, 170)
+...
+```
+
+离线模型统一 `step_seconds = chunk_seconds - 5`，最后一块允许不足完整长度。块长由 `GatewayModel` 的 `max_chunk_seconds`、`max_alignment_seconds`、`supports_native_long_audio` 和 `supports_streaming` 决定。manifest 记录每块源起止、前后重叠、路径、Provider、模型、attempt 和状态。
+
+`UnifiedAsrGatewayProvider` 向独立 Gateway 的 `/v1/asr/transcriptions` 提交 WAV；`DashScopeFunAsrProvider` 用单一 WebSocket 连续发送 PCM，完成后只接受最终句子。连续 Fun-ASR 会话的重叠为 0，不重复发送音频。Base URL、协议、模型、能力、超时、重试和密钥环境变量名称来自不可变任务快照。
+
+Provider 对超时、网络错误、429 和 5xx 做有限指数退避；401/403 映射为认证错误，其他 4xx 不自动重试。取消后不会提交新分块，已取消请求的晚到结果不会持久化。
+
+标准 `AsrSegment` 还包含结构化 words：
+
+```text
+segment_id, start_time, end_time, text, confidence,
+language, provider, model, chunk_index, raw_response_reference, words
+```
+
+Provider 未返回置信度或时间戳时字段保持 `null`。局部 segment/word 时间戳仅在存在时加上 chunk 全局偏移，不伪造数据。合并先在重叠窗口用时间戳和规范化文本去重；只有词级时间戳时可裁掉已确认的重复词。同一源时间窗内足够长的词前缀即使有少量 ASR 拼写漂移，也可用规范化相似度确定消重，但最后一个匹配块之后的未匹配边缘词必须保留，避免前一块漏词。短而相似、语义不确定的内容保留并写 `boundary_conflict_retained` 诊断；若两条保留内容的词时间互相矛盾，只把冲突词时间置 `null` 并收窄 SRT segment 到下一段可靠时间，不删除文本也不编造时间。最终结果按全局时间排序，TXT、SRT 和 normalized JSON 使用同一结构化 segment 集合。
+
+## 7. Pipeline 阶段和进度
+
+```text
+INPUT_VALIDATE (0-5)
+MEDIA_ACQUIRE (5-20)
+MEDIA_PROBE (20-28)
+AUDIO_EXTRACT (28-43)
+AUDIO_VALIDATE (43-47)
+AUDIO_CHUNK (47-55)
+ASR_TRANSCRIBE (55-88)
+ASR_COMBINE (88-96)
+ASR_VALIDATE (96-100)
+```
+
+括号是总进度映射范围。每个 `task_stage_runs` 行保存 attempt、状态、阶段百分比、用户消息、技术错误、输入/输出产物和日志路径。下载、FFmpeg、分块和 ASR 使用真实比例；探测等不可精确计量步骤使用阶段状态。
+
+更新通过短 SQLAlchemy 事务写入 `tasks` 和 `task_stage_runs`，同步 `task_state.json`，SSE 从数据库读出状态。任何 Provider 都不会直接发布 SSE。
+
+## 8. 工作区与原始数据
+
+`WorkspacePaths` 集中生成所有路径，Provider 不拼接任务根目录。工作区沿用 PRD 的 `00_source` 到 `05_output`，并在其内细分 media、metadata、audio、chunks、provider_raw、logs 和 intermediate。
+
+写 JSON 使用同目录临时文件后原子替换。媒体和音频使用 `.part` 文件。产物完成后生成 `artifacts.json`。ASR Provider 原始响应按 `attempt_0001` 隔离；`raw.json` 是原始响应索引，`normalized.json` 是版本化标准数据，另存 `raw.txt`、`raw.srt` 和 `preview.json`。
+
+SQLite 的任务行只保存 `media_info_path`、`transcript_path` 和 `artifacts_index_path`，不保存大型响应。
+
+## 9. 取消、失败、重试和恢复
+
+取消竞态继续使用第一轮规则：完成更新带 `status=PROCESSING AND cancel_requested=false` 条件；取消与完成只能有一个最终赢家。
+
+真实 runner 把错误保存为：机器码、用户消息、技术详情、阶段、可重试语义和日志路径。错误码覆盖输入、yt-dlp、ffprobe、FFmpeg、无音频、超时、取消、ASR 配置/认证/限流/超时/Provider 和工作区问题。
+
+重试复用原快照并增加 attempt。有效的获取结果、探测、标准音频和 chunk manifest 可复用；ASR 会搜索前一 attempt 已成功的同索引原始响应，避免重复收费。缺失或不完整产物重新执行，`.part` 文件永不复用。
+
+异常后端退出仍由启动恢复统一变成 `INTERRUPTED`，不会自动重放有外部副作用的阶段。
+
+## 10. 数据库迁移
+
+`0005_independent_model_gateways` 在 `0004` 之后新增：
+
+- `gateway_configs`：类型、协议、Base URL、密钥环境变量名称、健康状态与设置
+- `gateway_models`：Gateway 引用、模型名、分块/对齐上限、流式与时间戳等能力
+- `processing_profiles.asr_gateway_model_id`
+- `processing_profiles.ocr_gateway_model_id`
+
+旧任务快照仍可由兼容 Provider 执行；新快照版本为 3，数据库与快照都只保存密钥环境变量名称。
+
+## 11. API 与前端
+
+原任务 API 保持兼容。真实任务选择 `asr_gateway_model_id`，处理方案分别引用 ASR/OCR Gateway 模型；模拟模式仍供显式自动化兼容测试。
+
+新增 Gateway CRUD、健康检查、模型发现和 Gateway 模型 API。前端 Gateway 页分别管理 ASR/OCR 连接；模型页只保留 OneAPI 文本/视觉模型；处理方案和新任务页选择独立 Gateway 模型。SSE 和 REST 回退没有改变。
+
+## 12. 安全边界
+
+- API Key 值不进入请求响应、SQLite、快照、日志或测试 fixture；仅保存环境变量名称。
+- 外部命令不用 shell，不拼接用户输入。
+- URL 拒绝内嵌凭据，命令展示隐藏 URL 查询参数。
+- 本地输入只读，拒绝目录、相对路径和不存在文件。
+- 前端不显示完整敏感日志；任务 API 只返回产物相对路径和大小。
+- 原始 ASR 响应保存前递归隐藏常见 token/key 字段。
+
+## 13. 已知边界
+
+- 固定时长分块尚未做静音边界检测。
+- 当前只支持一个后端实例和单任务执行。
+- 浏览器没有原生绝对路径选择器，当前使用路径输入。
+- SSE 不是可重放事件日志。
+- URL 下载成功仍依赖站点和本机 yt-dlp 版本。
+- OCR Gateway 当前只有完整抽象与 mock，没有宣称真实 OCR 部署。
+- 本地大模型是否可运行取决于 GPU 显存、驱动、WSL 内存与具体依赖，按需单模型驻留。

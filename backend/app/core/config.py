@@ -30,6 +30,12 @@ class Settings:
     cors_origins: tuple[str, ...]
     log_level: str
     simulation_step_seconds: float
+    process_poll_seconds: float
+    media_process_timeout_seconds: float
+    asr_request_timeout_seconds: float
+    asr_max_retries: int
+    audio_chunk_seconds: float
+    asr_overlap_seconds: float
 
 
 @lru_cache
@@ -51,5 +57,21 @@ def get_settings() -> Settings:
         log_level=os.getenv("VIDEO2DOC_LOG_LEVEL", "INFO").upper(),
         simulation_step_seconds=max(
             0.001, float(os.getenv("VIDEO2DOC_SIMULATION_STEP_SECONDS", "0.20"))
+        ),
+        process_poll_seconds=max(
+            0.02, float(os.getenv("VIDEO2DOC_PROCESS_POLL_SECONDS", "0.20"))
+        ),
+        media_process_timeout_seconds=max(
+            1.0, float(os.getenv("VIDEO2DOC_MEDIA_TIMEOUT_SECONDS", "3600"))
+        ),
+        asr_request_timeout_seconds=max(
+            1.0, float(os.getenv("VIDEO2DOC_ASR_TIMEOUT_SECONDS", "300"))
+        ),
+        asr_max_retries=max(0, int(os.getenv("VIDEO2DOC_ASR_MAX_RETRIES", "2"))),
+        audio_chunk_seconds=max(
+            30.0, float(os.getenv("VIDEO2DOC_AUDIO_CHUNK_SECONDS", "60"))
+        ),
+        asr_overlap_seconds=max(
+            0.0, float(os.getenv("VIDEO2DOC_ASR_OVERLAP_SECONDS", "5"))
         ),
     )
