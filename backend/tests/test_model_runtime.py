@@ -18,6 +18,34 @@ def load_runtime(monkeypatch) -> ModuleType:
     return module
 
 
+def load_ocr_runtime() -> ModuleType:
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "model_runtime"
+        / "ocr_gateway_service.py"
+    )
+    spec = importlib.util.spec_from_file_location("video2doc_test_ocr_runtime", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_ocr_runtime_startup_removes_only_its_stale_uploads(tmp_path: Path) -> None:
+    module = load_ocr_runtime()
+    temp_dir = tmp_path / "temp"
+    temp_dir.mkdir()
+    stale = temp_dir / "video2doc-ocr-stale.jpg"
+    unrelated = temp_dir / "unrelated.jpg"
+    stale.write_bytes(b"partial")
+    unrelated.write_bytes(b"keep")
+
+    assert module.cleanup_stale_uploads(tmp_path) == 1
+    assert not stale.exists()
+    assert unrelated.read_bytes() == b"keep"
+
+
 def test_local_gateway_health_transcription_and_cancel(monkeypatch) -> None:
     module = load_runtime(monkeypatch)
     with TestClient(module.app) as client:

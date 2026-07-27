@@ -3,9 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.providers.asr import AsrResult, AsrSegment
+from app.providers.frames import FrameExtractionResult, FrameRecord
 from app.providers.media import MediaInfo, MediaStream
+from app.providers.ocr import OcrBlock, OcrResult
+from app.providers.ocr_timeline import OcrRunResult
+from app.storage.workspace import write_json
 from tests.helpers import wait_for_status
 
 
@@ -147,3 +152,237 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
     assert any(item["path"] == "02_asr/normalized.json" for item in artifacts)
     snapshot_text = str(client.get(f"/api/v1/tasks/{task_id}/snapshot").json())
     assert "integration-secret" not in snapshot_text
+
+
+def test_database_worker_runs_ocr_fusion_stages_and_serves_traceable_artifacts(
+    client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "ocr-fusion.mp4"
+    source.write_bytes(b"controlled-video-source")
+    asr_gateway = client.post(
+        "/api/v1/gateways",
+        json={
+            "name": "integration-fusion-asr",
+            "gateway_type": "ASR",
+            "protocol": "video2doc-asr-http-v1",
+            "base_url": "http://127.0.0.1:18112",
+        },
+    ).json()
+    asr_model = client.post(
+        "/api/v1/gateway-models",
+        json={
+            "gateway_id": asr_gateway["id"],
+            "model_name": "integration-fusion-asr",
+            "display_name": "Integration Fusion ASR",
+            "max_chunk_seconds": 30,
+            "supports_segment_timestamps": True,
+        },
+    ).json()
+    ocr_gateway = client.post(
+        "/api/v1/gateways",
+        json={
+            "name": "integration-fusion-ocr",
+            "gateway_type": "OCR",
+            "protocol": "video2doc-ocr-http-v1",
+            "base_url": "http://127.0.0.1:18212",
+        },
+    ).json()
+    ocr_model = client.post(
+        "/api/v1/gateway-models",
+        json={
+            "gateway_id": ocr_gateway["id"],
+            "model_name": "PP-OCRv5_server",
+            "display_name": "Integration PP-OCRv5",
+            "supports_confidence": True,
+            "languages": ["ch", "en"],
+        },
+    ).json()
+    profile = client.post(
+        "/api/v1/profiles",
+        json={
+            "name": "integration-ocr-fusion",
+            "asr_gateway_model_id": asr_model["id"],
+            "ocr_gateway_model_id": ocr_model["id"],
+            "ocr_enabled": True,
+        },
+    ).json()
+
+    async def fake_probe(self, media_path, paths, *, cancel_check, artifact_name="ffprobe"):
+        return media_info(
+            paths.metadata / f"{artifact_name}.json", video=Path(media_path) == source
+        )
+
+    async def fake_normalize(
+        self, media_path, probed, paths, *, cancel_check, progress
+    ):
+        output = paths.audio / "normalized.wav"
+        output.write_bytes(b"RIFF" + b"0" * 100)
+        progress(1.0, "controlled audio complete")
+        return output, media_info(
+            paths.metadata / "ffprobe_normalized_audio.json", video=False
+        )
+
+    async def fake_transcribe(self, request, paths, *, cancel_check):
+        raw_path = paths.asr_raw / f"chunk_{request.chunk.index:04d}.json"
+        write_json(
+            raw_path,
+            {
+                "language": "zh",
+                "segments": [{"start": 0.5, "end": 2.0, "text": "画面标题"}],
+            },
+        )
+        return AsrResult(
+            provider=self.name,
+            model=request.model,
+            language="zh",
+            chunk_index=request.chunk.index,
+            raw_response_reference=str(raw_path),
+            segments=(
+                AsrSegment(
+                    segment_id="local",
+                    start_time=0.5,
+                    end_time=2.0,
+                    text="画面标题",
+                    confidence=0.91,
+                    language="zh",
+                    provider=self.name,
+                    model=request.model,
+                    chunk_index=request.chunk.index,
+                    raw_response_reference=str(raw_path),
+                ),
+            ),
+        )
+
+    async def fake_extract(
+        self, media_path, *, duration, paths, config, cancel_check, progress
+    ):
+        original = paths.frame_candidates / "frame_000000.jpg"
+        normalized = paths.frame_normalized / "frame_000000.jpg"
+        Image.new("RGB", (640, 360), "white").save(original)
+        Image.new("RGB", (640, 360), "white").save(normalized)
+        record = FrameRecord(
+            frame_id="frame_000000",
+            media_timestamp=1.0,
+            extraction_reason="scene_change",
+            original_frame_path=str(original),
+            normalized_image_path=str(normalized),
+            width=640,
+            height=360,
+            file_size=normalized.stat().st_size,
+            sha256="controlled-frame-sha",
+            perceptual_hash="0000000000000000",
+            scene_change_score=0.8,
+        )
+        manifest = paths.frames / "manifest.json"
+        write_json(
+            manifest,
+            {
+                "schema_version": 1,
+                "candidate_count": 1,
+                "kept_count": 1,
+                "dropped_count": 0,
+                "drop_reasons": {},
+                "frames": [record.to_dict()],
+            },
+        )
+        progress(1.0, "controlled frame complete")
+        return FrameExtractionResult((record,), str(manifest), "controlled")
+
+    async def fake_ocr(
+        frames,
+        *,
+        ocr_config,
+        attempt,
+        paths,
+        cancel_check,
+        progress,
+    ):
+        frame = frames.kept[0]
+        raw = paths.ocr_raw / f"attempt_{attempt:04d}" / f"{frame.frame_id}.json"
+        write_json(raw, {"provider": "controlled-ocr", "text": "画面标题"})
+        result = OcrResult(
+            provider="controlled-ocr",
+            model=ocr_config["model"],
+            text="画面标题",
+            blocks=(
+                OcrBlock(
+                    text="画面标题",
+                    bounding_box=(10.0, 10.0, 300.0, 60.0),
+                    confidence=0.98,
+                    reading_order=0,
+                ),
+            ),
+            raw_response_reference=str(raw),
+            frame_id=frame.frame_id,
+            media_timestamp=frame.media_timestamp,
+            language="ch",
+            elapsed_seconds=0.01,
+        )
+        normalized = paths.ocr / "normalized.json"
+        raw_index = paths.ocr / "raw.json"
+        preview = paths.ocr / "preview.json"
+        write_json(normalized, {"schema_version": 1, "frames": [result.to_dict()]})
+        write_json(raw_index, {"schema_version": 1, "provider_responses": [str(raw)]})
+        write_json(preview, {"frame_count": 1, "block_count": 1, "text": "画面标题"})
+        progress(1.0, "controlled OCR complete")
+        return OcrRunResult(
+            (result,),
+            str(normalized),
+            str(raw_index),
+            str(preview),
+            1,
+            0,
+            0.01,
+        )
+
+    monkeypatch.setattr("app.pipeline.real.FfprobeProvider.probe", fake_probe)
+    monkeypatch.setattr("app.pipeline.real.FfmpegProvider.normalize_audio", fake_normalize)
+    monkeypatch.setattr(
+        "app.pipeline.real.UnifiedAsrGatewayProvider.transcribe", fake_transcribe
+    )
+    monkeypatch.setattr(
+        "app.pipeline.real.VideoFrameExtractor.extract", fake_extract
+    )
+    monkeypatch.setattr("app.pipeline.real.recognize_retained_frames", fake_ocr)
+
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "pipeline_mode": "REAL",
+            "inputs": [{"source": str(source), "source_type": "LOCAL_FILE"}],
+            "profile_id": profile["id"],
+            "config_overrides": {"audio_chunk_seconds": 600},
+        },
+    )
+    assert created.status_code == 201, created.text
+    task_id = created.json()[0]["id"]
+    completed = wait_for_status(client, task_id, {"COMPLETED"})
+    assert completed["frame_summary"]["kept_count"] == 1
+    assert completed["ocr_preview"]["block_count"] == 1
+    assert completed["fusion_preview"]["counts"] == {
+        "asr_segment": 1,
+        "ocr_event": 1,
+        "frame_event": 1,
+    }
+    assert [stage["stage"] for stage in completed["stages"]][-6:] == [
+        "FRAME_EXTRACT",
+        "FRAME_DEDUP",
+        "OCR_RECOGNIZE",
+        "OCR_TIMELINE",
+        "FUSION_BUILD",
+        "FUSION_VALIDATE",
+    ]
+    assert client.get(f"/api/v1/tasks/{task_id}/frames").status_code == 200
+    assert client.get(f"/api/v1/tasks/{task_id}/ocr").status_code == 200
+    timeline = client.get(f"/api/v1/tasks/{task_id}/timeline")
+    assert timeline.status_code == 200
+    assert timeline.json()["counts"]["ocr_event"] == 1
+    artifact = client.get(
+        f"/api/v1/tasks/{task_id}/artifacts/01_extract/frames/normalized/frame_000000.jpg"
+    )
+    assert artifact.status_code == 200
+    assert artifact.content.startswith(b"\xff\xd8")
+    traversal = client.get(
+        f"/api/v1/tasks/{task_id}/artifacts/%2E%2E/%2E%2E/task_config.json"
+    )
+    assert traversal.status_code == 404
