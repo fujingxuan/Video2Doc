@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, Query, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -138,7 +138,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="0.2.0",
+        version="0.3.0",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -250,6 +250,29 @@ def get_task_transcript(task_id: int, session: Session = Depends(get_db)) -> dic
 @router.get("/tasks/{task_id}/artifacts", response_model=list[dict], tags=["tasks"])
 def get_task_artifacts(task_id: int, session: Session = Depends(get_db)) -> list[dict]:
     return TaskService(session).artifacts(task_id)
+
+
+@router.get("/tasks/{task_id}/frames", response_model=dict, tags=["tasks"])
+def get_task_frames(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session).frames(task_id)
+
+
+@router.get("/tasks/{task_id}/ocr", response_model=dict, tags=["tasks"])
+def get_task_ocr(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session).ocr(task_id)
+
+
+@router.get("/tasks/{task_id}/timeline", response_model=dict, tags=["tasks"])
+def get_task_timeline(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session).fusion(task_id)
+
+
+@router.get("/tasks/{task_id}/artifacts/{artifact_path:path}", tags=["tasks"])
+def get_task_artifact(
+    task_id: int, artifact_path: str, session: Session = Depends(get_db)
+) -> FileResponse:
+    path = TaskService(session).artifact_path(task_id, artifact_path)
+    return FileResponse(path, filename=path.name)
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=TaskRead, tags=["tasks"])

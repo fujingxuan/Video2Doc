@@ -417,6 +417,40 @@ def seed_default_gateways(session: Session) -> None:
             },
             "models": [],
         },
+        {
+            "name": "local-paddleocr",
+            "gateway_type": "OCR",
+            "protocol": "video2doc-ocr-http-v1",
+            "base_url": "http://127.0.0.1:8201",
+            "enabled": True,
+            "settings": {
+                "deployment_status": "optional_local_runtime",
+                "timeout_seconds": 180,
+                "max_retries": 1,
+                "runtime": "paddleocr",
+            },
+            "models": [
+                {
+                    "model_name": "PP-OCRv5_server",
+                    "display_name": "PP-OCRv5 Server (Chinese/English)",
+                    "supports_confidence": True,
+                    "supports_language_detection": False,
+                    "languages": ["ch", "en"],
+                    "settings": {
+                        "default_language": "ch",
+                        "device": "cpu",
+                    },
+                    "capabilities": {
+                        "local": True,
+                        "text_blocks": True,
+                        "bounding_boxes": True,
+                        "polygons": True,
+                        "reading_order": True,
+                        "raw_response": True,
+                    },
+                }
+            ],
+        },
     ]
     existing_gateways = {
         item.name: item

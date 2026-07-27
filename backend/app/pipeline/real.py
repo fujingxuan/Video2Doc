@@ -29,6 +29,8 @@ from app.providers.asr import (
     save_transcript_artifacts,
     validate_segments,
 )
+from app.providers.frames import FrameExtractionConfig, VideoFrameExtractor
+from app.providers.fusion import build_fusion_timeline, save_fusion_artifacts
 from app.providers.media import (
     FfmpegProvider,
     FfprobeProvider,
@@ -39,6 +41,11 @@ from app.providers.media import (
     classify_input,
 )
 from app.providers.process import process_registry
+from app.providers.ocr_timeline import (
+    build_ocr_timeline,
+    recognize_retained_frames,
+    save_ocr_timeline,
+)
 from app.storage.workspace import (
     WorkspacePaths,
     append_task_log,
@@ -53,15 +60,21 @@ logger = logging.getLogger(__name__)
 
 
 STAGE_RANGES: dict[str, tuple[int, int]] = {
-    "INPUT_VALIDATE": (0, 5),
-    "MEDIA_ACQUIRE": (5, 20),
-    "MEDIA_PROBE": (20, 28),
-    "AUDIO_EXTRACT": (28, 43),
-    "AUDIO_VALIDATE": (43, 47),
-    "AUDIO_CHUNK": (47, 55),
-    "ASR_TRANSCRIBE": (55, 88),
-    "ASR_COMBINE": (88, 96),
-    "ASR_VALIDATE": (96, 100),
+    "INPUT_VALIDATE": (0, 3),
+    "MEDIA_ACQUIRE": (3, 12),
+    "MEDIA_PROBE": (12, 18),
+    "AUDIO_EXTRACT": (18, 30),
+    "AUDIO_VALIDATE": (30, 33),
+    "AUDIO_CHUNK": (33, 38),
+    "ASR_TRANSCRIBE": (38, 58),
+    "ASR_COMBINE": (58, 63),
+    "ASR_VALIDATE": (63, 66),
+    "FRAME_EXTRACT": (66, 75),
+    "FRAME_DEDUP": (75, 79),
+    "OCR_RECOGNIZE": (79, 91),
+    "OCR_TIMELINE": (91, 95),
+    "FUSION_BUILD": (95, 99),
+    "FUSION_VALIDATE": (99, 100),
 }
 
 
@@ -491,12 +504,227 @@ async def run_real_pipeline(task_id: int) -> None:
             input_artifacts=[artifacts["normalized"]],
         )
         validate_segments(segments)
-        artifact_index = write_artifact_index(workspace)
+        ocr_enabled = bool(snapshot.get("processing", {}).get("ocr_enabled"))
+        if not ocr_enabled:
+            artifact_index = write_artifact_index(workspace)
+            tracker.complete(
+                message="真实媒体与 ASR 核心链路完成；任务快照未启用 OCR",
+                output_artifacts=[
+                    artifacts["normalized"],
+                    artifacts["preview"],
+                    str(artifact_index),
+                ],
+            )
+            _complete_task(
+                task_id,
+                artifacts["preview"],
+                artifacts["normalized"],
+                artifact_index,
+            )
+            return
         tracker.complete(
-            message="真实媒体与 ASR 核心链路完成",
-            output_artifacts=[artifacts["normalized"], artifacts["preview"], str(artifact_index)],
+            message="标准化 ASR 结果有效，继续执行 OCR 分支",
+            output_artifacts=[artifacts["normalized"], artifacts["preview"]],
         )
-        _complete_task(task_id, artifacts["preview"], artifacts["normalized"], artifact_index)
+        if not media_info.has_video or media_info.duration is None:
+            raise PipelineError(
+                "NO_VIDEO_STREAM",
+                "任务启用了 OCR，但媒体中没有可用视频流或可靠时长",
+            )
+
+        processing = snapshot.get("processing", {})
+        frame_config = FrameExtractionConfig(
+            strategy=str(processing.get("frame_sampling_strategy") or "hybrid"),
+            interval_seconds=float(
+                processing.get("ocr_frame_interval_seconds", 15.0)
+            ),
+            scene_change_threshold=float(
+                processing.get("scene_change_threshold", 0.35)
+            ),
+            scene_min_gap_seconds=float(processing.get("scene_min_gap_seconds", 1.5)),
+            max_candidate_frames=int(processing.get("max_candidate_frames", 240)),
+            normalized_max_width=int(
+                processing.get("frame_normalized_max_width", 1600)
+            ),
+            perceptual_hamming_threshold=int(
+                processing.get("frame_similarity_hamming_threshold", 4)
+            ),
+            visual_difference_threshold=float(
+                processing.get("frame_similarity_difference_threshold", 0.025)
+            ),
+            transition_burst_seconds=float(
+                processing.get("frame_transition_burst_seconds", 3.0)
+            ),
+        )
+        tracker.start(
+            "FRAME_EXTRACT",
+            message="正在按媒体时间轴抽取固定间隔与画面变化候选帧",
+            input_artifacts=[acquisition.local_media_path],
+            log_path=str(paths.logs / "ffmpeg_frames.stderr.log"),
+        )
+        frame_result = await VideoFrameExtractor(ffmpeg_executable).extract(
+            Path(acquisition.local_media_path),
+            duration=media_info.duration,
+            paths=paths,
+            config=frame_config,
+            cancel_check=cancelled,
+            progress=tracker.progress,
+        )
+        with SessionLocal() as session:
+            db_task = session.get(Task, task_id)
+            if db_task:
+                db_task.frames_manifest_path = frame_result.manifest_path
+                session.commit()
+        tracker.complete(
+            message=f"抽取候选帧 {len(frame_result.records)} 个",
+            output_artifacts=[frame_result.manifest_path],
+        )
+
+        tracker.start(
+            "FRAME_DEDUP",
+            message="正在验证画面变化与感知相似度去重决策",
+            input_artifacts=[frame_result.manifest_path],
+        )
+        if not frame_result.kept:
+            raise PipelineError("OCR_NO_FRAMES", "候选帧去重后没有可用于 OCR 的画面")
+        timestamps = [item.media_timestamp for item in frame_result.records]
+        if timestamps != sorted(timestamps):
+            raise PipelineError("FRAME_TIMESTAMP_INVALID", "候选帧时间戳顺序不稳定")
+        tracker.progress(
+            1.0,
+            f"保留 {len(frame_result.kept)} 帧，去重 {frame_result.dropped_count} 帧",
+        )
+        tracker.complete(
+            message=f"画面去重完成：保留 {len(frame_result.kept)}，"
+            f"丢弃 {frame_result.dropped_count}",
+            output_artifacts=[
+                item.normalized_image_path for item in frame_result.kept
+            ],
+        )
+
+        ocr_config = snapshot.get("ocr")
+        if not isinstance(ocr_config, dict):
+            raise PipelineError("OCR_CONFIG_INVALID", "任务快照中没有 OCR Gateway 配置")
+        tracker.start(
+            "OCR_RECOGNIZE",
+            message="正在通过独立 OCR Gateway 识别保留帧",
+            input_artifacts=[
+                item.normalized_image_path for item in frame_result.kept
+            ],
+        )
+        ocr_run = await recognize_retained_frames(
+            frame_result,
+            ocr_config=ocr_config,
+            attempt=attempt,
+            paths=paths,
+            cancel_check=cancelled,
+            progress=tracker.progress,
+        )
+        tracker.complete(
+            message=f"OCR 完成 {ocr_run.processed_count} 帧，"
+            f"复用 {ocr_run.reused_count} 帧",
+            output_artifacts=[
+                ocr_run.raw_index_path,
+                ocr_run.normalized_path,
+                ocr_run.preview_path,
+            ],
+        )
+
+        tracker.start(
+            "OCR_TIMELINE",
+            message="正在按图像、文本、空间位置和时间建立 OCR 稳定事件",
+            input_artifacts=[ocr_run.normalized_path, frame_result.manifest_path],
+        )
+        ocr_timeline = build_ocr_timeline(
+            ocr_run.results,
+            frame_result,
+            text_similarity_threshold=float(
+                processing.get("ocr_text_similarity_threshold", 0.88)
+            ),
+            incremental_similarity_threshold=float(
+                processing.get("ocr_incremental_similarity_threshold", 0.55)
+            ),
+            max_event_gap_seconds=float(
+                processing.get("ocr_event_gap_seconds", 20.0)
+            ),
+        )
+        ocr_timeline_path = save_ocr_timeline(paths, ocr_timeline)
+        with SessionLocal() as session:
+            db_task = session.get(Task, task_id)
+            if db_task:
+                db_task.ocr_timeline_path = ocr_timeline_path
+                session.commit()
+        tracker.progress(1.0, f"生成 {ocr_timeline['event_count']} 个 OCR 事件")
+        tracker.complete(
+            message=f"OCR 时间线完成，合并 "
+            f"{ocr_timeline['merged_observation_count']} 个稳定重复观察",
+            output_artifacts=[ocr_timeline_path],
+        )
+
+        tracker.start(
+            "FUSION_BUILD",
+            message="正在保留来源差异并关联临近 ASR/OCR/帧事件",
+            input_artifacts=[
+                artifacts["normalized"],
+                ocr_timeline_path,
+                frame_result.manifest_path,
+            ],
+        )
+        asr_payload = read_json(Path(artifacts["normalized"]))
+        frame_payload = read_json(Path(frame_result.manifest_path))
+        if asr_payload is None or frame_payload is None:
+            raise PipelineError("FUSION_INPUT_INVALID", "无法读取融合输入产物")
+        fusion_payload = build_fusion_timeline(
+            asr_payload,
+            ocr_timeline,
+            frame_payload,
+            media_duration=media_info.duration,
+            association_window_seconds=float(
+                processing.get("fusion_window_seconds", 8.0)
+            ),
+        )
+        fusion_artifacts = save_fusion_artifacts(
+            paths,
+            fusion_payload,
+            asr_path=artifacts["normalized"],
+            ocr_path=ocr_timeline_path,
+            frames_path=frame_result.manifest_path,
+        )
+        tracker.progress(1.0, f"统一时间线包含 {fusion_payload['event_count']} 个事件")
+        tracker.complete(
+            message="ASR、OCR 与帧事件已按媒体时间排序并建立关联",
+            output_artifacts=list(fusion_artifacts.values()),
+        )
+
+        tracker.start(
+            "FUSION_VALIDATE",
+            message="正在验证融合时间、来源引用和产物完整性",
+            input_artifacts=[fusion_artifacts["timeline"]],
+        )
+        artifact_index = write_artifact_index(workspace)
+        with SessionLocal() as session:
+            db_task = session.get(Task, task_id)
+            if db_task:
+                db_task.fusion_timeline_path = fusion_artifacts["timeline"]
+                db_task.artifacts_index_path = str(artifact_index)
+                session.commit()
+        tracker.complete(
+            message="OCR 与 ASR/OCR 结构化融合链路完成",
+            output_artifacts=[
+                fusion_artifacts["timeline"],
+                fusion_artifacts["preview"],
+                str(artifact_index),
+            ],
+        )
+        _complete_task(
+            task_id,
+            fusion_artifacts["preview"],
+            artifacts["normalized"],
+            artifact_index,
+            frames_manifest_path=frame_result.manifest_path,
+            ocr_timeline_path=ocr_timeline_path,
+            fusion_timeline_path=fusion_artifacts["timeline"],
+        )
     except PipelineError as exc:
         if not exc.stage:
             exc.stage = tracker.stage
@@ -537,7 +765,16 @@ def _current_stage(session, task_id: int, attempt: int, stage: str) -> TaskStage
     )
 
 
-def _complete_task(task_id: int, preview_path: str, transcript_path: str, index_path: Path) -> None:
+def _complete_task(
+    task_id: int,
+    preview_path: str,
+    transcript_path: str,
+    index_path: Path,
+    *,
+    frames_manifest_path: str | None = None,
+    ocr_timeline_path: str | None = None,
+    fusion_timeline_path: str | None = None,
+) -> None:
     with SessionLocal() as session:
         result = session.execute(
             update(Task)
@@ -549,6 +786,9 @@ def _complete_task(task_id: int, preview_path: str, transcript_path: str, index_
                 completed_at=utcnow(),
                 output_path=preview_path,
                 transcript_path=transcript_path,
+                frames_manifest_path=frames_manifest_path,
+                ocr_timeline_path=ocr_timeline_path,
+                fusion_timeline_path=fusion_timeline_path,
                 artifacts_index_path=str(index_path),
                 error_code=None,
                 error_message=None,

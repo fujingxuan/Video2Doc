@@ -120,6 +120,9 @@ def test_health_models_profiles_settings_and_immutable_snapshot(client: TestClie
     assert created.status_code == 201, created.text
     task_id = created.json()[0]["id"]
     snapshot_before = client.get(f"/api/v1/tasks/{task_id}/snapshot").json()
+    assert snapshot_before["schema_version"] == 4
+    assert snapshot_before["processing"]["frame_sampling_strategy"] == "hybrid"
+    assert snapshot_before["processing"]["fusion_window_seconds"] == 8.0
     assert snapshot_before["models"]["asr"] == "test-asr"
     assert snapshot_before["gateways"]["asr"]["secret_env_name"] == "TEST_ASR_SECRET"
     assert snapshot_before["gateways"]["asr"]["chunking"]["overlap_seconds"] == 5.0
@@ -127,6 +130,10 @@ def test_health_models_profiles_settings_and_immutable_snapshot(client: TestClie
     assert snapshot_before["gateways"]["asr"]["max_retries"] == 3
     assert snapshot_before["gateways"]["ocr"]["gateway_type"] == "OCR"
     assert snapshot_before["gateways"]["ocr"]["protocol"] == "video2doc-ocr-http-v1"
+    assert snapshot_before["ocr"]["language"] == "ch"
+    assert snapshot_before["ocr"]["batch_size"] == 1
+    assert snapshot_before["ocr"]["capabilities"]["supports_confidence"] is False
+    assert snapshot_before["ocr"]["capabilities"]["languages"] == []
     assert snapshot_before["processing"]["ocr_enabled"] is False
 
     updated = client.put(

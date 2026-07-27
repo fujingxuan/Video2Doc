@@ -411,6 +411,9 @@ class TaskRead(BaseModel):
     output_path: str | None
     media_info_path: str | None
     transcript_path: str | None
+    frames_manifest_path: str | None
+    ocr_timeline_path: str | None
+    fusion_timeline_path: str | None
     artifacts_index_path: str | None
     created_at: datetime
     updated_at: datetime
@@ -423,6 +426,9 @@ class TaskDetail(TaskRead):
     stages: list[StageRead]
     media_info: dict[str, Any] | None = None
     transcript_preview: dict[str, Any] | None = None
+    frame_summary: dict[str, Any] | None = None
+    ocr_preview: dict[str, Any] | None = None
+    fusion_preview: dict[str, Any] | None = None
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
 
 

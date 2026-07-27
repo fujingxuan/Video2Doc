@@ -70,7 +70,7 @@ class TaskService:
             )
             self.session.add(item)
             self.session.flush()
-            item.snapshot = TaskConfigSnapshot(schema_version=3, snapshot_json=snapshot)
+            item.snapshot = TaskConfigSnapshot(schema_version=4, snapshot_json=snapshot)
             data_root = Path(settings.data_path) if settings.data_path else get_settings().data_dir
             item.workspace_path = str(
                 create_workspace(data_root, task_id=item.id, title=title, snapshot=snapshot)
@@ -121,6 +121,42 @@ class TaskService:
         if not item:
             raise NotFoundError("Task", task_id)
         return list_artifacts(Path(item.workspace_path)) if item.workspace_path else []
+
+    def frames(self, task_id: int) -> dict[str, Any]:
+        return self._artifact_json(task_id, "frames_manifest_path", "Task frame manifest")
+
+    def ocr(self, task_id: int) -> dict[str, Any]:
+        return self._artifact_json(task_id, "ocr_timeline_path", "Task OCR timeline")
+
+    def fusion(self, task_id: int) -> dict[str, Any]:
+        return self._artifact_json(task_id, "fusion_timeline_path", "Task fusion timeline")
+
+    def artifact_path(self, task_id: int, relative_path: str) -> Path:
+        item = self.repo.get(task_id)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        if not item.workspace_path:
+            raise NotFoundError("Task workspace", task_id)
+        workspace = Path(item.workspace_path).resolve(strict=True)
+        try:
+            candidate = (workspace / relative_path).resolve(strict=True)
+        except (FileNotFoundError, OSError) as exc:
+            raise NotFoundError("Task artifact", relative_path) from exc
+        if not candidate.is_relative_to(workspace) or not candidate.is_file():
+            raise NotFoundError("Task artifact", relative_path)
+        return candidate
+
+    def _artifact_json(
+        self, task_id: int, field: str, resource_name: str
+    ) -> dict[str, Any]:
+        item = self.repo.get(task_id)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        value = getattr(item, field)
+        payload = read_json(Path(value)) if value else None
+        if payload is None:
+            raise NotFoundError(resource_name, task_id)
+        return payload
 
     def cancel(self, task_id: int) -> TaskRead:
         item = self.repo.get(task_id)
@@ -246,6 +282,20 @@ class TaskService:
             "keep_raw_transcript": settings.default_keep_raw_transcript,
             "keep_downloaded_media": settings.default_keep_downloaded_media,
             "ocr_frame_interval_seconds": 5.0,
+            "frame_sampling_strategy": "hybrid",
+            "scene_change_threshold": 0.35,
+            "scene_min_gap_seconds": 1.5,
+            "frame_similarity_hamming_threshold": 4,
+            "frame_similarity_difference_threshold": 0.025,
+            "frame_transition_burst_seconds": 3.0,
+            "frame_normalized_max_width": 1600,
+            "max_candidate_frames": 240,
+            "ocr_language": "ch",
+            "ocr_batch_size": 1,
+            "ocr_text_similarity_threshold": 0.88,
+            "ocr_incremental_similarity_threshold": 0.55,
+            "ocr_event_gap_seconds": 20.0,
+            "fusion_window_seconds": 8.0,
             "markdown_template": settings.default_markdown_template,
             "audio_chunk_seconds": get_settings().audio_chunk_seconds,
             "asr_language": None,
@@ -317,7 +367,7 @@ class TaskService:
         if asr_gateway_snapshot:
             processing["audio_chunk_seconds"] = asr_gateway_snapshot["chunking"]["chunk_seconds"]
         return {
-            "schema_version": 3,
+            "schema_version": 4,
             "profile": profile_data,
             "models": models,
             "processing": processing,
@@ -345,6 +395,21 @@ class TaskService:
                     "streaming": asr_gateway_snapshot["capabilities"]["supports_streaming"],
                 }
                 if asr_gateway_snapshot
+                else None
+            ),
+            "ocr": (
+                {
+                    "provider": ocr_gateway_snapshot["protocol"],
+                    "base_url": ocr_gateway_snapshot["base_url"],
+                    "secret_env_name": ocr_gateway_snapshot["secret_env_name"],
+                    "model": ocr_gateway_snapshot["model_name"],
+                    "language": processing.get("ocr_language") or "ch",
+                    "timeout_seconds": ocr_gateway_snapshot["timeout_seconds"],
+                    "max_retries": ocr_gateway_snapshot["max_retries"],
+                    "batch_size": int(processing.get("ocr_batch_size") or 1),
+                    "capabilities": ocr_gateway_snapshot["capabilities"],
+                }
+                if ocr_gateway_snapshot
                 else None
             ),
             "text_processing": {
@@ -461,6 +526,8 @@ def _gateway_model_snapshot(
             "timestamp_granularity": item.timestamp_granularity,
             "languages": item.languages,
         },
+        "gateway_settings": sanitize_gateway_metadata(item.gateway.settings or {}),
+        "model_settings": sanitize_gateway_metadata(item.settings or {}),
         "chunking": {
             "mode": mode,
             "chunk_seconds": chunk_seconds,

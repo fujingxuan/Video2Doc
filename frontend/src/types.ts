@@ -122,6 +122,9 @@ export interface Task {
   output_path: string | null;
   media_info_path: string | null;
   transcript_path: string | null;
+  frames_manifest_path: string | null;
+  ocr_timeline_path: string | null;
+  fusion_timeline_path: string | null;
   artifacts_index_path: string | null;
   created_at: string;
   updated_at: string;
@@ -153,6 +156,28 @@ export interface TaskDetail extends Task {
     completed_chunks?: number;
     segment_count?: number;
     text?: string;
+    truncated?: boolean;
+  } | null;
+  frame_summary: {
+    candidate_count?: number;
+    kept_count?: number;
+    dropped_count?: number;
+    drop_reasons?: Record<string, number>;
+    config?: Record<string, unknown>;
+  } | null;
+  ocr_preview: {
+    provider?: string;
+    model?: string;
+    frame_count?: number;
+    reused_count?: number;
+    block_count?: number;
+    elapsed_seconds?: number;
+    text?: string;
+    truncated?: boolean;
+  } | null;
+  fusion_preview: {
+    event_count?: number;
+    counts?: Record<string, number>;
     truncated?: boolean;
   } | null;
   artifacts: Array<{ path: string; size: number }>;

@@ -98,6 +98,14 @@ export const api = {
     request<AppSettings>("/settings", { method: "PUT", body: JSON.stringify(payload) }),
   tasks: () => request<Task[]>("/tasks"),
   task: (id: number) => request<TaskDetail>(`/tasks/${id}`),
+  taskFrames: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/frames`),
+  taskOcr: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/ocr`),
+  taskTimeline: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/timeline`),
+  artifactUrl: (id: number, path: string) =>
+    `${API_BASE}/tasks/${id}/artifacts/${path
+      .split("/")
+      .map(segment => encodeURIComponent(segment))
+      .join("/")}`,
   createTasks: (payload: Record<string, unknown>) =>
     request<Task[]>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
   cancelTask: (id: number) => request<Task>(`/tasks/${id}/cancel`, { method: "POST" }),

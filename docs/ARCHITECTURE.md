@@ -1,8 +1,8 @@
-# Video2Doc 独立模型 Gateway 架构
+# Video2Doc 视频 OCR 与 ASR/OCR 时间线融合架构
 
 ## 1. 范围与不变量
 
-第二阶段在第一轮骨架上加入真实媒体输入和真实 ASR，不改变以下不变量：
+本阶段在既有真实媒体、ASR 与独立 Gateway 架构上增加真实视频 OCR 和结构化融合，不改变以下不变量：
 
 - SQLite `tasks.status` 是队列事实源；最大并发数固定为 1。
 - API 请求只创建/查询/控制任务，不在请求线程执行耗时 Pipeline。
@@ -11,7 +11,7 @@
 - SSE 发布数据库状态，断线时前端使用 REST 回退。
 - 大型媒体、日志和转写保存在工作区；SQLite 只保存索引和小型事实。
 
-本阶段包含 OCR Gateway 架构但不包含真实 OCR 模型；文本清洗、融合、Markdown 正文生成、总结和知识提炼仍不在范围内。
+本阶段包含抽帧、视觉去重、真实 OCR Provider、OCR 稳定事件和 ASR/OCR/帧统一时间线。最终 Markdown、文本大模型轻度编辑、总结、问答、RAG 和知识提炼不在范围内。
 
 ## 2. 总体结构
 
@@ -35,12 +35,19 @@ Pipeline dispatcher
          ├── FfprobeProvider
          ├── FfmpegProvider
          ├── AudioChunker
-         ├── AudioChunker + StructuredOverlapMerger
+         ├── StructuredOverlapMerger
          ├── DashScopeFunAsrProvider ── DashScope WebSocket
-         └── UnifiedAsrGatewayProvider
-                ├── FireRedASR2-AED :8101
-                ├── Qwen3-ASR + ForcedAligner :8102
-                └── faster-whisper :8103
+         ├── UnifiedAsrGatewayProvider
+         │      ├── FireRedASR2-AED :8101
+         │      ├── Qwen3-ASR + ForcedAligner :8102
+         │      └── faster-whisper :8103
+         ├── VideoFrameExtractor
+         │      ├── FFmpeg select + media pts
+         │      └── content-crop dHash + visual difference
+         ├── UnifiedOcrGatewayClient
+         │      └── PaddleOCR 3.7 / PP-OCRv5 server :8201
+         ├── OcrTimelineBuilder
+         └── FusionTimelineBuilder
 
 GatewayService ── gateway_configs / gateway_models
        └── ASR 与 OCR 各自拥有协议、健康检查、模型发现和密钥引用
@@ -48,7 +55,7 @@ GatewayService ── gateway_configs / gateway_models
 OneAPI ── 仅后续文本处理模型
 ```
 
-真实 Provider 不引用 FastAPI 路由或前端类型。Pipeline 负责阶段编排和持久化，Provider 只负责外部能力及标准化输入输出。
+真实 Provider 不引用 FastAPI 路由或前端类型。Pipeline 负责阶段编排和持久化，Provider 只负责外部能力及标准化输入输出。OCR 在 ASR 验证完成后执行，但两种来源在融合结果中保持独立，不把相似文字互相删除。
 
 ## 3. 输入与媒体来源
 
@@ -119,43 +126,94 @@ language, provider, model, chunk_index, raw_response_reference, words
 
 Provider 未返回置信度或时间戳时字段保持 `null`。局部 segment/word 时间戳仅在存在时加上 chunk 全局偏移，不伪造数据。合并先在重叠窗口用时间戳和规范化文本去重；只有词级时间戳时可裁掉已确认的重复词。同一源时间窗内足够长的词前缀即使有少量 ASR 拼写漂移，也可用规范化相似度确定消重，但最后一个匹配块之后的未匹配边缘词必须保留，避免前一块漏词。短而相似、语义不确定的内容保留并写 `boundary_conflict_retained` 诊断；若两条保留内容的词时间互相矛盾，只把冲突词时间置 `null` 并收窄 SRT segment 到下一段可靠时间，不删除文本也不编造时间。最终结果按全局时间排序，TXT、SRT 和 normalized JSON 使用同一结构化 segment 集合。
 
-## 7. Pipeline 阶段和进度
+## 7. 抽帧、变化检测与视觉去重
+
+`VideoFrameExtractor` 通过 FFmpeg `select` 与 `metadata=print` 同时输出图像和 `pts_time`/`lavfi.scene_score`。支持 `fixed_interval`、`scene_change`、`hybrid` 三种策略，时间戳始终来自媒体时间轴。
+
+最大候选帧数不使用 `-frames:v` 提前终止解码。实现根据媒体时长和候选上限推导最小选择间隔，FFmpeg 仍扫描到视频末尾；配置、媒体大小和 mtime 组成帧清单指纹。每帧保存：
 
 ```text
-INPUT_VALIDATE (0-5)
-MEDIA_ACQUIRE (5-20)
-MEDIA_PROBE (20-28)
-AUDIO_EXTRACT (28-43)
-AUDIO_VALIDATE (43-47)
-AUDIO_CHUNK (47-55)
-ASR_TRANSCRIBE (55-88)
-ASR_COMBINE (88-96)
-ASR_VALIDATE (96-100)
+frame_id, media_timestamp, extraction_reason,
+original_frame_path, normalized_image_path, width, height, file_size,
+sha256, perceptual_hash, scene_change_score,
+kept, drop_reason, duplicate_of, similarity
+```
+
+视觉特征裁掉底部 20% 常见字幕区，再计算 64 位差分哈希与 64×36 灰度像素差异。连续相似帧需同时满足哈希和像素阈值才丢弃；短暂转场只在前后帧彼此相似时删除。单一证据不足时保留，避免 PPT 翻页、代码变化或公式逐步推导被过度合并。
+
+候选图像先写 `.part.jpg`，成功后原子改名；取消、超时或外部进程失败会清理 partial。原媒体只读引用。
+
+## 8. OCR Provider、原始响应与稳定事件
+
+`UnifiedOcrGatewayClient` 使用统一 multipart 协议：
+
+```text
+POST /v1/ocr/recognitions
+file, model, frame_id, media_timestamp, language
+```
+
+本地实现为 Windows CPU PaddlePaddle 3.3.0 + PaddleOCR 3.7.0，加载 `PP-OCRv5_server_det` 与 `PP-OCRv5_server_rec`。Gateway 返回 Provider、模型、帧 ID、媒体时间、完整原始 Paddle 结果、文字块、置信度、矩形框、多边形、读取顺序、语言和耗时。
+
+每帧响应先保存到 `provider_raw/attempt_NNNN`，再生成 Provider 无关的 `OcrResult`。规范化只清理确定空白、统一换行、去除同位置完全重复块；置信度低于 0.5 的块标记 `uncertain`，不补写或猜测内容。
+
+逐帧规范化文件保存图像 SHA-256、Provider、Base URL、模型、语言和超时的请求指纹。重试只有在指纹一致且原始响应仍存在时才复用。
+
+OCR 时间线综合时间间隔、规范化文本相似度、文本块空间 IoU 和图像哈希：
+
+- 稳定同页观察合并为一个事件并扩展 `first_seen_time/last_seen_time`。
+- 小范围文字更新保留为 `incremental_update`，指向前一事件。
+- 每个事件保留所有来源帧、图像和原始响应引用。
+- ASR 与 OCR 文本相似不会触发跨来源删除。
+
+## 9. ASR/OCR/帧统一时间线
+
+`FusionTimelineBuilder` 输出 `asr_segment`、`ocr_event` 和 `frame_event`。每个事件包含稳定 ID、起止时间、来源、文本、原始产物引用、质量信息、关联帧、关联 ASR segment 和不确定性。
+
+OCR/帧事件按可配置时间窗口关联附近 ASR segment，所有事件按媒体时间排序。验证层拒绝重复 ID、倒序时间、结束早于开始以及超出媒体时长的事件。融合结果是版本化 JSON，不渲染最终 Markdown。
+
+## 10. Pipeline 阶段和进度
+
+```text
+INPUT_VALIDATE (0-3)
+MEDIA_ACQUIRE (3-12)
+MEDIA_PROBE (12-18)
+AUDIO_EXTRACT (18-30)
+AUDIO_VALIDATE (30-33)
+AUDIO_CHUNK (33-38)
+ASR_TRANSCRIBE (38-58)
+ASR_COMBINE (58-63)
+ASR_VALIDATE (63-66)
+FRAME_EXTRACT (66-75)
+FRAME_DEDUP (75-79)
+OCR_RECOGNIZE (79-91)
+OCR_TIMELINE (91-95)
+FUSION_BUILD (95-99)
+FUSION_VALIDATE (99-100)
 ```
 
 括号是总进度映射范围。每个 `task_stage_runs` 行保存 attempt、状态、阶段百分比、用户消息、技术错误、输入/输出产物和日志路径。下载、FFmpeg、分块和 ASR 使用真实比例；探测等不可精确计量步骤使用阶段状态。
 
 更新通过短 SQLAlchemy 事务写入 `tasks` 和 `task_stage_runs`，同步 `task_state.json`，SSE 从数据库读出状态。任何 Provider 都不会直接发布 SSE。
 
-## 8. 工作区与原始数据
+## 11. 工作区与原始数据
 
 `WorkspacePaths` 集中生成所有路径，Provider 不拼接任务根目录。工作区沿用 PRD 的 `00_source` 到 `05_output`，并在其内细分 media、metadata、audio、chunks、provider_raw、logs 和 intermediate。
 
-写 JSON 使用同目录临时文件后原子替换。媒体和音频使用 `.part` 文件。产物完成后生成 `artifacts.json`。ASR Provider 原始响应按 `attempt_0001` 隔离；`raw.json` 是原始响应索引，`normalized.json` 是版本化标准数据，另存 `raw.txt`、`raw.srt` 和 `preview.json`。
+写 JSON 使用同目录临时文件后原子替换。媒体、音频和候选帧使用 `.part` 文件。产物完成后生成 `artifacts.json`。ASR/OCR Provider 原始响应按 `attempt_0001` 隔离；`01_extract/frames/manifest.json`、`03_ocr/timeline.json` 和 `04_fusion/timeline.json` 是后续阶段的可追溯输入。
 
-SQLite 的任务行只保存 `media_info_path`、`transcript_path` 和 `artifacts_index_path`，不保存大型响应。
+SQLite 的任务行只保存 `media_info_path`、`transcript_path`、`frames_manifest_path`、`ocr_timeline_path`、`fusion_timeline_path` 和 `artifacts_index_path`，不保存大型响应。
 
-## 9. 取消、失败、重试和恢复
+## 12. 取消、失败、重试和恢复
 
 取消竞态继续使用第一轮规则：完成更新带 `status=PROCESSING AND cancel_requested=false` 条件；取消与完成只能有一个最终赢家。
 
-真实 runner 把错误保存为：机器码、用户消息、技术详情、阶段、可重试语义和日志路径。错误码覆盖输入、yt-dlp、ffprobe、FFmpeg、无音频、超时、取消、ASR 配置/认证/限流/超时/Provider 和工作区问题。
+真实 runner 把错误保存为：机器码、用户消息、技术详情、阶段、可重试语义和日志路径。错误码覆盖输入、yt-dlp、ffprobe、FFmpeg、无音频、超时、取消、ASR、抽帧、OCR、融合和工作区问题。
 
-重试复用原快照并增加 attempt。有效的获取结果、探测、标准音频和 chunk manifest 可复用；ASR 会搜索前一 attempt 已成功的同索引原始响应，避免重复收费。缺失或不完整产物重新执行，`.part` 文件永不复用。
+重试复用原快照并增加 attempt。有效的获取结果、探测、标准音频、chunk manifest、ASR 响应、帧清单和逐帧 OCR 可复用；后两者要求媒体/配置/图像请求指纹一致。缺失或不完整产物重新执行，`.part` 文件永不复用。
 
 异常后端退出仍由启动恢复统一变成 `INTERRUPTED`，不会自动重放有外部副作用的阶段。
 
-## 10. 数据库迁移
+## 13. 数据库迁移
 
 `0005_independent_model_gateways` 在 `0004` 之后新增：
 
@@ -164,29 +222,39 @@ SQLite 的任务行只保存 `media_info_path`、`transcript_path` 和 `artifact
 - `processing_profiles.asr_gateway_model_id`
 - `processing_profiles.ocr_gateway_model_id`
 
-旧任务快照仍可由兼容 Provider 执行；新快照版本为 3，数据库与快照都只保存密钥环境变量名称。
+`0006_ocr_fusion_artifacts` 在 `0005` 之后新增：
 
-## 11. API 与前端
+- `tasks.frames_manifest_path`
+- `tasks.ocr_timeline_path`
+- `tasks.fusion_timeline_path`
+
+旧迁移没有修改。新快照版本为 4，新增抽帧间隔/策略、场景阈值、视觉相似阈值、最大候选数、OCR Gateway/模型/能力/语言/超时/重试/批大小、OCR 事件阈值和融合窗口。数据库与快照都只保存密钥环境变量名称。
+
+## 14. API 与前端
 
 原任务 API 保持兼容。真实任务选择 `asr_gateway_model_id`，处理方案分别引用 ASR/OCR Gateway 模型；模拟模式仍供显式自动化兼容测试。
 
-新增 Gateway CRUD、健康检查、模型发现和 Gateway 模型 API。前端 Gateway 页分别管理 ASR/OCR 连接；模型页只保留 OneAPI 文本/视觉模型；处理方案和新任务页选择独立 Gateway 模型。SSE 和 REST 回退没有改变。
+新增帧、OCR、融合和受工作区边界约束的单文件产物 API。前端 Gateway 页管理 OCR 健康与模型，新任务页配置 OCR 和抽帧参数，详情页显示阶段进度、保留/丢弃帧、OCR 块和融合事件并可打开关键产物。SSE 和 REST 回退没有改变。
 
-## 12. 安全边界
+## 15. 安全边界
 
 - API Key 值不进入请求响应、SQLite、快照、日志或测试 fixture；仅保存环境变量名称。
 - 外部命令不用 shell，不拼接用户输入。
 - URL 拒绝内嵌凭据，命令展示隐藏 URL 查询参数。
 - 本地输入只读，拒绝目录、相对路径和不存在文件。
 - 前端不显示完整敏感日志；任务 API 只返回产物相对路径和大小。
-- 原始 ASR 响应保存前递归隐藏常见 token/key 字段。
+- 原始 ASR/OCR 响应保存前递归隐藏常见 token/key 字段。
+- 单文件产物 API 对规范化绝对路径执行 `is_relative_to(workspace)` 校验，拒绝路径穿越。
 
-## 13. 已知边界
+## 16. 已知边界
 
 - 固定时长分块尚未做静音边界检测。
 - 当前只支持一个后端实例和单任务执行。
 - 浏览器没有原生绝对路径选择器，当前使用路径输入。
 - SSE 不是可重放事件日志。
 - URL 下载成功仍依赖站点和本机 yt-dlp 版本。
-- OCR Gateway 当前只有完整抽象与 mock，没有宣称真实 OCR 部署。
+- PP-OCRv5 server 当前在 CPU 单请求串行执行；优先质量和稳定性，不追求批量吞吐。
+- 视觉去重不是语义模型，阈值边缘按保留优先。
+- OCR 读取顺序使用 Provider 返回顺序；复杂图文关系尚未形成文档级版面树。
+- 本阶段只产出结构化融合 JSON，不生成 Markdown。
 - 本地大模型是否可运行取决于 GPU 显存、驱动、WSL 内存与具体依赖，按需单模型驻留。
