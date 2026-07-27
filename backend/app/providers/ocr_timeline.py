@@ -21,6 +21,7 @@ from app.providers.ocr import (
     OcrBlock,
     OcrCancelCheck,
     OcrResult,
+    PaddleXLayoutParsingOcrClient,
     UnifiedOcrGatewayClient,
 )
 from app.storage.workspace import WorkspacePaths, read_json, write_json
@@ -48,7 +49,7 @@ async def recognize_retained_frames(
     paths: WorkspacePaths,
     cancel_check: OcrCancelCheck,
     progress: ProgressCallback,
-    client: UnifiedOcrGatewayClient | None = None,
+    client: UnifiedOcrGatewayClient | PaddleXLayoutParsingOcrClient | None = None,
 ) -> OcrRunResult:
     kept = list(frames.kept)
     if not kept:
@@ -66,7 +67,21 @@ async def recognize_retained_frames(
             f"缺少 OCR Gateway 密钥环境变量 {secret_env_name}",
         )
     if client is None:
-        client = UnifiedOcrGatewayClient(
+        protocol = str(ocr_config.get("provider") or "video2doc-ocr-http-v1")
+        client_class = (
+            PaddleXLayoutParsingOcrClient
+            if protocol == "paddlex-layout-parsing-v1"
+            else UnifiedOcrGatewayClient
+        )
+        if protocol not in {
+            "video2doc-ocr-http-v1",
+            "paddlex-layout-parsing-v1",
+        }:
+            raise PipelineError(
+                "OCR_CONFIG_INVALID",
+                f"不支持的 OCR Gateway 协议：{protocol}",
+            )
+        client = client_class(
             base_url=base_url,
             api_key=api_key,
             timeout_seconds=float(ocr_config.get("timeout_seconds", 120.0)),
