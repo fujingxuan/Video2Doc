@@ -30,6 +30,13 @@ class WorkspacePaths:
     chunks: Path
     asr: Path
     asr_raw: Path
+    frames: Path
+    frame_candidates: Path
+    frame_normalized: Path
+    ocr: Path
+    ocr_raw: Path
+    ocr_normalized: Path
+    fusion: Path
     metadata: Path
     logs: Path
     intermediate: Path
@@ -46,6 +53,13 @@ class WorkspacePaths:
             chunks=root / "01_extract/chunks",
             asr=root / "02_asr",
             asr_raw=root / "02_asr/provider_raw",
+            frames=root / "01_extract/frames",
+            frame_candidates=root / "01_extract/frames/candidates",
+            frame_normalized=root / "01_extract/frames/normalized",
+            ocr=root / "03_ocr",
+            ocr_raw=root / "03_ocr/provider_raw",
+            ocr_normalized=root / "03_ocr/normalized",
+            fusion=root / "04_fusion",
             metadata=root / "00_source/metadata",
             logs=root / "logs",
             intermediate=root / "04_fusion/intermediate",
@@ -61,12 +75,17 @@ class WorkspacePaths:
             self.chunks,
             self.asr,
             self.asr_raw,
+            self.frames,
+            self.frame_candidates,
+            self.frame_normalized,
+            self.ocr,
+            self.ocr_raw,
+            self.ocr_normalized,
+            self.fusion,
             self.metadata,
             self.logs,
             self.intermediate,
             self.output,
-            self.root / "03_ocr",
-            self.root / "04_fusion",
         ):
             path.mkdir(parents=True, exist_ok=True)
 
