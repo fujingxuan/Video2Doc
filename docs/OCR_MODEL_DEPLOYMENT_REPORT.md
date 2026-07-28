@@ -137,3 +137,34 @@ Gateway 明确设置 `enable_mkldnn=False`，启动环境同时设置 `FLAGS_use
 - 当前使用 Provider 返回顺序作为读取顺序，没有构建文档级图文版面树。
 - 视觉公式只保留 OCR 实际返回，不根据上下文猜测或补写。
 - 首帧含模型加载，耗时显著高于健康检查；健康 `model_loaded=false` 只表示尚未加载，不表示部署失败。
+
+## 旧 Docker PaddleOCR 扫描与适配
+
+2026-07-27 对 Docker 元数据和常见项目目录执行了只读扫描，范围包括：
+
+```text
+docker context/info/ps/ps -a/images/compose/network/volume
+D:\Projects
+D:\Models
+D:\Tools
+D:\Data（不存在）
+D:\Docker（不存在）
+C:\Users\Aaron 常见项目路径
+WSL /home/aaron 常见项目路径
+```
+
+扫描时没有运行中或已停止的 PaddleOCR 容器，也没有活动 compose 项目。找到：
+
+```text
+D:\Tools\paddle ocr\compose.yaml
+ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/
+  paddleocr-vl:latest-nvidia-gpu-sm120-offline
+  paddleocr-genai-vllm-server:latest-nvidia-gpu-sm120-offline
+Docker volume: paddleocr_model_cache
+```
+
+这是一套 PaddleOCR-VL 镜像/compose 残留，不是当前可调用的文字检测/识别 API。历史日志显示 host pipeline 因未知 `pipeline_config` 失败，扫描时 8118 未监听。因此没有启动、停止、删除或修改该容器、镜像、网络、volume 和 compose 文件，也没有把“找到镜像”描述成“找到可用服务”。
+
+为复用未来恢复的旧服务，应用新增 `paddlex-layout-parsing-v1` 协议适配器，支持官方 `/layout-parsing` 请求/响应；并提供 `deploy/docker/paddleocr-vl` 中的可选 Video2Doc 自有 compose 示例。已有外部服务可直接注册 Base URL，`managed_lifecycle=false` 时应用只做 health/recognition，不管理其生命周期。
+
+主验收继续使用当前本地 Windows CPU `PP-OCRv5_server` Gateway。Docker 适配器由受控响应自动化测试覆盖；由于旧 Docker 服务没有运行，本轮没有把它记为真实 Docker OCR 推理通过。

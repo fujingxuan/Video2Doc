@@ -61,3 +61,22 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .artifact-list > div { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--border); padding-bottom: .45rem; }
 .artifact-list code { word-break: break-all; }
 .artifact-list small { color: var(--muted); white-space: nowrap; }
+.action-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.action-bar > span { color: var(--accent); font-size: .82rem; }
+.tool-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-bottom: 1rem; }
+.tool-grid article { display: grid; gap: .35rem; padding: .85rem; border: 1px solid var(--border); border-radius: 10px; background: #0f1828; }
+.tool-grid article span { font-size: .75rem; font-weight: 750; }
+.tool-grid article small { color: var(--muted); word-break: break-all; }
+.tool-ok span { color: var(--accent); }
+.tool-missing span { color: var(--danger); }
+.frame-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: .85rem; }
+.frame-gallery a { color: var(--muted); text-decoration: none; }
+.frame-gallery img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid var(--border); border-radius: 9px; background: #080d16; margin-bottom: .35rem; }
+.frame-gallery small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.markdown-preview { max-height: 650px !important; white-space: pre-wrap; font-size: .84rem !important; }
+.ocr-preview { white-space: pre-wrap; }
+.export-list { display: grid; gap: .6rem; margin-top: 1rem; }
+.export-list article { display: grid; gap: .3rem; border: 1px solid var(--border); border-radius: 9px; padding: .75rem; background: #111b2d; }
+.export-list small, .export-list span { color: var(--muted); }
+.panel > details { border: 1px solid var(--border); border-radius: 9px; padding: .75rem; margin-top: .7rem; }
+.panel > details > summary { cursor: pointer; color: #cbd5e5; font-weight: 700; }

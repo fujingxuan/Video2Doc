@@ -1,0 +1,83 @@
+name: video2doc-paddleocr
+
+services:
+  vlm:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-vllm-server:latest-nvidia-gpu-sm120-offline
+    container_name: video2doc-paddleocr-vlm
+    labels:
+      com.video2doc.managed: "true"
+      com.video2doc.component: "paddleocr-vlm"
+    ports:
+      - "127.0.0.1:8118:8080"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    shm_size: 16g
+    user: root
+    restart: unless-stopped
+    volumes:
+      - ./vllm_config.yaml:/home/paddleocr/vlm_server_config.yaml:ro
+      - paddleocr_model_cache:/root/.cache
+    command:
+      - paddleocr
+      - genai_server
+      - --model_name
+      - PaddleOCR-VL-1.6-0.9B
+      - --backend
+      - vllm
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --backend_config
+      - /home/paddleocr/vlm_server_config.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 180s
+
+  api:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl:latest-nvidia-gpu-sm120-offline
+    container_name: video2doc-paddleocr-api
+    labels:
+      com.video2doc.managed: "true"
+      com.video2doc.component: "paddleocr-api"
+    ports:
+      - "127.0.0.1:8202:8080"
+    depends_on:
+      vlm:
+        condition: service_healthy
+    shm_size: 8g
+    user: root
+    restart: unless-stopped
+    volumes:
+      - ./pipeline_config.yaml:/home/paddleocr/video2doc_pipeline.yaml:ro
+      - paddleocr_model_cache:/root/.cache
+    command:
+      - paddlex
+      - --serve
+      - --pipeline
+      - /home/paddleocr/video2doc_pipeline.yaml
+      - --device
+      - cpu
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 180s
+
+volumes:
+  paddleocr_model_cache:
+    external: true
+    name: paddleocr_model_cache

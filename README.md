@@ -2,9 +2,9 @@
 
 Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音频转换为完整、可追溯、可长期保存的文字资料。产品原则是“质量 > 成本 > 速度”，当前不会总结、提炼观点或补充视频外知识。
 
-## 当前阶段
+## 当前状态
 
-第四阶段已经在独立 Gateway 架构上接入真实视频 OCR 与结构化时间线融合：
+主应用闭环已经完成：
 
 ```text
 本地视频 / 本地音频 / 媒体网页 URL
@@ -20,12 +20,17 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
   → 独立 OCR Gateway（本地 PaddleOCR 3.7 / PP-OCRv5 server）
   → OCR 原始响应、规范化文本块与稳定事件
   → ASR segment / OCR event / frame event 统一时间线
-  → raw JSON / normalized JSON / TXT / SRT / 融合 JSON / 前端预览
+  → 结构化 Document IR
+  → 无模型确定性整理，或 OneAPI 受约束轻度编辑
+  → 忠实性校验与失败回退
+  → Obsidian Markdown、图片和 JSON sidecar
+  → 用户指定 Vault / Inbox 原子导出
+  → Windows 单入口应用查看、取消、重试和打开结果
 ```
 
-耗时抽帧和 OCR 仍由 SQLite 数据库队列与 Worker 执行，不进入 API 请求线程。版本 4 不可变任务快照保存抽帧、去重、OCR 和融合参数；有效帧和逐帧 OCR 结果可在重试时按配置/内容指纹复用。OneAPI 只保留给后续文本轻度编辑，本阶段不生成最终 Markdown，也不总结或改写原文。
+所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 5 不可变任务快照冻结 Gateway、文本整理、Markdown 和导出语义；有效媒体、ASR、帧和逐帧 OCR 可按指纹复用。文本模型不是硬依赖，且只允许轻度整理；结构校验、来源引用、数字/术语/代码/公式/长度和顺序检查失败时会拒绝模型输出并回退原文。
 
-完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。真实 OCR 部署与验收分别见 [OCR 部署报告](docs/OCR_MODEL_DEPLOYMENT_REPORT.md) 和 [OCR/Fusion 验收报告](docs/OCR_FUSION_ACCEPTANCE_REPORT.md)。
+完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。操作说明见 [应用使用手册](docs/USER_GUIDE.md)、[Obsidian 导出说明](docs/OBSIDIAN_EXPORT.md) 和 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)；本轮真实证据见 [应用完成验收报告](docs/APP_COMPLETION_ACCEPTANCE_REPORT.md)。
 
 ## 技术栈
 
@@ -34,6 +39,8 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
 - 外部程序：FFmpeg、ffprobe、yt-dlp
 - ASR：统一 Gateway `POST /v1/asr/transcriptions`；Fun-ASR 使用 DashScope WebSocket
 - OCR：独立 Gateway `POST /v1/ocr/recognitions`；本地 PaddleOCR 3.7 + PP-OCRv5 server
+- 文档：类型化 Document IR、确定性忠实编辑器、可选 OneAPI 兼容文本编辑器
+- 导出：Obsidian Markdown、相对附件、JSON sidecar、原子目录提交
 - 图像：Pillow；媒体时间戳与候选帧由 FFmpeg `select/metadata` 提供
 - 状态通信：REST + Server-Sent Events（SSE）
 - 测试：pytest、受控外部进程、httpx MockTransport、Vitest
@@ -102,9 +109,19 @@ Set-Location D:\Projects\Video2Doc\backend
 .\.venv\Scripts\python.exe -m alembic check
 ```
 
-`0005_independent_model_gateways` 新增独立 ASR/OCR Gateway；`0006_ocr_fusion_artifacts` 为任务新增帧清单、OCR 时间线和融合时间线路径。旧迁移没有改写。新任务使用快照版本 4，保存 Gateway、模型能力、抽帧/去重/OCR/融合参数、超时、重试和密钥环境变量名称，不保存密钥值。
+`0005_independent_model_gateways` 新增独立 ASR/OCR Gateway；`0006_ocr_fusion_artifacts` 新增帧、OCR 与融合产物；`0007_document_exports` 新增文档、文本编辑与导出记录。旧迁移没有改写。新任务使用快照版本 5，额外冻结文本模型、提示词/模板版本、忠实性阈值、图片策略、Vault/Inbox 语义、文件名与冲突策略和 sidecar 开关；只保存密钥环境变量名称，不保存密钥值。
 
 ## 启动
+
+便携版推荐直接运行：
+
+```powershell
+D:\Projects\Video2Doc\dist\Video2Doc-Portable\Video2Doc.exe
+```
+
+程序会升级自己的 SQLite、检查端口、启动 FastAPI、托管已构建前端并打开浏览器。退出按钮或关闭启动器会停止由 Video2Doc 启动的进程，不停止外部管理的 Docker OCR。完整参数和隔离数据目录方式见 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)。
+
+开发环境仍可分别启动：
 
 后端：
 
@@ -141,7 +158,7 @@ Set-Location D:\Projects\Video2Doc
 
 本地输入必须是存在的绝对文件路径。应用不会只根据扩展名认定媒体有效，而是最终以 ffprobe 流信息为准。当前浏览器不能安全返回任意本地绝对路径，因此前端使用路径输入；后端仍执行完整验证。
 
-本地文件采用“只读引用原文件”策略，不复制到工作区。URL 媒体下载到任务工作区。外部命令始终使用参数列表启动，不经过 shell 拼接用户输入。
+Windows 便携版和本机开发版可通过后端 WinForms 文件选择器返回绝对路径；手工粘贴路径仍受相同校验。本地文件采用“只读引用原文件”策略，不复制到工作区。URL 媒体下载到任务工作区。外部命令始终使用参数列表启动，不经过 shell 拼接用户输入。
 
 ## ASR 配置
 
@@ -180,6 +197,11 @@ Set-Location D:\Projects\Video2Doc
 | `OCR_TIMELINE` | 稳定重复页合并与增量变化事件 |
 | `FUSION_BUILD` | ASR/OCR/帧统一事件构建 |
 | `FUSION_VALIDATE` | 时间范围、排序、引用和产物索引校验 |
+| `DOCUMENT_BUILD` | 从融合事件生成类型化 Document IR 和来源引用 |
+| `TEXT_EDIT` | 无模型确定性整理，或受约束文本模型编辑与忠实性验证 |
+| `MARKDOWN_RENDER` | frontmatter、正文、时间戳、图片和追溯附录渲染 |
+| `OBSIDIAN_EXPORT` | 路径验证、附件/sidecar 复制和原子提交 |
+| `FINALIZE` | 产物索引和任务最终状态 |
 
 总进度由上述真实状态映射，不使用固定 sleep 伪造。无法得到比例的步骤只显示阶段级状态。
 
@@ -227,6 +249,10 @@ Set-Location D:\Projects\Video2Doc
 │   ├── preview.json
 │   └── intermediate/
 ├── 05_output/
+│   ├── document.json               # 类型化 Document IR
+│   ├── text_edit.json              # 原文、编辑结果、验证和回退记录
+│   ├── note.md                     # 工作区 Markdown 副本
+│   └── export.json                 # 最终导出索引
 ├── logs/                            # stdout/stderr 与任务日志
 ├── artifacts.json
 ├── task_config.json
@@ -270,7 +296,13 @@ VIDEO2DOC_PROCESS_POLL_SECONDS=0.20
 - `GET /api/v1/tasks/{id}/frames`
 - `GET /api/v1/tasks/{id}/ocr`
 - `GET /api/v1/tasks/{id}/timeline`
+- `GET /api/v1/tasks/{id}/document`
+- `GET /api/v1/tasks/{id}/markdown`
+- `POST /api/v1/tasks/{id}/open/{workspace|export_directory|markdown}`
 - `GET /api/v1/tasks/{id}/artifacts/{relative-path}`
+- `GET /api/v1/system/status`
+- `POST /api/v1/system/select-media`
+- `POST /api/v1/system/shutdown`
 - `GET/POST/PUT/DELETE /api/v1/gateways`
 - `POST /api/v1/gateways/{id}/health`
 - `POST /api/v1/gateways/{id}/discover`
@@ -292,21 +324,24 @@ Set-Location D:\Projects\Video2Doc\frontend
 pnpm typecheck
 pnpm test
 pnpm build
+
+Set-Location D:\Projects\Video2Doc
+.\scripts\build_portable.ps1
 ```
 
-自动化测试不依赖公网或真实凭据：使用短生命周期受控进程、受控 yt-dlp/FFmpeg/OCR Provider、httpx MockTransport 和数据库 Worker 集成测试，验证成功、错误、超时、取消、时间轴、视觉去重、OCR 规范化、稳定事件、融合、脱敏、迁移、快照与重试复用。真实模型/媒体验收是独立的补充证据，不替代自动化测试。
+默认自动化测试不依赖公网或真实凭据：使用短生命周期受控进程、受控 yt-dlp/FFmpeg/OCR Provider、httpx MockTransport 和数据库 Worker 集成测试，验证成功、错误、超时、取消、时间轴、视觉去重、OCR、文档 IR、忠实性校验、Markdown、原子导出、迁移、快照与重试复用。真实模型/媒体验收通过显式 opt-in 测试执行，不替代自动化回归。
 
 ## Windows 手工验收
 
 仓库验收使用 `D:\Video2Doc-Test\sample.mp4`、自动提取的 `sample-asr-short.wav` 与文档记录的公开 URL：
 
 1. 运行 `check_media_tools.ps1`。
-2. 配置独立 ASR 与 OCR Gateway；OneAPI 只配置文本模型。
+2. 配置独立 ASR 与 OCR Gateway；OneAPI 只配置可选文本轻度编辑模型。
 3. 分别创建本地音频、本地视频和 URL 任务。
-4. 在任务详情核对媒体流、阶段进度、帧/OCR/融合统计和工作区产物。
+4. 在任务详情核对媒体流、阶段进度、帧/OCR/融合/文档统计、Markdown 预览和导出位置。
 5. 分别在下载、FFmpeg、ASR、抽帧和 OCR 阶段取消任务，确认任务停止、文件句柄释放且无残留进程。
 6. 对失败/中断任务执行重试，核对 attempt 增加、快照不变，并只复用指纹一致的帧/OCR。
-7. 运行联合启动，验证前端、健康检查、OpenAPI、SSE 和 `Ctrl+C` 清理。
+7. 启动便携版，验证前端、健康检查、任务读取/创建、缺失 Gateway 提示和退出清理。
 
 ASR 部署与横向结果见 `docs/MODEL_DEPLOYMENT_REPORT.md`、`docs/ASR_MODEL_COMPARISON.md`；OCR 部署与真实全链路结果见 `docs/OCR_MODEL_DEPLOYMENT_REPORT.md`、`docs/OCR_FUSION_ACCEPTANCE_REPORT.md`。
 
@@ -318,4 +353,7 @@ ASR 部署与横向结果见 `docs/MODEL_DEPLOYMENT_REPORT.md`、`docs/ASR_MODEL
 - SSE 是轻量状态快照，不是可重放事件日志。
 - 当前视觉去重使用内容裁剪 dHash 与灰度像素差异，不是语义视觉模型；边缘情况按保留优先。
 - OCR 事件只做确定性空白清理、块级去重和相似页合并，不补写、改写或总结识别文本。
-- 最终 Obsidian Markdown、文本大模型轻度编辑、RAG/问答/总结、原生文件选择器和桌面打包尚未实现。
+- Windows 发行物是便携目录/ZIP，不是带自动升级和卸载器的 MSI 安装包。
+- 前端由系统浏览器显示；当前没有独立 WebView 窗口或系统托盘。
+- 浏览器内 Markdown 预览是文本预览，不模拟 Obsidian 的完整主题与插件渲染。
+- RAG、问答、自动总结、向量数据库、Embedding 和语义搜索是永久排除功能，不是待办事项。

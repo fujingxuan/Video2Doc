@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.router import router
@@ -37,8 +40,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Video2Doc API",
-    version="0.2.0",
-    description="Local API with a persistent serial real-media and ASR Pipeline.",
+    version="1.0.0",
+    description="Local faithful media-to-Obsidian application API.",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -49,6 +52,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router, prefix=settings.api_prefix)
+
+frontend_directory = Path(
+    os.getenv(
+        "VIDEO2DOC_FRONTEND_DIR",
+        str(Path(__file__).resolve().parents[2] / "frontend" / "dist"),
+    )
+)
+frontend_assets = frontend_directory / "assets"
+if frontend_assets.is_dir():
+    app.mount("/assets", StaticFiles(directory=frontend_assets), name="frontend-assets")
 
 
 @app.exception_handler(AppError)
@@ -68,6 +81,9 @@ async def handle_database_error(_request: Request, exc: SQLAlchemyError) -> JSON
     )
 
 
-@app.get("/", include_in_schema=False)
-def root() -> dict[str, str]:
+@app.get("/", include_in_schema=False, response_model=None)
+def root() -> FileResponse | dict[str, str]:
+    index = frontend_directory / "index.html"
+    if index.is_file():
+        return FileResponse(index)
     return {"service": "Video2Doc", "docs": "/docs", "health": f"{settings.api_prefix}/health"}

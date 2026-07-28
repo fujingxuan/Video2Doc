@@ -7,11 +7,43 @@ from app.services.gateways import seed_default_gateways
 from tests.helpers import wait_for_status
 
 
-def test_health_models_profiles_settings_and_immutable_snapshot(client: TestClient) -> None:
+def test_health_models_profiles_settings_and_immutable_snapshot(
+    client: TestClient,
+    monkeypatch,
+) -> None:
     health = client.get("/api/v1/health")
     assert health.status_code == 200
     assert health.json()["database"] == "ok"
     assert health.json()["queue_worker"] == "running"
+    root = client.get("/")
+    assert root.status_code == 200
+    assert "text/html" in root.headers["content-type"]
+    assert "Video2Doc" in root.text
+    monkeypatch.setattr(
+        "app.api.router.media_tool_status",
+        lambda _settings: {
+            "platform": "nt",
+            "tools": {"ffmpeg": {"available": True}},
+            "data_directory": "D:\\Video2Doc",
+            "log_directory": "D:\\Video2Doc\\logs",
+            "api_prefix": "/api/v1",
+            "port": 8000,
+        },
+    )
+    system = client.get("/api/v1/system/status")
+    assert system.status_code == 200
+    assert system.json()["tools"]["ffmpeg"]["available"] is True
+    monkeypatch.setattr(
+        "app.api.router.select_media_files",
+        lambda: [r"D:\Video2Doc-Test\sample.mp4"],
+    )
+    selected = client.post("/api/v1/system/select-media")
+    assert selected.json()["paths"] == [r"D:\Video2Doc-Test\sample.mp4"]
+    shutdown_called: list[bool] = []
+    client.app.state.request_shutdown = lambda: shutdown_called.append(True)
+    shutdown = client.post("/api/v1/system/shutdown")
+    assert shutdown.json()["status"] == "shutting_down"
+    assert shutdown_called == [True]
 
     model_specs = [
         ("whisper-large-v3", ["ASR"]),
@@ -107,6 +139,14 @@ def test_health_models_profiles_settings_and_immutable_snapshot(client: TestClie
     # the referenced credential itself.
     assert "oneapi_api_key" not in settings_response.json()
     assert "oneapi_api_key_ref" not in settings_response.json()
+    unsafe_inbox = client.put(
+        "/api/v1/settings",
+        json={
+            "obsidian_vault_path": "D:\\Video2Doc-Test\\Obsidian-Test-Vault",
+            "inbox_path": "..\\outside",
+        },
+    )
+    assert unsafe_inbox.status_code == 409
 
     created = client.post(
         "/api/v1/tasks",
@@ -120,7 +160,11 @@ def test_health_models_profiles_settings_and_immutable_snapshot(client: TestClie
     assert created.status_code == 201, created.text
     task_id = created.json()[0]["id"]
     snapshot_before = client.get(f"/api/v1/tasks/{task_id}/snapshot").json()
-    assert snapshot_before["schema_version"] == 4
+    assert snapshot_before["schema_version"] == 5
+    assert snapshot_before["processing"]["prompt_version"] == "faithful-edit-v1"
+    assert snapshot_before["processing"]["markdown_template_version"] == "obsidian-v1"
+    assert snapshot_before["export"]["conflict_policy"] == "rename"
+    assert snapshot_before["export"]["keep_json_sidecar"] is True
     assert snapshot_before["processing"]["frame_sampling_strategy"] == "hybrid"
     assert snapshot_before["processing"]["fusion_window_seconds"] == 8.0
     assert snapshot_before["models"]["asr"] == "test-asr"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import json
 import re
@@ -30,6 +31,7 @@ class OcrBlock:
     reading_order: int | None = None
     language: str | None = None
     uncertain: bool = False
+    block_type: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -208,6 +210,151 @@ class UnifiedOcrGatewayClient:
         return payload
 
 
+class PaddleXLayoutParsingOcrClient:
+    """Adapter for the official PaddleOCR-VL/PaddleX serving protocol."""
+
+    name = "paddlex-layout-parsing-v1"
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str = "",
+        timeout_seconds: float = 300.0,
+        max_retries: int = 1,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.endpoint = gateway_endpoint(base_url, "/layout-parsing")
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+        self.max_retries = max(0, min(max_retries, 10))
+        self.transport = transport
+        self.trust_env = trust_environment_proxy(self.endpoint)
+
+    async def recognize(
+        self,
+        image_path: Path,
+        *,
+        model: str,
+        raw_path: Path,
+        frame_id: str | None = None,
+        media_timestamp: float | None = None,
+        language: str | None = None,
+        cancel_check: OcrCancelCheck | None = None,
+    ) -> OcrResult:
+        started = time.monotonic()
+        last_error: PipelineError | None = None
+        for retry_index in range(self.max_retries + 1):
+            await _ensure_ocr_active(cancel_check)
+            try:
+                payload = await self._request(image_path, cancel_check=cancel_check)
+                write_json(raw_path, redact_sensitive(payload))
+                return normalize_paddlex_layout_response(
+                    payload,
+                    model=model,
+                    raw_path=raw_path,
+                    frame_id=frame_id,
+                    media_timestamp=media_timestamp,
+                    language=language,
+                    elapsed_seconds=time.monotonic() - started,
+                )
+            except PipelineError as exc:
+                last_error = exc
+                if not exc.retryable or retry_index >= self.max_retries:
+                    raise
+                await _cancel_aware_delay(min(4.0, 0.5 * (2**retry_index)), cancel_check)
+        raise last_error or PipelineError("OCR_GATEWAY_FAILED", "PaddleX OCR 请求失败")
+
+    async def _request(
+        self,
+        image_path: Path,
+        *,
+        cancel_check: OcrCancelCheck | None,
+    ) -> dict[str, Any]:
+        try:
+            encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        except OSError as exc:
+            raise PipelineError(
+                "OCR_INPUT_UNREADABLE",
+                "无法读取待识别画面",
+                technical_detail=str(exc),
+            ) from exc
+        request_payload = {
+            "file": encoded,
+            "fileType": 1,
+            "useDocOrientationClassify": False,
+            "useDocUnwarping": False,
+            "useLayoutDetection": True,
+            "useChartRecognition": True,
+            "useSealRecognition": False,
+            "formatBlockContent": True,
+            "prettifyMarkdown": False,
+            "restructurePages": False,
+            "returnMarkdownImages": False,
+            "visualize": False,
+            "temperature": 0,
+        }
+
+        async def send() -> httpx.Response:
+            try:
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(self.timeout_seconds),
+                    transport=self.transport,
+                    trust_env=self.trust_env,
+                ) as client:
+                    return await client.post(
+                        self.endpoint,
+                        headers=(
+                            {"Authorization": f"Bearer {self.api_key}"}
+                            if self.api_key
+                            else {}
+                        ),
+                        json=request_payload,
+                    )
+            except httpx.TimeoutException as exc:
+                raise PipelineError(
+                    "OCR_GATEWAY_TIMEOUT", "PaddleX OCR 请求超时", retryable=True
+                ) from exc
+            except httpx.NetworkError as exc:
+                raise PipelineError(
+                    "OCR_GATEWAY_UNAVAILABLE",
+                    "PaddleX OCR 服务无法连接",
+                    technical_detail=str(exc),
+                    retryable=True,
+                ) from exc
+
+        response = await _await_ocr_request(send(), cancel_check)
+        if response.status_code in {401, 403}:
+            raise PipelineError("OCR_GATEWAY_AUTH_FAILED", "PaddleX OCR 服务认证失败")
+        if response.status_code == 429 or response.status_code >= 500:
+            raise PipelineError(
+                "OCR_GATEWAY_RETRYABLE",
+                f"PaddleX OCR 服务暂时不可用（HTTP {response.status_code}）",
+                retryable=True,
+            )
+        if response.status_code >= 400:
+            raise PipelineError(
+                "OCR_GATEWAY_FAILED",
+                f"PaddleX OCR 请求失败（HTTP {response.status_code}）",
+            )
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise PipelineError(
+                "OCR_GATEWAY_INVALID_RESPONSE", "PaddleX OCR 返回了无效 JSON"
+            ) from exc
+        if not isinstance(payload, dict):
+            raise PipelineError("OCR_GATEWAY_INVALID_RESPONSE", "PaddleX OCR 返回格式错误")
+        error_code = payload.get("errorCode")
+        if error_code not in {None, 0, "0"}:
+            raise PipelineError(
+                "OCR_GATEWAY_FAILED",
+                "PaddleX OCR 未能完成识别",
+                technical_detail=str(payload.get("errorMsg") or error_code),
+            )
+        return payload
+
+
 def normalize_ocr_response(
     payload: dict[str, Any],
     *,
@@ -277,6 +424,94 @@ def normalize_ocr_response(
             if payload.get("elapsed_seconds") is not None
             else elapsed_seconds
         ),
+    )
+
+
+def normalize_paddlex_layout_response(
+    payload: dict[str, Any],
+    *,
+    model: str,
+    raw_path: Path,
+    frame_id: str | None = None,
+    media_timestamp: float | None = None,
+    language: str | None = None,
+    elapsed_seconds: float | None = None,
+) -> OcrResult:
+    result = payload.get("result")
+    pages = result.get("layoutParsingResults") if isinstance(result, dict) else None
+    if not isinstance(pages, list) or not pages:
+        raise PipelineError(
+            "OCR_GATEWAY_INVALID_RESPONSE",
+            "PaddleX OCR 响应缺少 layoutParsingResults",
+        )
+    blocks: list[OcrBlock] = []
+    markdown_parts: list[str] = []
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        pruned = page.get("prunedResult")
+        parsing_items = pruned.get("parsing_res_list") if isinstance(pruned, dict) else None
+        if isinstance(parsing_items, list):
+            for index, item in enumerate(parsing_items):
+                if not isinstance(item, dict):
+                    continue
+                text = _clean_ocr_text(optional_text(item.get("block_content")) or "")
+                if not text:
+                    continue
+                raw_box = item.get("block_bbox")
+                box = (
+                    tuple(float(value) for value in raw_box)
+                    if isinstance(raw_box, list)
+                    and len(raw_box) >= 4
+                    and all(isinstance(value, (int, float)) for value in raw_box)
+                    else None
+                )
+                raw_order = item.get("block_order")
+                if not isinstance(raw_order, int):
+                    raw_order = item.get("block_id")
+                blocks.append(
+                    OcrBlock(
+                        text=text,
+                        bounding_box=box,
+                        confidence=None,
+                        reading_order=raw_order if isinstance(raw_order, int) else index,
+                        language=language,
+                        block_type=optional_text(item.get("block_label")),
+                    )
+                )
+        markdown = page.get("markdown")
+        markdown_text = (
+            _clean_ocr_text(optional_text(markdown.get("text")) or "")
+            if isinstance(markdown, dict)
+            else ""
+        )
+        if markdown_text:
+            markdown_parts.append(markdown_text)
+    text = "\n\n".join(item for item in markdown_parts if item)
+    if not text and blocks:
+        text = "\n".join(item.text for item in blocks)
+    if not text:
+        raise PipelineError("OCR_GATEWAY_INVALID_RESPONSE", "PaddleX OCR 未返回文字内容")
+    if not blocks:
+        blocks.append(
+            OcrBlock(
+                text=text,
+                bounding_box=None,
+                confidence=None,
+                reading_order=0,
+                language=language,
+            )
+        )
+    return OcrResult(
+        provider="paddlex-layout-parsing-v1",
+        model=model,
+        text=text,
+        blocks=tuple(blocks),
+        raw_response_reference=str(raw_path),
+        frame_id=frame_id,
+        media_timestamp=media_timestamp,
+        language=language,
+        elapsed_seconds=elapsed_seconds,
     )
 
 

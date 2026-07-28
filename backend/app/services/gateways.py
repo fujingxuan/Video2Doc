@@ -451,6 +451,46 @@ def seed_default_gateways(session: Session) -> None:
                 }
             ],
         },
+        {
+            "name": "docker-paddleocr-vl",
+            "gateway_type": "OCR",
+            "protocol": "paddlex-layout-parsing-v1",
+            "base_url": "http://127.0.0.1:8202",
+            "enabled": False,
+            "settings": {
+                "deployment_status": "discovered_not_running",
+                "timeout_seconds": 600,
+                "max_retries": 1,
+                "runtime": "docker-paddleocr-vl",
+                "model_name": "PaddleOCR-VL-1.6-0.9B",
+                "managed_lifecycle": False,
+                "discovered_compose": r"D:\Tools\paddle ocr\compose.yaml",
+                "discovered_vlm_base_url": "http://127.0.0.1:8118/v1",
+            },
+            "models": [
+                {
+                    "model_name": "PaddleOCR-VL-1.6-0.9B",
+                    "display_name": "PaddleOCR-VL 1.6 (external Docker)",
+                    "supports_confidence": False,
+                    "supports_language_detection": False,
+                    "languages": ["zh", "en"],
+                    "settings": {
+                        "device": "docker-gpu-vlm",
+                        "managed_lifecycle": False,
+                    },
+                    "capabilities": {
+                        "local": True,
+                        "docker": True,
+                        "layout_parsing": True,
+                        "text_blocks": True,
+                        "bounding_boxes": True,
+                        "reading_order": True,
+                        "markdown": True,
+                        "raw_response": True,
+                    },
+                }
+            ],
+        },
     ]
     existing_gateways = {
         item.name: item

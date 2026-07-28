@@ -6,7 +6,7 @@
 
 - `[x]` 已实现并由自动化或实际命令验证
 - `[~]` 已实现，但真实外部凭据/媒体的手工验收仍待用户环境验证
-- `[ ]` 后续阶段
+- `[ ]` 尚未实现或未验证
 
 ## 阶段 0-3：第一轮工程与任务系统
 
@@ -124,29 +124,49 @@
 - [x] 本地 PP-OCRv5 真实帧推理：40 块，全部含置信度、矩形框和多边形
 - [x] `D:\Video2Doc-Test\sample.mp4` 真实数据库 Worker 全链路
 - [x] 真实 OCR Gateway 中断后结构化失败、重启和逐帧 OCR 复用完成
-- [x] 后端 68 tests、前端 typecheck/test/build、Alembic heads/check、脚本语法和 diff 检查
+- [x] OCR/Fusion 阶段后端 69 tests、前端 typecheck/test/build、Alembic heads/check、脚本语法和 diff 检查
 
-## 后续阶段（不属于本次范围）
+## 阶段 8：结构化文档与忠实文本整理
 
-### 文本轻度编辑与融合
+- [x] `Document` / section / block / timestamp / source reference 类型化 IR
+- [x] ASR、OCR、frame 来源独立保留并按时间构建文档
+- [x] 无文本模型的确定性分段和自然标题回退
+- [x] OneAPI Chat Completions 受约束 JSON 按块轻度编辑
+- [x] 原文、编辑文本、模型、提示词版本、diff、来源与验证结果持久化
+- [x] source_id、数字、专有词形、代码、公式、长度和顺序自动门禁
+- [x] 结构错误、来源丢失或明显删减时拒绝响应并回退原文
+- [x] Document/文本忠实性单元和 Worker 集成测试
 
-- [ ] ASR/OCR/fusion 独立提示词
-- [ ] OneAPI TextModelProvider
-- [ ] 只执行 PRD 允许的轻度编辑
-- [ ] 基于当前结构化融合结果做忠实轻度编辑，不删除来源差异
+## 阶段 9：Markdown 与 Obsidian
 
-### Markdown 与 Obsidian
+- [x] YAML frontmatter、来源、模型、配置、正文、时间戳和追溯附录
+- [x] 语音、画面文字和关键图片按时间并列保留
+- [x] 本地媒体只显示时间戳，不伪造不可用协议链接
+- [x] 图片使用稳定文件名复制到相对附件目录
+- [x] timeline/sources/document JSON sidecar 与可选字幕/转写复制
+- [x] Vault/Inbox 校验、Windows 文件名清理和目录创建
+- [x] rename/fail/overwrite 冲突策略
+- [x] stage/commit/rollback 原子 bundle 导出、取消和失败回滚
+- [x] 导出索引、打开工作区/目录/Markdown API
+- [x] `0007_document_exports` 与任务快照版本 5
 
-- [ ] 真实内容 Markdown renderer
-- [ ] 来源、隐藏时间戳和原始资料索引
-- [ ] 工作区与 Obsidian Inbox 双副本
-- [ ] 原生打开文件/目录辅助接口
+## 阶段 10：前端闭环与 Windows 发行
 
-### 发布强化
+- [x] 新建任务的媒体选择、ASR/OCR、抽帧、文本整理与导出配置
+- [x] 运行阶段、耗时、统计、attempt、错误和日志摘要
+- [x] ASR/OCR/融合/Document/Markdown/导出详情
+- [x] 取消、重试、打开结果和复制错误
+- [x] 媒体工具、Gateway、OneAPI、Obsidian 和运行位置设置
+- [x] Windows WinForms 本地媒体选择器
+- [x] FastAPI 托管 production React
+- [x] 单入口 launcher：迁移、端口检查、启动、浏览器和受管进程清理
+- [x] PyInstaller 便携目录与 ZIP
+- [x] 打包版对 `sample.mp4` 执行真实 Fun-ASR + PP-OCRv5 + Markdown + Obsidian 导出
+- [x] 打包版故障、重试复用、取消、启动和关闭验收
+- [x] 完整结果见 `docs/APP_COMPLETION_ACCEPTANCE_REPORT.md`
 
-- [ ] 静音边界分块评估
-- [ ] SSE 可重放事件（有实际需要时）
-- [ ] 原生文件/目录选择
-- [ ] Windows 桌面打包、安装和升级
+## 有意不实施与可选强化
 
-明确不计划实现：自动总结、核心观点、问答、RAG、向量库、知识图谱、多任务并发、多用户和云部署。
+以下不是后续功能：自动总结、核心观点、问答、RAG、向量库、Embedding、语义搜索、知识图谱、多用户和云端知识库。
+
+仍可在不改变产品定位时评估：静音边界分块、确有需要时的 SSE 可重放事件、MSI/自动升级器、独立 WebView 窗口。它们不是当前便携版可用闭环的依赖。

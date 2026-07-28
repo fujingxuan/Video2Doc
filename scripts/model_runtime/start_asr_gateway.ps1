@@ -69,6 +69,42 @@ New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 $stdout = Join-Path $logDirectory "gateway.stdout.log"
 $stderr = Join-Path $logDirectory "gateway.stderr.log"
 $pidPath = Join-Path $logDirectory "gateway.pid"
+
+# Managed Windows shells may contain both "Path" and "PATH". Start-Process
+# rejects that inherited environment as duplicate dictionary keys, so retain
+# one canonical entry without changing its value.
+$processEnvironment = [System.Environment]::GetEnvironmentVariables(
+    [System.EnvironmentVariableTarget]::Process
+)
+$pathKeys = @(
+    $processEnvironment.Keys |
+        Where-Object {
+            [string]::Equals(
+                [string]$_,
+                "Path",
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        }
+)
+if ($pathKeys.Count -gt 1) {
+    $canonicalKey = @($pathKeys | Where-Object { [string]$_ -ceq "Path" })[0]
+    if (-not $canonicalKey) { $canonicalKey = $pathKeys[0] }
+    $canonicalValue = [string]$processEnvironment[$canonicalKey]
+    foreach ($key in $pathKeys) {
+        if ([string]$key -cne [string]$canonicalKey) {
+            [System.Environment]::SetEnvironmentVariable(
+                [string]$key,
+                $null,
+                [System.EnvironmentVariableTarget]::Process
+            )
+        }
+    }
+    [System.Environment]::SetEnvironmentVariable(
+        "Path",
+        $canonicalValue,
+        [System.EnvironmentVariableTarget]::Process
+    )
+}
 $process = Start-Process -FilePath "wsl.exe" -ArgumentList @("-d", $Distribution, "--", "bash", $launcherPath, $Provider, $wslModelRoot, $python, $servicePath, $Port) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 Set-Content -LiteralPath $pidPath -Value $process.Id -Encoding ASCII
 

@@ -87,6 +87,29 @@ async def discover_gateway_models(
 ) -> list[dict[str, Any]]:
     if gateway.protocol == "dashscope-fun-asr-websocket":
         return []
+    if gateway.protocol == "paddlex-layout-parsing-v1":
+        model_name = str(
+            (gateway.settings or {}).get("model_name") or "PaddleOCR-VL-1.6-0.9B"
+        )
+        return [
+            {
+                "model_name": model_name,
+                "display_name": "PaddleOCR-VL 1.6 (Docker/PaddleX)",
+                "capabilities": {
+                    "local": True,
+                    "docker": True,
+                    "layout_parsing": True,
+                    "text_blocks": True,
+                    "bounding_boxes": True,
+                    "reading_order": True,
+                    "markdown": True,
+                    "confidence": False,
+                    "managed_lifecycle": bool(
+                        (gateway.settings or {}).get("managed_lifecycle")
+                    ),
+                },
+            }
+        ]
     endpoint = gateway_endpoint(gateway.base_url, "/v1/models")
     secret = os.getenv(gateway.secret_env_name, "") if gateway.secret_env_name else ""
     headers = {"Authorization": f"Bearer {secret}"} if secret else {}

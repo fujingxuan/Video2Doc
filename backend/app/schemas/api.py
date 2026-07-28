@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 import re
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -322,6 +323,25 @@ class SettingsUpdate(BaseModel):
     default_keep_timestamps: bool | None = None
     default_keep_downloaded_media: bool | None = None
     default_keep_frames: bool | None = None
+    default_text_edit_enabled: bool | None = None
+    default_text_model_name: str | None = Field(default=None, max_length=300)
+    text_prompt_version: str | None = Field(default=None, max_length=100)
+    faithfulness_min_length_ratio: float | None = Field(default=None, ge=0.5, le=1.0)
+    faithfulness_formula_symbol_ratio: float | None = Field(
+        default=None, ge=0.5, le=1.0
+    )
+    markdown_template_version: str | None = Field(default=None, max_length=100)
+    image_insertion_policy: str | None = Field(default=None, max_length=100)
+    image_min_gap_seconds: float | None = Field(default=None, ge=0, le=3600)
+    export_filename_template: str | None = Field(default=None, max_length=300)
+    export_attachment_directory_template: str | None = Field(
+        default=None, max_length=300
+    )
+    export_data_directory_template: str | None = Field(default=None, max_length=300)
+    export_conflict_policy: Literal["rename", "fail", "overwrite"] | None = None
+    export_keep_json_sidecar: bool | None = None
+    export_copy_transcript: bool | None = None
+    export_copy_subtitles: bool | None = None
 
 
 class SettingsRead(BaseModel):
@@ -342,6 +362,21 @@ class SettingsRead(BaseModel):
     default_keep_timestamps: bool
     default_keep_downloaded_media: bool
     default_keep_frames: bool
+    default_text_edit_enabled: bool
+    default_text_model_name: str | None
+    text_prompt_version: str
+    faithfulness_min_length_ratio: float
+    faithfulness_formula_symbol_ratio: float
+    markdown_template_version: str
+    image_insertion_policy: str
+    image_min_gap_seconds: float
+    export_filename_template: str
+    export_attachment_directory_template: str
+    export_data_directory_template: str
+    export_conflict_policy: Literal["rename", "fail", "overwrite"]
+    export_keep_json_sidecar: bool
+    export_copy_transcript: bool
+    export_copy_subtitles: bool
     updated_at: datetime
 
 
@@ -368,6 +403,30 @@ class TaskBatchCreate(BaseModel):
     asr_model_id: int | None = None
     asr_gateway_model_id: int | None = None
     ocr_gateway_model_id: int | None = None
+    text_model_id: int | None = None
+    export_vault_path: str | None = None
+    export_inbox_relative_path: str | None = None
+
+    @field_validator("export_vault_path")
+    @classmethod
+    def export_vault_must_be_absolute(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip()
+        if "\x00" in normalized or not Path(normalized).is_absolute():
+            raise ValueError("Export Vault path must be an absolute path")
+        return normalized
+
+    @field_validator("export_inbox_relative_path")
+    @classmethod
+    def export_inbox_must_be_relative(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip()
+        path = Path(normalized)
+        if "\x00" in normalized or path.is_absolute() or ".." in path.parts:
+            raise ValueError("Export Inbox must be a safe relative path")
+        return normalized
 
 
 class SnapshotRead(BaseModel):
@@ -415,6 +474,9 @@ class TaskRead(BaseModel):
     ocr_timeline_path: str | None
     fusion_timeline_path: str | None
     artifacts_index_path: str | None
+    document_path: str | None
+    markdown_path: str | None
+    export_path: str | None
     created_at: datetime
     updated_at: datetime
     started_at: datetime | None
@@ -429,6 +491,9 @@ class TaskDetail(TaskRead):
     frame_summary: dict[str, Any] | None = None
     ocr_preview: dict[str, Any] | None = None
     fusion_preview: dict[str, Any] | None = None
+    document_preview: dict[str, Any] | None = None
+    markdown_preview: str | None = None
+    exports: list[dict[str, Any]] = Field(default_factory=list)
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
 
 

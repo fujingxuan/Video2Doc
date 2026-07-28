@@ -9,9 +9,13 @@ import type {
   QueueState,
   Task,
   TaskDetail,
+  SystemStatus,
 } from "../types";
 
-export const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api/v1").replace(
+const defaultApiBase = ["5173", "4173"].includes(window.location.port)
+  ? "http://127.0.0.1:8000/api/v1"
+  : `${window.location.origin}/api/v1`;
+export const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? defaultApiBase).replace(
   /\/$/,
   "",
 );
@@ -101,6 +105,11 @@ export const api = {
   taskFrames: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/frames`),
   taskOcr: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/ocr`),
   taskTimeline: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/timeline`),
+  taskDocument: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/document`),
+  openTaskTarget: (id: number, target: "workspace" | "export_directory" | "markdown") =>
+    request<{ target: string; path: string }>(`/tasks/${id}/open/${target}`, {
+      method: "POST",
+    }),
   artifactUrl: (id: number, path: string) =>
     `${API_BASE}/tasks/${id}/artifacts/${path
       .split("/")
@@ -111,4 +120,7 @@ export const api = {
   cancelTask: (id: number) => request<Task>(`/tasks/${id}/cancel`, { method: "POST" }),
   retryTask: (id: number) => request<Task>(`/tasks/${id}/retry`, { method: "POST" }),
   queue: () => request<QueueState>("/queue"),
+  systemStatus: () => request<SystemStatus>("/system/status"),
+  selectMedia: () => request<{ paths: string[] }>("/system/select-media", { method: "POST" }),
+  shutdownApp: () => request<{ status: string }>("/system/shutdown", { method: "POST" }),
 };

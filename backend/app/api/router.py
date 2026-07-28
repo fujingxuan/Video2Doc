@@ -4,8 +4,8 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, Query, Response, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -37,6 +37,7 @@ from app.schemas.api import (
 from app.services.catalog import CatalogService
 from app.services.gateways import GatewayService
 from app.services.settings import SettingsService
+from app.services.system import media_tool_status, select_media_files
 from app.services.tasks import TaskService
 from app.workers.queue import queue_worker
 
@@ -138,7 +139,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="0.3.0",
+        version="1.0.0",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -217,6 +218,28 @@ def update_settings(payload: SettingsUpdate, session: Session = Depends(get_db))
     return SettingsService(session).update(payload)
 
 
+@router.get("/system/status", response_model=dict, tags=["system"])
+def system_status(session: Session = Depends(get_db)) -> dict:
+    settings = SettingsService(session).entity()
+    return media_tool_status(settings)
+
+
+@router.post("/system/select-media", response_model=dict, tags=["system"])
+def select_media() -> dict[str, list[str]]:
+    return {"paths": select_media_files()}
+
+
+@router.post("/system/shutdown", response_model=dict, tags=["system"])
+def shutdown_application(request: Request) -> dict[str, str]:
+    callback = getattr(request.app.state, "request_shutdown", None)
+    if not callable(callback):
+        from app.core.errors import ConflictError
+
+        raise ConflictError("This development server is not managed by the Windows launcher")
+    callback()
+    return {"status": "shutting_down"}
+
+
 @router.post("/tasks", response_model=list[TaskRead], status_code=status.HTTP_201_CREATED, tags=["tasks"])
 def create_tasks(payload: TaskBatchCreate, session: Session = Depends(get_db)) -> list[TaskRead]:
     return TaskService(session, queue_worker).create_batch(payload)
@@ -265,6 +288,31 @@ def get_task_ocr(task_id: int, session: Session = Depends(get_db)) -> dict:
 @router.get("/tasks/{task_id}/timeline", response_model=dict, tags=["tasks"])
 def get_task_timeline(task_id: int, session: Session = Depends(get_db)) -> dict:
     return TaskService(session).fusion(task_id)
+
+
+@router.get("/tasks/{task_id}/document", response_model=dict, tags=["tasks"])
+def get_task_document(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session).document(task_id)
+
+
+@router.get("/tasks/{task_id}/markdown", tags=["tasks"])
+def get_task_markdown(
+    task_id: int,
+    session: Session = Depends(get_db),
+) -> PlainTextResponse:
+    return PlainTextResponse(
+        TaskService(session).markdown(task_id),
+        media_type="text/markdown; charset=utf-8",
+    )
+
+
+@router.post("/tasks/{task_id}/open/{target}", response_model=dict, tags=["tasks"])
+def open_task_target(
+    task_id: int,
+    target: str,
+    session: Session = Depends(get_db),
+) -> dict[str, str]:
+    return TaskService(session).open_target(task_id, target)
 
 
 @router.get("/tasks/{task_id}/artifacts/{artifact_path:path}", tags=["tasks"])
