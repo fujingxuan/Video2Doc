@@ -12,6 +12,26 @@
 
 软件的主要价值是降低从视频中获取信息的时间成本，把线性的视频学习过程转换为可搜索、可阅读的文字材料。AI 不负责替用户理解、总结和提炼知识。
 
+## 当前模型接入架构补充
+
+由于 ASR、OCR 与文本处理模型在接口协议、流式事件、时间戳、模型加载、显存管理和取消机制方面存在差异，Video2Doc 不再假设所有模型都由 OneAPI 统一管理。
+
+当前职责划分为：
+
+```text
+文本处理模型
+    → OneAPI 或其他 Text Gateway
+
+ASR 模型
+    → 独立 ASR Gateway
+
+OCR 模型
+    → 独立 OCR Gateway
+```
+
+Gateway 表示“如何连接和调用模型”，Model 表示“Gateway 后面的具体模型及其能力”。任务创建时必须把选定 Gateway、模型、能力、分块策略、超时、重试和密钥环境变量名称写入不可变配置快照，但不得保存密钥实际值。
+
+
 ---
 
 # 一、必须遵守的产品原则
@@ -96,26 +116,49 @@ Transformer 成功的核心秘密
 用户设备环境：
 
 ```text
-CPU：Intel 9955HX
+CPU：AMD Ryzen 9 9955HX
 GPU：RTX 5070 Ti Laptop
 显存：12GB
 操作系统：Windows
 ```
 
-用户已经配置 OneAPI。
+用户已经配置 OneAPI，但 OneAPI 只作为文本处理模型的主要接入方式，不再承担全部 ASR 与 OCR 模型的统一代理职责。
 
-包括 Ollama 在内的本地模型，也会由用户接入 OneAPI。因此 Video2Doc 不需要直接连接 Ollama。
+模型接入按照能力类型分层：
 
-Video2Doc 中所有需要通过 API 调用的模型，都统一通过 OneAPI 的 OpenAI 兼容接口调用。
+```text
+TEXT_PROCESSING
+    → OneAPI 或其他 Text Gateway
 
-API 配置不得硬编码。
+ASR
+    → 独立 ASR Gateway
+       ├── 云端流式或离线 ASR
+       └── 本地 ASR Runtime
 
-使用环境变量或本地安全配置保存：
+OCR
+    → 独立 OCR Gateway
+       ├── 云端 OCR
+       └── 本地 OCR Runtime
+```
+
+包括 Ollama 在内的通用文本模型可以继续由用户接入 OneAPI。对于具有专用音频、图像、流式、时间戳或本地运行协议的模型，Video2Doc 应通过对应 Gateway 适配器调用，不能为了表面统一而强制转换成 OneAPI 接口。
+
+API、Gateway 和本地 Runtime 配置不得硬编码。
+
+文本模型可以使用：
 
 ```text
 ONEAPI_BASE_URL
 ONEAPI_API_KEY
 ```
+
+其他云端 Gateway 应通过“密钥环境变量名称”引用凭据，例如：
+
+```text
+DASHSCOPE_API_KEY
+```
+
+数据库、任务快照、日志、异常和前端只能保存或显示环境变量名称，不得保存或输出密钥实际值。
 
 仓库中只能提交 `.env.example`，不能提交真实密钥。
 
@@ -128,9 +171,11 @@ ONEAPI_API_KEY
 * yt-dlp；
 * FFmpeg；
 * Python 音视频处理工具；
-* ASR 工具；
-* PaddleOCR 或其他本地 OCR 命令；
-* OneAPI；
+* ASR 工具与本地 ASR Runtime；
+* PaddleOCR 或其他本地 OCR Runtime；
+* 独立 ASR Gateway；
+* 独立 OCR Gateway；
+* OneAPI 或其他 Text Gateway；
 * 本地文件系统。
 
 建议技术栈可以采用：
@@ -179,7 +224,9 @@ Pipeline 执行层
 ```text
 MediaDownloader
 AudioExtractor
+ASRGateway
 ASRProvider
+OCRGateway
 OCRProvider
 TextModelProvider
 OutputWriter
@@ -249,20 +296,63 @@ OutputWriter
 
 不要让队列状态只存在于内存中。
 
-## 3. Model
+## 3. Gateway
 
-模型由用户手动添加。
+Gateway 表示模型的连接方式、调用协议和运行边界。
 
-不自动从 OneAPI 拉取模型列表。
+第一版至少区分：
 
-添加一个模型时，只需要：
+```text
+ASR_GATEWAY
+OCR_GATEWAY
+TEXT_GATEWAY
+```
+
+Gateway 至少包含：
+
+* 名称；
+* Gateway 类型；
+* 协议类型；
+* Base URL 或本地 Runtime 地址；
+* 密钥环境变量名称；
+* 是否启用；
+* 健康状态；
+* 最近检查时间；
+* 超时和重试设置；
+* 可选备注。
+
+密钥环境变量名称可以保存到数据库和配置快照，但密钥实际值不得进入数据库、任务快照、日志、异常或前端。
+
+Gateway 可以是：
+
+```text
+OneAPI 文本 Gateway
+DashScope ASR Gateway
+本地 FireRed ASR Gateway
+本地 Qwen ASR Gateway
+本地 Whisper Gateway
+本地或云端 OCR Gateway
+```
+
+服务默认只监听 `127.0.0.1`。除非用户显式开启并承担风险，不得默认绑定公网地址。
+
+## 4. Model
+
+模型由用户手动添加，或由用户主动触发 Gateway 的模型发现后确认添加。
+
+系统不得在后台自动扫描、自动新增或自动启用模型。
+
+每个模型至少包含：
 
 * 模型名称；
+* 显示名称；
+* 所属 Gateway；
 * 可用于哪些处理环节的核心标签；
+* 模型能力；
 * 可选备注；
 * 是否启用。
 
-模型名称同时作为调用 OneAPI 时使用的模型 ID。
+模型名称作为调用所属 Gateway 时使用的模型 ID，而不是默认作为 OneAPI 模型 ID。
 
 核心能力标签采用固定列表：
 
@@ -286,21 +376,35 @@ TEXT_PROCESSING
 例如：
 
 ```text
+Gateway：oneapi-text
 模型名：gpt-5-mini
 标签：TEXT_PROCESSING
 
-模型名：whisper-large-v3
+Gateway：local-whisper
+模型名：large-v3-turbo
 标签：ASR
 
+Gateway：local-ocr
 模型名：paddleocr
 标签：OCR
 ```
 
-不要要求用户填写供应商、厂商或底层模型来源。
+模型能力至少可以表达：
 
-所有模型在 Video2Doc 看来都来自统一的 OneAPI 模型池。
+```text
+是否支持流式
+是否支持句级时间戳
+是否支持词级时间戳
+是否支持置信度
+是否支持语言检测
+最大分块时长
+最大对齐时长
+本地或云端
+```
 
-## 4. Processing Profile
+前端不必要求普通用户理解复杂的底层供应商实现，但必须显示所属 Gateway、模型能力、本地或云端状态和健康状态。
+
+## 5. Processing Profile
 
 界面中可以称为：
 
@@ -314,10 +418,10 @@ TEXT_PROCESSING
 
 ProcessingProfile 不是只保存模型名称，而是保存一整套可复用的处理配置，包括：
 
-* ASR 模型；
+* ASR Gateway 和 ASR 模型；
 * 是否启用 OCR；
-* OCR 模型；
-* 文本处理模型；
+* OCR Gateway 和 OCR 模型；
+* 文本 Gateway 和文本处理模型；
 * 是否删除语气词；
 * 是否修复断句；
 * 是否自动分段；
@@ -325,6 +429,7 @@ ProcessingProfile 不是只保存模型名称，而是保存一整套可复用�
 * 是否保留时间戳；
 * 是否保留原始转写；
 * 是否保留下载媒体；
+* ASR 分块与重叠参数；
 * OCR 抽帧参数；
 * Markdown 模板；
 * Obsidian 输出目录；
@@ -338,7 +443,7 @@ ProcessingProfile 不是只保存模型名称，而是保存一整套可复用�
 快速模式
 ```
 
-由于本地模型也统一经过 OneAPI，所谓“本地模式”只是用户自己配置的一组模型，不需要 Video2Doc 识别模型实际运行位置。
+“本地模式”可以选择本地 ASR/OCR Runtime 和任意可用的文本 Gateway。Video2Doc 必须识别模型是本地还是云端，以便显示运行状态、资源要求和启动方式，但不应把具体供应商逻辑写入 Pipeline。
 
 用户还可以创建自定义模型组。
 
@@ -346,12 +451,17 @@ ProcessingProfile 不是只保存模型名称，而是保存一整套可复用�
 
 临时修改只影响当前任务，不自动覆盖原模型组。
 
-## 5. App Settings
+## 6. App Settings
 
 至少保存：
 
-* OneAPI Base URL；
-* OneAPI API Key 的安全引用或本地配置；
+* OneAPI Text Gateway 的 Base URL；
+* OneAPI API Key 的安全引用或环境变量名称；
+* ASR Gateway 配置；
+* OCR Gateway 配置；
+* Gateway 健康检查和模型发现设置；
+* 本地模型目录；
+* 本地模型服务启动和停止方式；
 * Obsidian Vault 路径；
 * Video2Doc Inbox 路径；
 * Video2Doc 数据资料目录；
@@ -368,7 +478,24 @@ ProcessingProfile 不是只保存模型名称，而是保存一整套可复用�
 
 不是每次强迫用户重新选择预设。
 
-每个任务创建时必须保存配置快照。之后即使全局设置或模型组发生变化，也不能改变历史任务的配置记录。
+每个任务创建时必须保存配置快照。之后即使 Gateway、模型、全局设置或处理方案发生变化，也不能改变历史任务的配置记录。
+
+任务配置快照至少记录：
+
+```text
+Gateway 类型
+Gateway Base URL
+协议类型
+模型名称
+模型能力
+分块和重叠策略
+时间戳策略
+超时
+重试
+密钥环境变量名称
+```
+
+不得记录密钥实际值。
 
 ---
 
@@ -1143,35 +1270,93 @@ Markdown 生成
 * 使用的配置快照；
 * 输出文件路径。
 
-## 4. 模型中心
+## 4. Gateway 与模型中心
+
+### Gateway 管理
 
 功能：
 
-* 手动添加模型；
-* 编辑模型；
-* 删除模型；
-* 启用或停用模型；
-* 设置能力标签；
-* 添加备注。
+* 手动添加 Gateway；
+* 编辑 Gateway；
+* 启用或停用 Gateway；
+* 测试连接；
+* 查看健康状态；
+* 主动发现模型；
+* 查看本地模型 Runtime 的运行状态；
+* 启动、停止或卸载允许由应用管理的本地模型服务。
 
-不自动拉取 OneAPI 模型。
-
-模型表单只要求：
+Gateway 表单至少包含：
 
 ```text
-模型名称
-能力标签
+名称
+Gateway 类型
+协议类型
+Base URL 或本地地址
+密钥环境变量名称
 备注
 是否启用
 ```
 
-模型下拉列表按环节标签过滤。
+前端不得显示密钥实际值。
 
-ASR 下拉列表只显示带 `ASR` 标签的模型。
+### 模型管理
 
-OCR 下拉列表只显示带 `OCR` 标签的模型。
+功能：
 
-文本处理下拉列表只显示带 `TEXT_PROCESSING` 标签的模型。
+* 手动添加模型；
+* 从 Gateway 主动发现模型后确认添加；
+* 编辑模型；
+* 删除模型；
+* 启用或停用模型；
+* 设置能力标签；
+* 设置或查看模型能力；
+* 添加备注。
+
+不得在后台自动从 OneAPI 或其他 Gateway 拉取并启用模型。
+
+模型表单至少包含：
+
+```text
+所属 Gateway
+模型名称
+显示名称
+能力标签
+能力信息
+备注
+是否启用
+```
+
+模型下拉列表按环节标签和 Gateway 状态过滤。
+
+ASR 下拉列表只显示：
+
+```text
+已启用
+所属 ASR Gateway 可用
+带 ASR 标签
+```
+
+的模型。
+
+OCR 下拉列表只显示：
+
+```text
+已启用
+所属 OCR Gateway 可用
+带 OCR 标签
+```
+
+的模型。
+
+文本处理下拉列表只显示：
+
+```text
+已启用
+所属 Text Gateway 可用
+带 TEXT_PROCESSING 标签
+```
+
+的模型。
 
 ## 5. 模型组 / 处理方案
 
@@ -1182,7 +1367,8 @@ OCR 下拉列表只显示带 `OCR` 标签的模型。
 * 复制处理方案；
 * 编辑处理方案；
 * 删除用户方案；
-* 设置默认方案。
+* 设置默认方案；
+* 分别选择 ASR Gateway 模型、OCR Gateway 模型和文本处理模型。
 
 模型组保存完整工作流设置，不只是模型名称。
 
@@ -1190,15 +1376,19 @@ OCR 下拉列表只显示带 `OCR` 标签的模型。
 
 至少包含：
 
-* OneAPI Base URL；
-* OneAPI API Key；
-* 测试 OneAPI 连接；
+* OneAPI Text Gateway Base URL；
+* OneAPI API Key 的安全引用；
+* 测试 OneAPI 文本连接；
+* ASR Gateway 管理入口；
+* OCR Gateway 管理入口；
+* Gateway 健康检查；
+* 本地模型目录；
+* 本地模型 Runtime 启动和停止配置；
 * Obsidian Vault 路径；
 * Video2Doc Inbox 路径；
 * Video2Doc 数据目录；
 * FFmpeg 路径；
 * yt-dlp 路径或运行方式；
-* OCR 外部命令配置；
 * 默认保留策略；
 * 最后一次设置。
 
@@ -1294,16 +1484,20 @@ tests/
 * 健康检查；
 * 基础页面和路由。
 
-## 阶段 2：模型和设置
+## 阶段 2：Gateway、模型和设置
 
 实现：
 
+* ASR/OCR/Text Gateway CRUD；
+* Gateway 健康检查；
+* 用户主动触发的模型发现；
 * 模型 CRUD；
-* 核心标签；
+* 核心标签和模型能力；
 * 处理方案 CRUD；
 * 设置持久化；
 * 上次设置恢复；
-* OneAPI 连接测试。
+* OneAPI 文本连接测试；
+* Gateway 密钥环境变量引用和脱敏。
 
 ## 阶段 3：任务和串行队列
 
@@ -1336,28 +1530,53 @@ tests/
 
 ## 阶段 5：ASR
 
-创建统一 ASR Provider 接口。
+创建统一 ASR Gateway 和 ASR Provider 接口。
 
-第一版可以优先实现 OneAPI 兼容 ASR 调用。
+ASR 不再要求统一经过 OneAPI。至少允许：
 
-如果 OneAPI 的具体 ASR 请求格式无法完全统一，应将差异封装在 Provider 中，不要污染 Pipeline。
+```text
+云端流式 ASR Gateway
+云端离线 ASR Gateway
+本地 ASR Runtime Gateway
+旧 OneAPI/OpenAI 兼容 ASR 适配器（仅在确实兼容时）
+```
 
-保存原始 JSON、SRT、TXT。
+不同 ASR Provider 的协议、流式事件、分块上限、时间戳、取消和重试差异必须封装在 Gateway/Provider 中，不得污染 Pipeline。
+
+离线 ASR 的分块策略必须由模型能力决定。相邻分块默认保留 5 秒重叠，并在结构化合并层根据全局时间戳和规范化文本相似度消除重复；不能把边界重复全部留给后续文本模型清洗。
+
+流式 ASR 在单一连续会话中不得重复发送重叠音频。只有拆分成独立会话时才使用重叠和相同去重机制。
+
+保存原始 JSON、标准化 JSON、SRT、TXT、preview 和分块 manifest。
 
 ## 阶段 6：OCR
 
-创建统一 OCR Provider 接口。
+创建统一 OCR Gateway 和 OCR Provider 接口。
 
-考虑两种接入能力：
+至少允许：
 
 ```text
-OneAPI OCR 模型
-外部本地 OCR 命令
+云端 OCR Gateway
+本地 OCR Runtime Gateway
+外部本地 OCR 命令适配器
+OneAPI OCR 适配器（仅在实例真实支持所需协议时）
 ```
 
-用户当前计划通过 OneAPI 管理模型，但原始 OCR 工具可能仍以本地命令形式运行，因此架构应允许外部 OCR 命令适配器。
+OCR Gateway 应表达：
 
-第一版界面不必暴露复杂供应商概念，但后端需要允许不同执行适配器。
+```text
+健康检查
+模型发现
+全文识别
+文本块和坐标
+置信度
+原始响应
+取消
+超时
+错误分类
+```
+
+第一版界面可以隐藏不必要的供应商细节，但后端必须允许不同执行适配器。
 
 ## 阶段 7：文本清洗和融合
 
@@ -1367,7 +1586,7 @@ OneAPI OCR 模型
 * OCR 清洗；
 * 融合；
 * 提示词模板；
-* OneAPI 文本模型调用；
+* OneAPI 或其他 Text Gateway 调用；
 * 长文本分块；
 * 上下文连续性；
 * 失败重试；
@@ -1601,8 +1820,8 @@ logs/task.log
 * 下载目录监听；
 * 移动端 App；
 * 多任务并发处理；
-* 模型自动发现；
-* OneAPI 模型列表自动拉取；
+* 后台无确认地自动发现、自动新增或自动启用模型；
+* OneAPI 或其他 Gateway 模型列表的定时自动拉取；
 * 自动模型评分；
 * 自动模型回退；
 * 复杂成本预算系统。
@@ -1683,7 +1902,7 @@ docs/IMPLEMENTATION_PLAN.md
 * 提供 PowerShell 启动脚本；
 * 架构文档和实施计划完整。
 
-完成这个基础版本后，再继续接入真实 yt-dlp、FFmpeg、ASR、OCR 和 OneAPI 文本处理。
+完成这个基础版本后，再继续接入真实 yt-dlp、FFmpeg、独立 ASR/OCR Gateway，以及 OneAPI 或其他 Text Gateway 文本处理。
 
 但项目架构从第一轮开始就必须按照真实 Pipeline 设计，不能把模拟任务写成以后难以替换的临时代码。
 
@@ -1701,10 +1920,10 @@ docs/IMPLEMENTATION_PLAN.md
 6. 第一个任务完成后，第二个任务自动开始。
 7. 刷新浏览器后状态不丢失。
 8. 重启后台后已完成和等待任务仍然存在。
-9. 用户可以添加名为 `whisper-large-v3` 的模型并标记为 ASR。
-10. 用户可以添加名为 `paddleocr` 的模型并标记为 OCR。
-11. 用户可以添加名为 `gpt-5-mini` 的模型并标记为 TEXT_PROCESSING。
-12. 创建处理方案时，三个下拉列表只显示符合标签的模型。
+9. 用户可以创建本地 Whisper ASR Gateway，并添加名为 `large-v3` 的模型并标记为 ASR。
+10. 用户可以创建 OCR Gateway，并添加名为 `paddleocr` 的模型并标记为 OCR。
+11. 用户可以创建 OneAPI Text Gateway，并添加名为 `gpt-5-mini` 的模型并标记为 TEXT_PROCESSING。
+12. 创建处理方案时，三个下拉列表只显示标签正确、所属 Gateway 已启用且配置有效的模型。
 13. 用户启用或关闭 OCR。
 14. 新任务自动使用上一次实际使用的配置。
 15. 修改本次任务配置不会自动覆盖处理方案。
@@ -1716,7 +1935,7 @@ docs/IMPLEMENTATION_PLAN.md
 21. 模拟任务失败时，前端能显示明确错误。
 22. 用户可以重试失败任务。
 23. 用户取消任务后，不会继续显示为处理中。
-24. 日志中不出现 API Key。
+24. 数据库、配置快照、日志、异常和前端中不出现任何 Gateway 的密钥实际值。
 
 ---
 
