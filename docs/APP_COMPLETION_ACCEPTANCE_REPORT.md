@@ -114,15 +114,15 @@ D:\Projects\Video2Doc\dist\Video2Doc-Portable.zip
 
 ```text
 便携目录文件：144
-便携目录大小：56.075 MiB
+便携目录大小：56.076 MiB
 Video2Doc.exe SHA-256：
-59EF11D41DA2E863ABCE512DDFA99AD95357C5D222A0802E441F9A465EBB004D
-Video2Doc-Portable.zip：30,877,479 bytes
+BD8984A2B11456360C0BA4B9592F6BE59D722FABA6FB605762959F3D651A5E0A
+Video2Doc-Portable.zip：30,881,759 bytes
 ZIP SHA-256：
-86EC2E38F39667995A5D0D2F6D6D2FFD9FB4BBA0631BC556CD3F941F3CFEBEFE
+EABF40F4A98B9CF0DD30BC6BEE86270627957EB352E295CFDE00DC1C8F79331A
 ```
 
-真实新推理验收所用打包版验证了迁移、前端静态资源、后端健康、已有任务读取、任务创建、工具状态、正常 shutdown 和端口释放。最后一次 UI 文案更新后重新构建的发行包也在隔离 app-home 中完成全迁移、health、前端 HTTP 200、模拟任务 `COMPLETED`、系统工具状态、shutdown 和 8894 端口释放。
+真实新推理验收所用打包版验证了迁移、前端静态资源、后端健康、已有任务读取、任务创建、工具状态、正常 shutdown 和端口释放。最新发行包还在 AnkiConnect 实际占用 8765 的条件下自动选择 8766；第二次启动识别并复用该 Video2Doc 实例，退出后 8766 释放，AnkiConnect 前后均保持可用。
 
 浏览器内可视检查受当前自动化浏览器安全策略拒绝 localhost；前端 production build、静态响应、API 和打包真实任务已验证，但不把这一项写成浏览器视觉回归通过。
 
@@ -131,7 +131,7 @@ ZIP SHA-256：
 最终命令结果：
 
 - Ruff：通过；
-- 完整 Pytest：`79 passed, 2 skipped, 1 warning`；两个 skip 是显式 opt-in 的真实验收，均已单独运行通过；
+- 完整 Pytest：`83 passed, 2 skipped, 1 warning`；新增 4 个启动器端口选择测试，两个 skip 是显式 opt-in 的真实验收且均已单独运行通过；
 - Alembic：项目数据库 `0007_document_exports (head)`，heads/check 通过；新隔离数据库 0001→0007、downgrade 到 0006、再 upgrade 到 0007 通过；
 - 前端 TypeScript：通过；
 - Vitest：`1 passed`；
