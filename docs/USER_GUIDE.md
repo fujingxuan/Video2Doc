@@ -2,7 +2,7 @@
 
 ## 1. 启动
 
-双击 `dist\Video2Doc-Portable\Video2Doc.exe`。应用默认使用 `127.0.0.1:8765`，自动升级自己的数据库并在系统浏览器打开界面。应用数据默认位于 `%LOCALAPPDATA%\Video2Doc`。
+双击 `dist\Video2Doc-Portable\Video2Doc.exe`。应用优先使用 `127.0.0.1:8765`；若默认端口被 AnkiConnect 等其他程序占用，会自动选择后续空闲端口并打开正确地址。应用自动升级自己的数据库，数据默认位于 `%LOCALAPPDATA%\Video2Doc`。
 
 首次使用先打开“应用设置”，点击“重新检查环境”，确认 FFmpeg、ffprobe 和 yt-dlp 可用。缺少工具或 Gateway 时界面会显示原因，不会把未完成任务伪装为成功。
 
