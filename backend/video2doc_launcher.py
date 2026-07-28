@@ -10,15 +10,22 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+from collections.abc import Mapping
 from pathlib import Path
 
 
+DEFAULT_PORT = 8765
+FALLBACK_PORT_ATTEMPTS = 100
+
+
 def main() -> int:
+    launch_argv = sys.argv[1:]
+    port_is_explicit = _requested_port_is_explicit(launch_argv, os.environ)
     parser = argparse.ArgumentParser(description="Video2Doc Windows launcher")
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.getenv("VIDEO2DOC_PORT", "8765")),
+        default=int(os.getenv("VIDEO2DOC_PORT", str(DEFAULT_PORT))),
     )
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--check-only", action="store_true")
@@ -58,6 +65,40 @@ def main() -> int:
     if not migrations or not alembic_ini:
         return _fatal("发行包缺少数据库迁移资源。", logs / "launcher-error.log")
 
+    health_url = f"http://127.0.0.1:{args.port}/api/v1/health"
+    app_url = f"http://127.0.0.1:{args.port}/"
+    if not _port_available(args.port):
+        if _is_video2doc(health_url):
+            if not args.no_browser:
+                webbrowser.open(app_url)
+            print(f"Video2Doc 已在运行：{app_url}")
+            return 0
+        if port_is_explicit:
+            return _fatal(
+                f"端口 {args.port} 已被其他程序占用。"
+                "请关闭冲突程序或使用 --port 指定其他端口。",
+                logs / "launcher-error.log",
+            )
+        fallback = _find_fallback_port(args.port + 1)
+        if fallback is None:
+            return _fatal(
+                f"默认端口 {args.port} 已被其他程序占用，"
+                f"后续 {FALLBACK_PORT_ATTEMPTS} 个端口也没有可用端口。",
+                logs / "launcher-error.log",
+            )
+        fallback_kind, fallback_port = fallback
+        fallback_url = f"http://127.0.0.1:{fallback_port}/"
+        if fallback_kind == "video2doc":
+            if not args.no_browser:
+                webbrowser.open(fallback_url)
+            print(f"Video2Doc 已在运行：{fallback_url}")
+            return 0
+        print(
+            f"默认端口 {args.port} 已被其他程序占用，"
+            f"Video2Doc 将改用端口 {fallback_port}。"
+        )
+        args.port = fallback_port
+
     runtime_paths = {
         "VIDEO2DOC_DATABASE_URL": (
             f"sqlite:///{(app_root / 'video2doc.db').as_posix()}"
@@ -92,17 +133,6 @@ def main() -> int:
 
     health_url = f"http://127.0.0.1:{args.port}/api/v1/health"
     app_url = f"http://127.0.0.1:{args.port}/"
-    if not _port_available(args.port):
-        if _is_video2doc(health_url):
-            if not args.no_browser:
-                webbrowser.open(app_url)
-            print(f"Video2Doc 已在运行：{app_url}")
-            return 0
-        return _fatal(
-            f"端口 {args.port} 已被其他程序占用。"
-            "请关闭冲突程序或使用 --port 指定其他端口。",
-            logs / "launcher-error.log",
-        )
     if args.check_only:
         print(
             json.dumps(
@@ -159,6 +189,29 @@ def _port_available(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as stream:
         stream.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
         return stream.connect_ex(("127.0.0.1", port)) != 0
+
+
+def _requested_port_is_explicit(
+    argv: list[str],
+    environ: Mapping[str, str],
+) -> bool:
+    return "VIDEO2DOC_PORT" in environ or any(
+        argument == "--port" or argument.startswith("--port=")
+        for argument in argv
+    )
+
+
+def _find_fallback_port(
+    start_port: int,
+    attempts: int = FALLBACK_PORT_ATTEMPTS,
+) -> tuple[str, int] | None:
+    end_port = min(65535, start_port + attempts - 1)
+    for port in range(start_port, end_port + 1):
+        if _port_available(port):
+            return "available", port
+        if _is_video2doc(f"http://127.0.0.1:{port}/api/v1/health"):
+            return "video2doc", port
+    return None
 
 
 def _is_video2doc(url: str) -> bool:
