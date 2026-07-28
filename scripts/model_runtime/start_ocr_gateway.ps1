@@ -33,6 +33,43 @@ $stdout = Join-Path $logDirectory "gateway.stdout.log"
 $stderr = Join-Path $logDirectory "gateway.stderr.log"
 $pidPath = Join-Path $logDirectory "gateway.pid"
 $launcherPidPath = Join-Path $logDirectory "gateway.launcher.pid"
+
+# Some managed Windows shells can expose both "Path" and "PATH" in the
+# process environment. Start-Process treats them as duplicate dictionary keys
+# and fails before launching the child process. Remove only duplicate casings
+# while retaining the canonical value.
+$processEnvironment = [System.Environment]::GetEnvironmentVariables(
+    [System.EnvironmentVariableTarget]::Process
+)
+$pathKeys = @(
+    $processEnvironment.Keys |
+        Where-Object {
+            [string]::Equals(
+                [string]$_,
+                "Path",
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        }
+)
+if ($pathKeys.Count -gt 1) {
+    $canonicalKey = @($pathKeys | Where-Object { [string]$_ -ceq "Path" })[0]
+    if (-not $canonicalKey) { $canonicalKey = $pathKeys[0] }
+    $canonicalValue = [string]$processEnvironment[$canonicalKey]
+    foreach ($key in $pathKeys) {
+        if ([string]$key -cne [string]$canonicalKey) {
+            [System.Environment]::SetEnvironmentVariable(
+                [string]$key,
+                $null,
+                [System.EnvironmentVariableTarget]::Process
+            )
+        }
+    }
+    [System.Environment]::SetEnvironmentVariable(
+        "Path",
+        $canonicalValue,
+        [System.EnvironmentVariableTarget]::Process
+    )
+}
 $process = Start-Process -FilePath $python -ArgumentList @($servicePath, "--host", "127.0.0.1", "--port", $Port) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 Set-Content -LiteralPath $launcherPidPath -Value $process.Id -Encoding ASCII
 
