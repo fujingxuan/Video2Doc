@@ -126,6 +126,9 @@ export interface Task {
   ocr_timeline_path: string | null;
   fusion_timeline_path: string | null;
   artifacts_index_path: string | null;
+  document_path: string | null;
+  markdown_path: string | null;
+  export_path: string | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -178,8 +181,32 @@ export interface TaskDetail extends Task {
   fusion_preview: {
     event_count?: number;
     counts?: Record<string, number>;
+    events?: Array<Record<string, unknown>>;
     truncated?: boolean;
   } | null;
+  document_preview: {
+    schema_version?: number;
+    document_id?: string;
+    title?: string;
+    media_duration_seconds?: number | null;
+    section_count?: number;
+    block_count?: number;
+    edit_metadata?: Record<string, unknown>;
+  } | null;
+  markdown_preview: string | null;
+  exports: Array<{
+    id: number;
+    attempt: number;
+    target_type: "WORKSPACE" | "OBSIDIAN";
+    status: string;
+    markdown_path: string | null;
+    attachment_directory: string | null;
+    data_directory: string | null;
+    image_count: number;
+    sidecar_count: number;
+    error_message: string | null;
+    created_at: string;
+  }>;
   artifacts: Array<{ path: string; size: number }>;
 }
 
@@ -212,5 +239,35 @@ export interface AppSettings {
   default_keep_timestamps: boolean;
   default_keep_downloaded_media: boolean;
   default_keep_frames: boolean;
+  default_text_edit_enabled: boolean;
+  default_text_model_name: string | null;
+  text_prompt_version: string;
+  faithfulness_min_length_ratio: number;
+  faithfulness_formula_symbol_ratio: number;
+  markdown_template_version: string;
+  image_insertion_policy: string;
+  image_min_gap_seconds: number;
+  export_filename_template: string;
+  export_attachment_directory_template: string;
+  export_data_directory_template: string;
+  export_conflict_policy: "rename" | "fail" | "overwrite";
+  export_keep_json_sidecar: boolean;
+  export_copy_transcript: boolean;
+  export_copy_subtitles: boolean;
   updated_at: string;
+}
+
+export interface SystemStatus {
+  platform: string;
+  tools: Record<string, {
+    configured: string;
+    available: boolean;
+    resolved_path: string | null;
+    version: string | null;
+    error: string | null;
+  }>;
+  data_directory: string;
+  log_directory: string;
+  api_prefix: string;
+  port: number;
 }

@@ -48,6 +48,8 @@ class TaskService:
             payload.asr_gateway_model_id,
             payload.ocr_gateway_model_id,
             payload.text_model_id,
+            payload.export_vault_path,
+            payload.export_inbox_relative_path,
         )
         tasks: list[Task] = []
         for task_input in payload.inputs:
@@ -317,6 +319,8 @@ class TaskService:
         asr_gateway_model_id: int | None,
         ocr_gateway_model_id: int | None,
         text_model_id: int | None,
+        export_vault_path: str | None,
+        export_inbox_relative_path: str | None,
     ) -> dict[str, Any]:
         processing = {
             "ocr_enabled": settings.default_ocr_enabled,
@@ -452,6 +456,10 @@ class TaskService:
         if asr_gateway_snapshot:
             processing["audio_chunk_seconds"] = asr_gateway_snapshot["chunking"]["chunk_seconds"]
         vault_path, inbox_relative_path = _export_target(settings)
+        if export_vault_path is not None:
+            vault_path = export_vault_path
+        if export_inbox_relative_path is not None:
+            inbox_relative_path = export_inbox_relative_path
         return {
             "schema_version": 5,
             "profile": profile_data,

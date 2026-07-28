@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from pathlib import Path
 import re
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -403,6 +404,29 @@ class TaskBatchCreate(BaseModel):
     asr_gateway_model_id: int | None = None
     ocr_gateway_model_id: int | None = None
     text_model_id: int | None = None
+    export_vault_path: str | None = None
+    export_inbox_relative_path: str | None = None
+
+    @field_validator("export_vault_path")
+    @classmethod
+    def export_vault_must_be_absolute(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip()
+        if "\x00" in normalized or not Path(normalized).is_absolute():
+            raise ValueError("Export Vault path must be an absolute path")
+        return normalized
+
+    @field_validator("export_inbox_relative_path")
+    @classmethod
+    def export_inbox_must_be_relative(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip()
+        path = Path(normalized)
+        if "\x00" in normalized or path.is_absolute() or ".." in path.parts:
+            raise ValueError("Export Inbox must be a safe relative path")
+        return normalized
 
 
 class SnapshotRead(BaseModel):

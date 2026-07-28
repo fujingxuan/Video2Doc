@@ -21,6 +21,9 @@ class SettingsService:
         result.api_key_configured = bool(os.getenv("ONEAPI_API_KEY"))
         return result
 
+    def entity(self) -> AppSetting:
+        return self._get_or_create()
+
     def update(self, payload: SettingsUpdate) -> SettingsRead:
         item = self._get_or_create()
         values = payload.model_dump(exclude_unset=True)
