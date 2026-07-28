@@ -1,8 +1,8 @@
-# Video2Doc 视频 OCR 与 ASR/OCR 时间线融合架构
+# Video2Doc 完整应用与 Obsidian 导出架构
 
 ## 1. 范围与不变量
 
-本阶段在既有真实媒体、ASR 与独立 Gateway 架构上增加真实视频 OCR 和结构化融合，不改变以下不变量：
+完整应用在既有真实媒体、ASR、OCR 与融合架构上增加忠实文档整理、Markdown、Obsidian 导出和 Windows 单入口发行，不改变以下不变量：
 
 - SQLite `tasks.status` 是队列事实源；最大并发数固定为 1。
 - API 请求只创建/查询/控制任务，不在请求线程执行耗时 Pipeline。
@@ -11,7 +11,7 @@
 - SSE 发布数据库状态，断线时前端使用 REST 回退。
 - 大型媒体、日志和转写保存在工作区；SQLite 只保存索引和小型事实。
 
-本阶段包含抽帧、视觉去重、真实 OCR Provider、OCR 稳定事件和 ASR/OCR/帧统一时间线。最终 Markdown、文本大模型轻度编辑、总结、问答、RAG 和知识提炼不在范围内。
+应用包含抽帧、视觉去重、真实 OCR Provider、OCR 稳定事件、ASR/OCR/帧统一时间线、Document IR、可选忠实轻度编辑、Markdown 和原子导出。自动总结、问答、RAG、向量数据库、Embedding、语义搜索和知识提炼永久不在范围内。
 
 ## 2. 总体结构
 
@@ -47,15 +47,27 @@ Pipeline dispatcher
          ├── UnifiedOcrGatewayClient
          │      └── PaddleOCR 3.7 / PP-OCRv5 server :8201
          ├── OcrTimelineBuilder
-         └── FusionTimelineBuilder
+         ├── FusionTimelineBuilder
+         ├── DocumentBuilder ── 类型化 Document IR
+         ├── FaithfulTextEditor ── 可选 OneAPI Chat Completions
+         │      └── FaithfulnessValidator / 原文回退
+         ├── ObsidianMarkdownRenderer
+         └── ObsidianExporter ── 原子 stage / commit / rollback
 
 GatewayService ── gateway_configs / gateway_models
        └── ASR 与 OCR 各自拥有协议、健康检查、模型发现和密钥引用
 
-OneAPI ── 仅后续文本处理模型
+Windows launcher
+   ├── Alembic upgrade
+   ├── 端口和依赖检查
+   ├── FastAPI + 已构建 React 静态资源
+   ├── 系统浏览器
+   └── 只清理由本进程启动的子进程
+
+OneAPI ── 仅可选的受约束文本轻度编辑
 ```
 
-真实 Provider 不引用 FastAPI 路由或前端类型。Pipeline 负责阶段编排和持久化，Provider 只负责外部能力及标准化输入输出。OCR 在 ASR 验证完成后执行，但两种来源在融合结果中保持独立，不把相似文字互相删除。
+真实 Provider 不引用 FastAPI 路由或前端类型。Pipeline 负责阶段编排和持久化，Provider 只负责外部能力及标准化输入输出。OCR 在 ASR 验证完成后执行，但两种来源在融合和文档结果中保持独立，不把相似文字互相删除。
 
 ## 3. 输入与媒体来源
 
@@ -154,6 +166,14 @@ file, model, frame_id, media_timestamp, language
 
 本地实现为 Windows CPU PaddlePaddle 3.3.0 + PaddleOCR 3.7.0，加载 `PP-OCRv5_server_det` 与 `PP-OCRv5_server_rec`。Gateway 返回 Provider、模型、帧 ID、媒体时间、完整原始 Paddle 结果、文字块、置信度、矩形框、多边形、读取顺序、语言和耗时。
 
+Gateway 配置同时支持：
+
+- `video2doc-ocr-v1`：当前本地进程协议；
+- `paddlex-layout-parsing-v1`：PaddleOCR-VL 官方 `/layout-parsing` 服务，由轻量适配器规范化为 Video2Doc OCR 响应；
+- 未来通过 Base URL 注册的同协议兼容服务。
+
+配置记录 Provider 类型、Base URL、协议、模型、健康状态、能力、超时、重试和生命周期归属。`managed_lifecycle=false` 的 Docker/外部 Gateway 只做健康检查和调用，应用退出时不停止它。
+
 每帧响应先保存到 `provider_raw/attempt_NNNN`，再生成 Provider 无关的 `OcrResult`。规范化只清理确定空白、统一换行、去除同位置完全重复块；置信度低于 0.5 的块标记 `uncertain`，不补写或猜测内容。
 
 逐帧规范化文件保存图像 SHA-256、Provider、Base URL、模型、语言和超时的请求指纹。重试只有在指纹一致且原始响应仍存在时才复用。
@@ -169,9 +189,23 @@ OCR 时间线综合时间间隔、规范化文本相似度、文本块空间 IoU
 
 `FusionTimelineBuilder` 输出 `asr_segment`、`ocr_event` 和 `frame_event`。每个事件包含稳定 ID、起止时间、来源、文本、原始产物引用、质量信息、关联帧、关联 ASR segment 和不确定性。
 
-OCR/帧事件按可配置时间窗口关联附近 ASR segment，所有事件按媒体时间排序。验证层拒绝重复 ID、倒序时间、结束早于开始以及超出媒体时长的事件。融合结果是版本化 JSON，不渲染最终 Markdown。
+OCR/帧事件按可配置时间窗口关联附近 ASR segment，所有事件按媒体时间排序。验证层拒绝重复 ID、倒序时间、结束早于开始以及超出媒体时长的事件。融合结果是版本化 JSON，也是 Document Builder 的唯一时序输入；构建文档时不会回写或覆盖融合结果。
 
-## 10. Pipeline 阶段和进度
+## 10. Document IR、轻度编辑与忠实性门禁
+
+`Document`、`DocumentSection`、`DocumentBlock`、`TimestampAnchor` 和 `SourceReference` 构成版本化中间表示。块类型包括 transcript、visual_text、image、code 和 quote。每个块至少有一个来源引用，来源可定位到 ASR segment、OCR event、frame、原始响应和媒体时间。
+
+无文本模型时，Builder 仍按时间构建自然段和描述性分节，并列保留语音、画面文字与关联图片。可选 `FaithfulTextEditor` 按块发送严格 JSON，请求温度为 0，要求返回完整 block_id、source_ids 和 edited_text，不允许自由生成整篇文章。
+
+验证器检查来源集合、数字、专有词形、代码标记、公式符号、文本长度和块顺序。响应缺块、增块、来源丢失、结构错误或明显压缩时，整个编辑响应被拒绝，Document 保留原文；原文、候选文本、模型、提示词版本、diff、验证指标、原始响应引用和回退原因写入 `text_edit.json`。
+
+## 11. Markdown 与 Obsidian 导出
+
+Renderer 从 Document IR 生成 YAML frontmatter、媒体来源、模型/配置、按时间正文、说话内容、画面文字、相对图片、来源引用和可折叠追溯附录。URL 时间戳仅在来源平台支持时生成跳转；本地文件只显示时间戳和结构化来源，不伪造协议链接。
+
+Exporter 先在 Inbox 内创建隐藏临时目录，复制并重命名图片，生成 Markdown、document/timeline/sources sidecar 和可选字幕/转写；全部成功后才把同一 bundle 提交到最终路径。取消或失败删除 stage，并在 overwrite 模式下恢复备份。冲突策略为 rename、fail 或 overwrite，默认 rename。最终 Markdown 不引用任务临时绝对路径。
+
+## 12. Pipeline 阶段和进度
 
 ```text
 INPUT_VALIDATE (0-3)
@@ -183,27 +217,32 @@ AUDIO_CHUNK (33-38)
 ASR_TRANSCRIBE (38-58)
 ASR_COMBINE (58-63)
 ASR_VALIDATE (63-66)
-FRAME_EXTRACT (66-75)
-FRAME_DEDUP (75-79)
-OCR_RECOGNIZE (79-91)
-OCR_TIMELINE (91-95)
-FUSION_BUILD (95-99)
-FUSION_VALIDATE (99-100)
+FRAME_EXTRACT (66-73)
+FRAME_DEDUP (73-76)
+OCR_RECOGNIZE (76-84)
+OCR_TIMELINE (84-86)
+FUSION_BUILD (86-88)
+FUSION_VALIDATE (88-89)
+DOCUMENT_BUILD (89-92)
+TEXT_EDIT (92-94)
+MARKDOWN_RENDER (94-97)
+OBSIDIAN_EXPORT (97-99)
+FINALIZE (99-100)
 ```
 
 括号是总进度映射范围。每个 `task_stage_runs` 行保存 attempt、状态、阶段百分比、用户消息、技术错误、输入/输出产物和日志路径。下载、FFmpeg、分块和 ASR 使用真实比例；探测等不可精确计量步骤使用阶段状态。
 
 更新通过短 SQLAlchemy 事务写入 `tasks` 和 `task_stage_runs`，同步 `task_state.json`，SSE 从数据库读出状态。任何 Provider 都不会直接发布 SSE。
 
-## 11. 工作区与原始数据
+## 13. 工作区与原始数据
 
 `WorkspacePaths` 集中生成所有路径，Provider 不拼接任务根目录。工作区沿用 PRD 的 `00_source` 到 `05_output`，并在其内细分 media、metadata、audio、chunks、provider_raw、logs 和 intermediate。
 
 写 JSON 使用同目录临时文件后原子替换。媒体、音频和候选帧使用 `.part` 文件。产物完成后生成 `artifacts.json`。ASR/OCR Provider 原始响应按 `attempt_0001` 隔离；`01_extract/frames/manifest.json`、`03_ocr/timeline.json` 和 `04_fusion/timeline.json` 是后续阶段的可追溯输入。
 
-SQLite 的任务行只保存 `media_info_path`、`transcript_path`、`frames_manifest_path`、`ocr_timeline_path`、`fusion_timeline_path` 和 `artifacts_index_path`，不保存大型响应。
+`05_output` 保存 `document.json`、`text_edit.json`、工作区 Markdown 和导出索引。SQLite 的任务行只保存媒体、转写、帧、OCR、融合、Document、Markdown、导出和产物索引路径，不保存大型响应。
 
-## 12. 取消、失败、重试和恢复
+## 14. 取消、失败、重试和恢复
 
 取消竞态继续使用第一轮规则：完成更新带 `status=PROCESSING AND cancel_requested=false` 条件；取消与完成只能有一个最终赢家。
 
@@ -213,7 +252,7 @@ SQLite 的任务行只保存 `media_info_path`、`transcript_path`、`frames_man
 
 异常后端退出仍由启动恢复统一变成 `INTERRUPTED`，不会自动重放有外部副作用的阶段。
 
-## 13. 数据库迁移
+## 15. 数据库迁移
 
 `0005_independent_model_gateways` 在 `0004` 之后新增：
 
@@ -228,15 +267,24 @@ SQLite 的任务行只保存 `media_info_path`、`transcript_path`、`frames_man
 - `tasks.ocr_timeline_path`
 - `tasks.fusion_timeline_path`
 
-旧迁移没有修改。新快照版本为 4，新增抽帧间隔/策略、场景阈值、视觉相似阈值、最大候选数、OCR Gateway/模型/能力/语言/超时/重试/批大小、OCR 事件阈值和融合窗口。数据库与快照都只保存密钥环境变量名称。
+`0007_document_exports` 在 `0006` 之后新增：
 
-## 14. API 与前端
+- `tasks.document_path`、`tasks.markdown_path`、`tasks.export_path`
+- `document_artifacts`：Document IR 索引与统计
+- `text_edit_runs`：Provider、模型、提示词、接受/回退和原始响应
+- `markdown_exports`：模板、最终路径、图片与 sidecar 计数
+
+旧迁移没有修改。新快照版本为 5，除版本 4 内容外，还冻结文本 Gateway/模型、提示词版本、忠实性阈值、Markdown 模板、图片策略、Vault/Inbox 语义、附件/数据目录模板、冲突策略和 sidecar/字幕复制选项。数据库与快照都只保存密钥环境变量名称。
+
+## 16. API、前端与 Windows 启动器
 
 原任务 API 保持兼容。真实任务选择 `asr_gateway_model_id`，处理方案分别引用 ASR/OCR Gateway 模型；模拟模式仍供显式自动化兼容测试。
 
-新增帧、OCR、融合和受工作区边界约束的单文件产物 API。前端 Gateway 页管理 OCR 健康与模型，新任务页配置 OCR 和抽帧参数，详情页显示阶段进度、保留/丢弃帧、OCR 块和融合事件并可打开关键产物。SSE 和 REST 回退没有改变。
+新增帧、OCR、融合、文档、Markdown、系统状态、原生媒体选择和受边界约束的打开/产物 API。前端新建任务页配置 ASR/OCR/文本处理和导出目标；详情页显示 attempt、错误、阶段进度、统计、融合、Document、Markdown 和导出位置，并提供取消、重试、打开与复制错误。SSE 和 REST 回退没有改变。
 
-## 15. 安全边界
+`video2doc_launcher.py` 是 Windows 单入口。它在独立 app-home 中设置数据库、数据和默认 Inbox，执行 Alembic upgrade，拒绝占用端口，启动单个 Uvicorn/FastAPI 进程并由后端托管前端。退出 API 只在 launcher 注入回调时可用；应用不控制外部管理的 Docker OCR。
+
+## 17. 安全边界
 
 - API Key 值不进入请求响应、SQLite、快照、日志或测试 fixture；仅保存环境变量名称。
 - 外部命令不用 shell，不拼接用户输入。
@@ -245,16 +293,18 @@ SQLite 的任务行只保存 `media_info_path`、`transcript_path`、`frames_man
 - 前端不显示完整敏感日志；任务 API 只返回产物相对路径和大小。
 - 原始 ASR/OCR 响应保存前递归隐藏常见 token/key 字段。
 - 单文件产物 API 对规范化绝对路径执行 `is_relative_to(workspace)` 校验，拒绝路径穿越。
+- Vault 必须是已存在绝对目录，Inbox 必须是 Vault 内相对路径；导出文件名经 Windows 安全清理。
+- 文本模型响应必须保留 source_id，失败时回退原文；提示词和原始响应可审计。
 
-## 16. 已知边界
+## 18. 已知边界
 
 - 固定时长分块尚未做静音边界检测。
 - 当前只支持一个后端实例和单任务执行。
-- 浏览器没有原生绝对路径选择器，当前使用路径输入。
+- Windows 本机使用 WinForms 选择媒体；非 Windows 环境仍使用路径输入。
 - SSE 不是可重放事件日志。
 - URL 下载成功仍依赖站点和本机 yt-dlp 版本。
 - PP-OCRv5 server 当前在 CPU 单请求串行执行；优先质量和稳定性，不追求批量吞吐。
 - 视觉去重不是语义模型，阈值边缘按保留优先。
-- OCR 读取顺序使用 Provider 返回顺序；复杂图文关系尚未形成文档级版面树。
-- 本阶段只产出结构化融合 JSON，不生成 Markdown。
+- OCR 读取顺序使用 Provider 返回顺序；复杂图文关系只形成时间文档块，尚未重建像素级版面。
+- 发行形态是便携目录/ZIP和系统浏览器，不是 MSI、自动更新器或独立 WebView。
 - 本地大模型是否可运行取决于 GPU 显存、驱动、WSL 内存与具体依赖，按需单模型驻留。
