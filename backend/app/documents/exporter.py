@@ -144,10 +144,14 @@ def export_document_bundle(
                 ),
                 f"frame-{index:04d}",
             )
-            timestamp = _filename_timestamp(block.timestamp.start_seconds)
+            timestamp = (
+                f"_{_filename_timestamp(block.timestamp.start_seconds)}"
+                if bool(staged_document.processing.get("keep_timestamps", False))
+                else ""
+            )
             filename = safe_filename(
-                f"{frame_id}_{timestamp}{source_image.suffix.lower() or '.jpg'}",
-                fallback=f"frame_{index:04d}_{timestamp}.jpg",
+                f"{frame_id}{timestamp}{source_image.suffix.lower() or '.jpg'}",
+                fallback=f"frame_{index:04d}{timestamp}.jpg",
             )
             destination = _unique_child(stage_attachments / filename)
             shutil.copy2(source_image, destination)

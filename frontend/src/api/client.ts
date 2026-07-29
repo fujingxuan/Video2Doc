@@ -122,5 +122,9 @@ export const api = {
   queue: () => request<QueueState>("/queue"),
   systemStatus: () => request<SystemStatus>("/system/status"),
   selectMedia: () => request<{ paths: string[] }>("/system/select-media", { method: "POST" }),
+  selectSubtitle: () =>
+    request<{ path: string | null }>("/system/select-subtitle", { method: "POST" }),
+  selectOutputDirectory: () =>
+    request<{ path: string | null }>("/system/select-output-directory", { method: "POST" }),
   shutdownApp: () => request<{ status: string }>("/system/shutdown", { method: "POST" }),
 };

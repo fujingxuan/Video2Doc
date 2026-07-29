@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -70,7 +72,7 @@ def main() -> int:
     if not _port_available(args.port):
         if _is_video2doc(health_url):
             if not args.no_browser:
-                webbrowser.open(app_url)
+                _show_existing_app(app_url, health_url, app_root)
             print(f"Video2Doc 已在运行：{app_url}")
             return 0
         if port_is_explicit:
@@ -90,7 +92,11 @@ def main() -> int:
         fallback_url = f"http://127.0.0.1:{fallback_port}/"
         if fallback_kind == "video2doc":
             if not args.no_browser:
-                webbrowser.open(fallback_url)
+                _show_existing_app(
+                    fallback_url,
+                    f"http://127.0.0.1:{fallback_port}/api/v1/health",
+                    app_root,
+                )
             print(f"Video2Doc 已在运行：{fallback_url}")
             return 0
         print(
@@ -148,7 +154,8 @@ def main() -> int:
         )
         return 0
 
-    if not args.no_browser:
+    standalone = not args.no_browser and os.name == "nt"
+    if not args.no_browser and not standalone:
         threading.Thread(
             target=_open_when_ready,
             args=(health_url, app_url),
@@ -169,8 +176,44 @@ def main() -> int:
             access_log=False,
         )
         server = uvicorn.Server(config)
-        app.state.request_shutdown = lambda: setattr(server, "should_exit", True)
-        server.run()
+        shutdown_requested = threading.Event()
+
+        def request_shutdown() -> None:
+            shutdown_requested.set()
+            server.should_exit = True
+
+        app.state.request_shutdown = request_shutdown
+        if standalone:
+            server_thread = threading.Thread(target=server.run, daemon=True)
+            server_thread.start()
+            if not _wait_until_ready(health_url, server_thread):
+                server.should_exit = True
+                server_thread.join(timeout=5)
+                return _fatal(
+                    "应用后端未能在 30 秒内启动。",
+                    logs / "launcher-error.log",
+                )
+            window = _open_standalone_window(app_url, app_root)
+            if window is None:
+                webbrowser.open(app_url)
+                server_thread.join()
+            else:
+                while (
+                    window.poll() is None
+                    and server_thread.is_alive()
+                    and not shutdown_requested.wait(0.25)
+                ):
+                    pass
+                if window.poll() is None:
+                    window.terminate()
+                    try:
+                        window.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        window.kill()
+                server.should_exit = True
+                server_thread.join(timeout=15)
+        else:
+            server.run()
     except KeyboardInterrupt:
         pass
     except Exception as exc:
@@ -229,6 +272,89 @@ def _open_when_ready(health_url: str, app_url: str) -> None:
             webbrowser.open(app_url)
             return
         time.sleep(0.25)
+
+
+def _wait_until_ready(health_url: str, server_thread: threading.Thread) -> bool:
+    for _attempt in range(120):
+        if _is_video2doc(health_url):
+            return True
+        if not server_thread.is_alive():
+            return False
+        time.sleep(0.25)
+    return False
+
+
+def _edge_executable(environ: Mapping[str, str] | None = None) -> Path | None:
+    values = environ or os.environ
+    configured = str(values.get("VIDEO2DOC_BROWSER_EXECUTABLE") or "").strip()
+    candidates = [
+        Path(configured) if configured else None,
+        Path(values.get("PROGRAMFILES(X86)", ""))
+        / "Microsoft/Edge/Application/msedge.exe",
+        Path(values.get("PROGRAMFILES", ""))
+        / "Microsoft/Edge/Application/msedge.exe",
+        Path(values.get("LOCALAPPDATA", ""))
+        / "Microsoft/Edge/Application/msedge.exe",
+    ]
+    discovered = shutil.which("msedge")
+    if discovered:
+        candidates.append(Path(discovered))
+    return next(
+        (
+            candidate.resolve()
+            for candidate in candidates
+            if candidate is not None and candidate.is_file()
+        ),
+        None,
+    )
+
+
+def _open_standalone_window(
+    app_url: str,
+    app_root: Path,
+) -> subprocess.Popen[bytes] | None:
+    executable = _edge_executable()
+    if executable is None:
+        return None
+    profile = app_root / "browser-profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    try:
+        return subprocess.Popen(
+            [
+                str(executable),
+                f"--app={app_url}",
+                f"--user-data-dir={profile}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-background-mode",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=(
+                subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            ),
+        )
+    except OSError:
+        return None
+
+
+def _show_existing_app(
+    app_url: str,
+    health_url: str,
+    app_root: Path,
+) -> None:
+    window = _open_standalone_window(app_url, app_root)
+    if window is None:
+        webbrowser.open(app_url)
+        return
+    window.wait()
+    shutdown_url = health_url.rsplit("/health", 1)[0] + "/system/shutdown"
+    try:
+        request = urllib.request.Request(shutdown_url, data=b"", method="POST")
+        urllib.request.urlopen(request, timeout=3).close()
+    except (OSError, urllib.error.URLError):
+        pass
 
 
 def _fatal(message: str, log_path: Path | None = None) -> int:

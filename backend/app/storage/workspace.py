@@ -151,7 +151,6 @@ def write_simulated_markdown(
 ) -> tuple[Path, Path]:
     display_title = re.sub(r"[\r\n]+", " ", title).strip() or "Untitled"
     safe_title = safe_filename(display_title)
-    created_at = datetime.now(timezone.utc).isoformat()
     model_config = snapshot.get("models", {})
     processing = snapshot.get("processing", {})
     source_url = source if source_type == "URL" else ""
@@ -167,7 +166,6 @@ channel:
 published_date:
 duration:
 language:
-created_at: {created_at}
 video2doc_version: v0.1-bootstrap
 models:
   asr: "{model_config.get('asr', '') or ''}"

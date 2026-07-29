@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.db.session import SessionLocal
 from app.models import Task, TaskStageRun
 from app.models.entities import utcnow
+from app.pipeline.model_usage import stage_model_usage
 from app.storage.workspace import (
     append_task_log,
     write_simulated_markdown,
@@ -56,6 +57,11 @@ def _stages_for_task(task_id: int) -> list[tuple[str, int]]:
         if not task:
             return []
         stages = list(BASE_STAGES)
+        if task.snapshot.snapshot_json["processing"].get("text_source") == "SUBTITLE":
+            stages = [
+                ("SUBTITLE_IMPORT", target) if name == "ASR_PROCESSING" else (name, target)
+                for name, target in stages
+            ]
         if task.snapshot.snapshot_json["processing"]["ocr_enabled"]:
             stages.insert(3, ("OCR_PROCESSING", 62))
         return stages
@@ -75,6 +81,7 @@ async def _run_stage(task_id: int, stage_name: str, start: int, target: int) -> 
             status="PROCESSING",
             progress=start,
             started_at=utcnow(),
+            model_usage=stage_model_usage(stage_name, task.snapshot.snapshot_json),
         )
         session.add(stage_run)
         task.current_stage = stage_name

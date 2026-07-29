@@ -58,7 +58,12 @@ def build_document(
         if section is None:
             section = DocumentSection(
                 section_id=f"section-{len(sections) + 1:04d}",
-                title=_section_title(start, text, event_type),
+                title=_section_title(
+                    start,
+                    text,
+                    event_type,
+                    keep_timestamp=bool(processing.get("keep_timestamps", False)),
+                ),
                 timestamp=timestamp,
             )
             section_by_bucket[bucket] = section
@@ -195,20 +200,26 @@ def _source_reference(
     )
 
 
-def _section_title(start: float | None, text: str, event_type: str) -> str:
+def _section_title(
+    start: float | None,
+    text: str,
+    event_type: str,
+    *,
+    keep_timestamp: bool,
+) -> str:
     stamp = _format_timestamp(start) if start is not None else "未定时"
     if text:
         cleaned = re.sub(r"[\r\n#*_`]+", " ", text)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         if cleaned:
             excerpt = cleaned[:44].rstrip("，。；：,.!?！？ ")
-            return f"{stamp} {excerpt}"
+            return f"{stamp} {excerpt}" if keep_timestamp else excerpt
     kind = {
         "asr_segment": "讲者内容",
         "ocr_event": "画面文字",
         "frame_event": "相关画面",
     }.get(event_type, "媒体内容")
-    return f"{stamp} {kind}"
+    return f"{stamp} {kind}" if keep_timestamp else kind
 
 
 def _visual_block_type(text: str, event: dict[str, Any]) -> str:

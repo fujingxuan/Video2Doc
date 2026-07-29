@@ -36,6 +36,7 @@ Pipeline dispatcher
          ├── FfmpegProvider
          ├── AudioChunker
          ├── StructuredOverlapMerger
+         ├── SubtitleImporter ── SRT / VTT / ASS / SSA / TXT
          ├── DashScopeFunAsrProvider ── DashScope WebSocket
          ├── UnifiedAsrGatewayProvider
          │      ├── FireRedASR2-AED :8101
@@ -61,7 +62,7 @@ Windows launcher
    ├── Alembic upgrade
    ├── 端口和依赖检查
    ├── FastAPI + 已构建 React 静态资源
-   ├── 系统浏览器
+   ├── Edge 独立应用窗口
    └── 只清理由本进程启动的子进程
 
 OneAPI ── 仅可选的受约束文本轻度编辑
@@ -71,12 +72,14 @@ OneAPI ── 仅可选的受约束文本轻度编辑
 
 ## 3. 输入与媒体来源
 
-`MediaSourceResolver` 是唯一输入分类边界：
+`MediaSourceResolver` 是媒体输入分类边界；`SubtitleImporter` 是可选文本来源边界：
 
 - URL 只允许 HTTP/HTTPS，拒绝内嵌用户名和密码，交给 yt-dlp。
 - 本地文件必须是存在的绝对文件路径，拒绝目录和 NUL 字符。
 - 本地文件采用只读引用策略，工作区记录规范化路径和大小，不复制原文件。
 - URL 下载到 `00_source/media`。
+- 字幕模式只读选择本地字幕，创建任务时复制到 `00_source/subtitles` 并记录 SHA-256；原文件不移动、不覆盖。
+- 字幕模式跳过音频提取、分块与 ASR Provider，解析结果仍进入统一的 normalized transcript、融合和 Document IR。
 - 扩展名仅作界面提示；最终媒体有效性、音视频流和容器以 ffprobe 为准。
 
 统一 `MediaAcquisitionResult` 包含 `source_type`、`original_input`、`local_media_path`、`title`、`duration`、`container`、`has_audio`、`has_video`、`metadata_path` 和 `provider`。
@@ -274,15 +277,20 @@ FINALIZE (99-100)
 - `text_edit_runs`：Provider、模型、提示词、接受/回退和原始响应
 - `markdown_exports`：模板、最终路径、图片与 sidecar 计数
 
-旧迁移没有修改。新快照版本为 5，除版本 4 内容外，还冻结文本 Gateway/模型、提示词版本、忠实性阈值、Markdown 模板、图片策略、Vault/Inbox 语义、附件/数据目录模板、冲突策略和 sidecar/字幕复制选项。数据库与快照都只保存密钥环境变量名称。
+`0008_v2_traceable_inputs` 在 `0007` 之后新增：
+
+- `task_stage_runs.model_usage`：阶段实际使用的 Gateway、协议、能力和模型显示名
+- 现有方案与应用设置迁移到“成品不写入时间戳”的默认值
+
+旧迁移没有修改。新快照版本为 6，除版本 5 内容外，还冻结 ASR/字幕文本来源、字幕工作区副本与 SHA-256、任务级直接导出目录和无时间戳策略。数据库与快照都只保存密钥环境变量名称。
 
 ## 16. API、前端与 Windows 启动器
 
 原任务 API 保持兼容。真实任务选择 `asr_gateway_model_id`，处理方案分别引用 ASR/OCR Gateway 模型；模拟模式仍供显式自动化兼容测试。
 
-新增帧、OCR、融合、文档、Markdown、系统状态、原生媒体选择和受边界约束的打开/产物 API。前端新建任务页配置 ASR/OCR/文本处理和导出目标；详情页显示 attempt、错误、阶段进度、统计、融合、Document、Markdown 和导出位置，并提供取消、重试、打开与复制错误。SSE 和 REST 回退没有改变。
+新增帧、OCR、融合、文档、Markdown、系统状态、原生媒体/字幕/目录选择和受边界约束的打开/产物 API。前端新建任务页配置 ASR 或字幕、OCR、文本处理和直接导出目录；处理方案显示完整模型名称；详情页显示 attempt、错误、阶段进度及逐阶段模型、统计、融合、Document、Markdown 和导出位置，并提供取消、重试、打开与复制错误。SSE 和 REST 回退没有改变。
 
-`video2doc_launcher.py` 是 Windows 单入口。它在独立 app-home 中设置数据库、数据和默认 Inbox，执行 Alembic upgrade，拒绝占用端口，启动单个 Uvicorn/FastAPI 进程并由后端托管前端。退出 API 只在 launcher 注入回调时可用；应用不控制外部管理的 Docker OCR。
+`video2doc_launcher.py` 是 Windows 单入口。它在独立 app-home 中设置数据库、数据和默认 Inbox，执行 Alembic upgrade，拒绝占用端口，启动单个 Uvicorn/FastAPI 进程并由后端托管前端；默认使用隔离 Edge profile 的应用模式窗口，窗口关闭后停止受管后端。退出 API 只在 launcher 注入回调时可用；应用不控制外部管理的 Docker OCR。
 
 ## 17. 安全边界
 
@@ -293,7 +301,7 @@ FINALIZE (99-100)
 - 前端不显示完整敏感日志；任务 API 只返回产物相对路径和大小。
 - 原始 ASR/OCR 响应保存前递归隐藏常见 token/key 字段。
 - 单文件产物 API 对规范化绝对路径执行 `is_relative_to(workspace)` 校验，拒绝路径穿越。
-- Vault 必须是已存在绝对目录，Inbox 必须是 Vault 内相对路径；导出文件名经 Windows 安全清理。
+- 任务级导出目录必须是已存在绝对目录；兼容 Vault/Inbox 时 Inbox 必须在 Vault 内；导出文件名经 Windows 安全清理。
 - 文本模型响应必须保留 source_id，失败时回退原文；提示词和原始响应可审计。
 
 ## 18. 已知边界
@@ -306,5 +314,5 @@ FINALIZE (99-100)
 - PP-OCRv5 server 当前在 CPU 单请求串行执行；优先质量和稳定性，不追求批量吞吐。
 - 视觉去重不是语义模型，阈值边缘按保留优先。
 - OCR 读取顺序使用 Provider 返回顺序；复杂图文关系只形成时间文档块，尚未重建像素级版面。
-- 发行形态是便携目录/ZIP和系统浏览器，不是 MSI、自动更新器或独立 WebView。
+- 发行形态是便携目录/ZIP和 Edge 应用模式窗口，不是 MSI、自动更新器或内嵌 WebView。
 - 本地大模型是否可运行取决于 GPU 显存、驱动、WSL 内存与具体依赖，按需单模型驻留。

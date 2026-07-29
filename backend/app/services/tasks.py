@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -23,7 +25,14 @@ from app.repositories.tasks import TaskRepository
 from app.schemas.api import QueueStatus, TaskBatchCreate, TaskDetail, TaskRead
 from app.services.gateways import sanitize_gateway_metadata
 from app.services.serializers import task_detail, task_read
-from app.storage.workspace import create_workspace, list_artifacts, read_json
+from app.storage.workspace import (
+    WorkspacePaths,
+    create_workspace,
+    list_artifacts,
+    read_json,
+    safe_filename,
+    write_json,
+)
 
 
 class WorkerNotifier(Protocol):
@@ -39,6 +48,11 @@ class TaskService:
     def create_batch(self, payload: TaskBatchCreate) -> list[TaskRead]:
         settings = self._get_or_create_settings()
         profile = self._resolve_profile(payload.profile_id, settings)
+        subtitle_inputs = {
+            index: self._resolve_subtitle(item.subtitle_path)
+            for index, item in enumerate(payload.inputs)
+            if item.text_source == "SUBTITLE"
+        }
         base_snapshot = self._build_snapshot(
             profile,
             settings,
@@ -48,18 +62,26 @@ class TaskService:
             payload.asr_gateway_model_id,
             payload.ocr_gateway_model_id,
             payload.text_model_id,
+            payload.export_directory,
             payload.export_vault_path,
             payload.export_inbox_relative_path,
+            require_asr=any(item.text_source == "ASR" for item in payload.inputs),
         )
         tasks: list[Task] = []
-        for task_input in payload.inputs:
+        for input_index, task_input in enumerate(payload.inputs):
             title = task_input.title or Path(task_input.source).name or task_input.source[:100]
             snapshot = copy.deepcopy(base_snapshot)
+            snapshot["processing"]["text_source"] = task_input.text_source
             snapshot["input"] = {
                 "source": task_input.source,
                 "source_type": task_input.source_type,
                 "title": title,
+                "text_source": task_input.text_source,
             }
+            if task_input.text_source == "SUBTITLE":
+                snapshot["models"]["asr"] = None
+                snapshot["gateways"]["asr"] = None
+                snapshot["asr"] = None
             snapshot["simulation"] = {
                 "enabled": payload.pipeline_mode == "SIMULATED",
                 "failure_mode": task_input.simulate_failure,
@@ -73,11 +95,20 @@ class TaskService:
             )
             self.session.add(item)
             self.session.flush()
-            item.snapshot = TaskConfigSnapshot(schema_version=5, snapshot_json=snapshot)
             data_root = Path(settings.data_path) if settings.data_path else get_settings().data_dir
-            item.workspace_path = str(
-                create_workspace(data_root, task_id=item.id, title=title, snapshot=snapshot)
+            workspace = create_workspace(
+                data_root, task_id=item.id, title=title, snapshot=snapshot
             )
+            item.workspace_path = str(workspace)
+            if task_input.text_source == "SUBTITLE":
+                subtitle_path = subtitle_inputs[input_index]
+                snapshot["subtitle"] = self._copy_subtitle(
+                    subtitle_path,
+                    workspace,
+                )
+                snapshot["input"]["subtitle"] = copy.deepcopy(snapshot["subtitle"])
+                write_json(workspace / "task_config.json", snapshot)
+            item.snapshot = TaskConfigSnapshot(schema_version=6, snapshot_json=snapshot)
             tasks.append(item)
         settings.last_profile_id = profile.id if profile else None
         settings.last_task_config = copy.deepcopy(base_snapshot)
@@ -319,8 +350,11 @@ class TaskService:
         asr_gateway_model_id: int | None,
         ocr_gateway_model_id: int | None,
         text_model_id: int | None,
+        export_directory: str | None,
         export_vault_path: str | None,
         export_inbox_relative_path: str | None,
+        *,
+        require_asr: bool,
     ) -> dict[str, Any]:
         processing = {
             "ocr_enabled": settings.default_ocr_enabled,
@@ -426,7 +460,7 @@ class TaskService:
         if unknown:
             raise ConflictError(f"Unsupported task config overrides: {', '.join(sorted(unknown))}")
         processing.update(copy.deepcopy(overrides))
-        if pipeline_mode == "REAL" and asr_gateway_model is None:
+        if pipeline_mode == "REAL" and require_asr and asr_gateway_model is None:
             raise ConflictError("A real task must select an independent ASR gateway model")
         if processing.get("ocr_enabled") and ocr_gateway_model is None:
             raise ConflictError("An OCR-enabled task must select an independent OCR gateway model")
@@ -456,12 +490,15 @@ class TaskService:
         if asr_gateway_snapshot:
             processing["audio_chunk_seconds"] = asr_gateway_snapshot["chunking"]["chunk_seconds"]
         vault_path, inbox_relative_path = _export_target(settings)
-        if export_vault_path is not None:
+        if export_directory is not None:
+            vault_path = export_directory
+            inbox_relative_path = "."
+        elif export_vault_path is not None:
             vault_path = export_vault_path
         if export_inbox_relative_path is not None:
             inbox_relative_path = export_inbox_relative_path
         return {
-            "schema_version": 5,
+            "schema_version": 6,
             "profile": profile_data,
             "models": models,
             "processing": processing,
@@ -537,6 +574,42 @@ class TaskService:
                     "faithfulness_formula_symbol_ratio"
                 ],
             },
+        }
+
+    @staticmethod
+    def _resolve_subtitle(value: str | None) -> Path:
+        if not value:
+            raise ConflictError("Subtitle text source requires a subtitle file")
+        try:
+            path = Path(value).resolve(strict=True)
+        except OSError as exc:
+            raise ConflictError("The selected subtitle file does not exist") from exc
+        if not path.is_file():
+            raise ConflictError("The selected subtitle path is not a file")
+        if path.suffix.casefold() not in {".srt", ".vtt", ".ass", ".ssa", ".txt"}:
+            raise ConflictError("Subtitle file must be SRT, VTT, ASS, SSA, or TXT")
+        if path.stat().st_size > 64 * 1024 * 1024:
+            raise ConflictError("Subtitle file exceeds the 64 MiB safety limit")
+        return path
+
+    @staticmethod
+    def _copy_subtitle(source: Path, workspace: Path) -> dict[str, Any]:
+        paths = WorkspacePaths.from_root(workspace)
+        destination_directory = paths.source / "subtitles"
+        destination_directory.mkdir(parents=True, exist_ok=True)
+        destination = destination_directory / safe_filename(
+            source.name,
+            fallback=f"imported-subtitle{source.suffix.casefold()}",
+        )
+        shutil.copy2(source, destination)
+        digest = hashlib.sha256(destination.read_bytes()).hexdigest()
+        return {
+            "mode": "IMPORTED_SUBTITLE",
+            "original_path": str(source),
+            "original_filename": source.name,
+            "workspace_path": str(destination),
+            "sha256": digest,
+            "size_bytes": destination.stat().st_size,
         }
 
     def _resolve_gateway_model(

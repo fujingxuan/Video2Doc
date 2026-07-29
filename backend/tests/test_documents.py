@@ -137,6 +137,21 @@ def test_markdown_frontmatter_and_seekable_timestamp_are_valid(tmp_path: Path) -
     assert "核心观点" not in markdown
 
 
+def test_markdown_omits_all_presentation_timestamps_when_disabled(tmp_path: Path) -> None:
+    document = sample_document(tmp_path)
+    document.processing["keep_timestamps"] = False
+    for block in document.all_blocks():
+        if block.block_type == "image":
+            block.image_relative_path = "课程.assets/frame_000001.jpg"
+    markdown = render_obsidian_markdown(document)
+    frontmatter = yaml.safe_load(markdown.split("---", 2)[1])
+    assert "created_at" not in frontmatter
+    assert "[00:00:" not in markdown
+    assert "00:00:10" not in markdown
+    assert "| 文档块 | 类型 | 时间 | 来源 ID |" not in markdown
+    assert "frame_000001.jpg" in markdown
+
+
 def test_faithfulness_rejects_number_identifier_and_formula_loss(tmp_path: Path) -> None:
     document = sample_document(tmp_path)
     visual = next(block for block in document.all_blocks() if block.block_type == "visual_text")

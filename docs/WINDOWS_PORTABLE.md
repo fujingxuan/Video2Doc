@@ -24,7 +24,7 @@ dist\Video2Doc-Portable.zip
 3. 自动执行 Alembic upgrade 到 head；
 4. 检查 `127.0.0.1:8765`，若被其他程序占用则选择后续空闲端口；
 5. 启动 Uvicorn/FastAPI 并托管前端；
-6. 健康后打开系统浏览器。
+6. 健康后用 Microsoft Edge 应用模式打开独立 Video2Doc 窗口。
 
 命令行选项：
 
@@ -39,7 +39,7 @@ Video2Doc.exe --app-home D:\Video2Doc-AppData --check-only
 
 ## 退出与进程边界
 
-可关闭启动器窗口、按 `Ctrl+C`，或在“应用设置”点击“退出 Windows 应用”。后端关闭流程会：
+默认双击启动没有控制台窗口。点击独立 Video2Doc 窗口右上角 X，或在“应用设置”点击“退出 Windows 应用”。使用 `--no-browser` 从命令行启动时仍可按 `Ctrl+C`。后端关闭流程会：
 
 - 停止 Worker；
 - 终止由当前 Video2Doc 启动的媒体子进程树；
@@ -67,4 +67,4 @@ Set-Location D:\Projects\Video2Doc
 - 媒体工具缺失：应用仍能启动；在设置页补充路径后重新检查。
 - Gateway 缺失或不可用：任务结构化失败并保留错误/attempt，恢复服务后重试。
 
-当前发行版使用系统浏览器，不是 MSI、自动更新器、系统托盘或独立 WebView。便携版可用性不依赖这些附加形态。
+独立窗口使用 Windows 自带的 Microsoft Edge 应用模式和隔离的 `%LOCALAPPDATA%\Video2Doc\browser-profile`。若系统找不到 Edge，会回退到默认浏览器，此时可在设置页退出应用。当前发行版不是 MSI、自动更新器或系统托盘应用。

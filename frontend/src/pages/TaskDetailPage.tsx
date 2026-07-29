@@ -128,17 +128,19 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
     </section>
 
     <section className="panel">
-      <h2>转写预览</h2>
+      <h2>文本预览</h2>
       {task.transcript_preview ? <>
         <div className="preview-meta">
           <span>Provider：{task.transcript_preview.provider}</span>
-          <span>模型：{task.transcript_preview.model}</span>
+          {task.transcript_preview.model !== "not-applicable" && (
+            <span>模型：{task.transcript_preview.model}</span>
+          )}
           <span>分块：{task.transcript_preview.completed_chunks}/{task.transcript_preview.chunk_count}</span>
           <span>分段：{task.transcript_preview.segment_count}</span>
         </div>
         <pre className="transcript-preview">{task.transcript_preview.text}</pre>
         {task.transcript_preview.truncated && <small>预览已截断；完整结果保存在工作区。</small>}
-      </> : <div className="state-card">ASR 结果尚未生成。</div>}
+      </> : <div className="state-card">ASR 或导入字幕文本尚未生成。</div>}
     </section>
 
     <section className="detail-grid">
@@ -208,6 +210,14 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
             <div>
               <strong>{stage.stage}</strong>
               <small>{stage.status} · 阶段进度 {stage.progress}% · 耗时 {duration(stage.started_at, stage.finished_at)}</small>
+              {stage.model_usage.length > 0
+                ? <div className="tags">{stage.model_usage.map((usage, index) => (
+                  <span key={`${usage.capability}-${index}`}>
+                    {usage.capability}：{usage.gateway_name ? `${usage.gateway_name} / ` : ""}
+                    {usage.display_name}
+                  </span>
+                ))}</div>
+                : <small>模型：未调用（本地工具或确定性处理）</small>}
               {stage.message && <p>{stage.message}</p>}
               {stage.log_path && <small className="break">日志：{stage.log_path}</small>}
             </div>

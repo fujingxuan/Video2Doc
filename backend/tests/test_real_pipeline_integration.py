@@ -180,6 +180,78 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
     assert "integration-secret" not in snapshot_text
 
 
+def test_imported_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown(
+    client: TestClient, tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "subtitle-video.mp4"
+    source.write_bytes(b"controlled-video-source")
+    subtitle = tmp_path / "subtitle-video.zh-CN.srt"
+    subtitle.write_text(
+        "1\n00:00:00,500 --> 00:00:01,800\n第一段中文字幕。\n\n"
+        "2\n00:00:02,000 --> 00:00:03,500\n第二段保留完整内容。\n",
+        encoding="utf-8",
+    )
+    export_directory = tmp_path / "export"
+    export_directory.mkdir()
+
+    async def fake_probe(self, media_path, paths, *, cancel_check, artifact_name="ffprobe"):
+        return media_info(paths.metadata / f"{artifact_name}.json", video=True)
+
+    async def forbidden_audio(*args, **kwargs):
+        raise AssertionError("subtitle mode must not normalize audio")
+
+    monkeypatch.setattr("app.pipeline.real.FfprobeProvider.probe", fake_probe)
+    monkeypatch.setattr(
+        "app.pipeline.real.FfmpegProvider.normalize_audio",
+        forbidden_audio,
+    )
+
+    created = client.post(
+        "/api/v1/tasks",
+        json={
+            "pipeline_mode": "REAL",
+            "inputs": [
+                {
+                    "source": str(source),
+                    "source_type": "LOCAL_FILE",
+                    "text_source": "SUBTITLE",
+                    "subtitle_path": str(subtitle),
+                }
+            ],
+            "export_directory": str(export_directory),
+            "config_overrides": {
+                "ocr_enabled": False,
+                "keep_timestamps": False,
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+    completed = wait_for_status(client, created.json()[0]["id"], {"COMPLETED"})
+    stage_names = [stage["stage"] for stage in completed["stages"]]
+    assert "SUBTITLE_IMPORT" in stage_names
+    assert "SUBTITLE_NORMALIZE" in stage_names
+    assert "SUBTITLE_VALIDATE" in stage_names
+    assert "ASR_TRANSCRIBE" not in stage_names
+    assert "AUDIO_EXTRACT" not in stage_names
+    subtitle_stage = next(
+        stage for stage in completed["stages"] if stage["stage"] == "SUBTITLE_IMPORT"
+    )
+    assert subtitle_stage["model_usage"][0]["mode"] == "IMPORTED_SUBTITLE"
+    assert subtitle_stage["model_usage"][0]["model_name"] is None
+    assert completed["transcript_preview"]["provider"] == "imported-subtitle"
+    assert completed["transcript_preview"]["text"] == (
+        "第一段中文字幕。\n第二段保留完整内容。"
+    )
+    markdown = Path(completed["export_path"]).read_text(encoding="utf-8")
+    assert "第一段中文字幕。" in markdown
+    assert "[00:00:" not in markdown
+    assert "created_at:" not in markdown
+    snapshot = completed["snapshot"]["snapshot_json"]
+    assert snapshot["models"]["asr"] is None
+    assert snapshot["subtitle"]["sha256"]
+    assert Path(snapshot["subtitle"]["workspace_path"]).is_file()
+
+
 def test_database_worker_runs_ocr_fusion_stages_and_serves_traceable_artifacts(
     client: TestClient, tmp_path: Path, monkeypatch
 ) -> None:

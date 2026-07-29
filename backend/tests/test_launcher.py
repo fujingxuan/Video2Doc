@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import video2doc_launcher as launcher
 
 
@@ -45,3 +47,12 @@ def test_fallback_stops_at_port_range_end(monkeypatch) -> None:
     monkeypatch.setattr(launcher, "_is_video2doc", lambda _url: False)
 
     assert launcher._find_fallback_port(65535, attempts=100) is None
+
+
+def test_edge_executable_prefers_explicit_configuration(tmp_path: Path) -> None:
+    executable = tmp_path / "msedge.exe"
+    executable.write_bytes(b"edge")
+
+    assert launcher._edge_executable(
+        {"VIDEO2DOC_BROWSER_EXECUTABLE": str(executable)}
+    ) == executable.resolve()

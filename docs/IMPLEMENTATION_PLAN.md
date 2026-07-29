@@ -148,7 +148,7 @@
 - [x] rename/fail/overwrite 冲突策略
 - [x] stage/commit/rollback 原子 bundle 导出、取消和失败回滚
 - [x] 导出索引、打开工作区/目录/Markdown API
-- [x] `0007_document_exports` 与任务快照版本 5
+- [x] `0007_document_exports` 与历史任务快照版本 5（迭代 2.0 已升级为版本 6）
 
 ## 阶段 10：前端闭环与 Windows 发行
 
@@ -165,8 +165,22 @@
 - [x] 打包版故障、重试复用、取消、启动和关闭验收
 - [x] 完整结果见 `docs/APP_COMPLETION_ACCEPTANCE_REPORT.md`
 
+## 迭代 2.0：可见模型、字幕输入、独立窗口与导出控制
+
+- [x] 处理方案 API 返回 ASR/OCR/Text 的 Gateway、协议和模型显示名
+- [x] 阶段执行记录持久化 `model_usage`，历史记录可从不可变快照回填
+- [x] SRT/VTT/ASS/SSA/TXT 中文字幕选择、工作区副本、SHA-256 与编码解析
+- [x] 字幕模式跳过音频提取、分块和 ASR 模型调用，进入统一融合/文档链路
+- [x] `SUBTITLE_IMPORT` / `SUBTITLE_NORMALIZE` / `SUBTITLE_VALIDATE` 可追溯阶段
+- [x] 创建任务时直接选择成品导出目录
+- [x] 成品 Markdown 默认移除媒体时间锚点、追溯表时间列、生成时间与图片时间文件名
+- [x] Edge 应用模式独立窗口；关闭窗口时停止受管后端
+- [x] PyInstaller 改为无控制台窗口发行
+- [x] `0008_v2_traceable_inputs` 与任务快照版本 6
+- [x] 字幕无 ASR 闭环、无时间戳 Markdown、方案模型和启动器回归
+
 ## 有意不实施与可选强化
 
 以下不是后续功能：自动总结、核心观点、问答、RAG、向量库、Embedding、语义搜索、知识图谱、多用户和云端知识库。
 
-仍可在不改变产品定位时评估：静音边界分块、确有需要时的 SSE 可重放事件、MSI/自动升级器、独立 WebView 窗口。它们不是当前便携版可用闭环的依赖。
+仍可在不改变产品定位时评估：静音边界分块、确有需要时的 SSE 可重放事件、MSI/自动升级器。它们不是当前便携版可用闭环的依赖。

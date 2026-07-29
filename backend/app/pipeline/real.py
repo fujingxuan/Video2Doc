@@ -24,6 +24,7 @@ from app.models import (
     TextEditRun,
 )
 from app.models.entities import utcnow
+from app.pipeline.model_usage import stage_model_usage
 from app.providers.asr import (
     AsrRequest,
     AsrResult,
@@ -52,6 +53,7 @@ from app.providers.media import (
     classify_input,
 )
 from app.providers.process import process_registry
+from app.providers.subtitles import import_subtitle
 from app.providers.ocr_timeline import (
     build_ocr_timeline,
     recognize_retained_frames,
@@ -80,6 +82,9 @@ STAGE_RANGES: dict[str, tuple[int, int]] = {
     "ASR_TRANSCRIBE": (29, 47),
     "ASR_COMBINE": (47, 51),
     "ASR_VALIDATE": (51, 54),
+    "SUBTITLE_IMPORT": (25, 47),
+    "SUBTITLE_NORMALIZE": (47, 51),
+    "SUBTITLE_VALIDATE": (51, 54),
     "FRAME_EXTRACT": (54, 63),
     "FRAME_DEDUP": (63, 67),
     "OCR_RECOGNIZE": (67, 79),
@@ -95,9 +100,10 @@ STAGE_RANGES: dict[str, tuple[int, int]] = {
 
 
 class StageTracker:
-    def __init__(self, task_id: int, workspace: Path) -> None:
+    def __init__(self, task_id: int, workspace: Path, snapshot: dict) -> None:
         self.task_id = task_id
         self.workspace = workspace
+        self.snapshot = snapshot
         self.stage: str | None = None
         self.attempt: int | None = None
 
@@ -128,6 +134,7 @@ class StageTracker:
                 message=message,
                 started_at=utcnow(),
                 input_artifacts=input_artifacts,
+                model_usage=stage_model_usage(stage, self.snapshot),
                 log_path=log_path,
             )
             session.add(run)
@@ -221,7 +228,7 @@ async def run_real_pipeline(task_id: int) -> None:
         attempt = task.attempt
     paths = WorkspacePaths.from_root(workspace)
     paths.create()
-    tracker = StageTracker(task_id, workspace)
+    tracker = StageTracker(task_id, workspace, snapshot)
 
     def cancelled() -> bool:
         with SessionLocal() as session:
@@ -302,57 +309,69 @@ async def run_real_pipeline(task_id: int) -> None:
             output_artifacts=[media_info.raw_probe_path, str(media_info_path)],
         )
 
-        tracker.start(
-            "AUDIO_EXTRACT",
-            message="正在提取并标准化音频",
-            input_artifacts=[acquisition.local_media_path, str(media_info_path)],
-            log_path=str(paths.logs / "ffmpeg_audio.stderr.log"),
-        )
-        audio_path = paths.audio / "normalized.wav"
-        audio_info_path = paths.metadata / "audio_media_info.json"
-        audio_info = _load_media_info(audio_info_path)
-        if audio_path.is_file() and audio_info is not None:
-            tracker.progress(1.0, "复用已完成的标准化音频")
+        processing = snapshot.get("processing", {})
+        subtitle_mode = str(processing.get("text_source") or "ASR") == "SUBTITLE"
+        if subtitle_mode:
+            audio_path = Path(acquisition.local_media_path)
+            audio_info = media_info
         else:
-            audio_path, audio_info = await FfmpegProvider(
-                ffmpeg_executable, ffprobe
-            ).normalize_audio(
-                Path(acquisition.local_media_path),
-                media_info,
-                paths,
-                cancel_check=cancelled,
-                progress=tracker.progress,
+            tracker.start(
+                "AUDIO_EXTRACT",
+                message="正在提取并标准化音频",
+                input_artifacts=[acquisition.local_media_path, str(media_info_path)],
+                log_path=str(paths.logs / "ffmpeg_audio.stderr.log"),
             )
-            write_json(audio_info_path, audio_info.to_dict())
-        tracker.complete(
-            message="已生成 PCM 16kHz 单声道 WAV",
-            output_artifacts=[str(audio_path), str(audio_info_path)],
-        )
+            audio_path = paths.audio / "normalized.wav"
+            audio_info_path = paths.metadata / "audio_media_info.json"
+            audio_info = _load_media_info(audio_info_path)
+            if audio_path.is_file() and audio_info is not None:
+                tracker.progress(1.0, "复用已完成的标准化音频")
+            else:
+                audio_path, audio_info = await FfmpegProvider(
+                    ffmpeg_executable, ffprobe
+                ).normalize_audio(
+                    Path(acquisition.local_media_path),
+                    media_info,
+                    paths,
+                    cancel_check=cancelled,
+                    progress=tracker.progress,
+                )
+                write_json(audio_info_path, audio_info.to_dict())
+            tracker.complete(
+                message="已生成 PCM 16kHz 单声道 WAV",
+                output_artifacts=[str(audio_path), str(audio_info_path)],
+            )
 
-        tracker.start(
-            "AUDIO_VALIDATE",
-            message="正在验证标准化音频",
-            input_artifacts=[str(audio_path), str(audio_info_path)],
-        )
-        if (
-            not audio_path.is_file()
-            or audio_path.stat().st_size <= 44
-            or not audio_info.has_audio
-            or not audio_info.audio_streams
-            or audio_info.audio_streams[0].sample_rate != 16000
-            or audio_info.audio_streams[0].channels != 1
-        ):
-            raise PipelineError("AUDIO_EXTRACTION_FAILED", "标准化音频完整性检查失败")
-        tracker.complete(message="标准化音频有效", output_artifacts=[str(audio_path)])
+            tracker.start(
+                "AUDIO_VALIDATE",
+                message="正在验证标准化音频",
+                input_artifacts=[str(audio_path), str(audio_info_path)],
+            )
+            if (
+                not audio_path.is_file()
+                or audio_path.stat().st_size <= 44
+                or not audio_info.has_audio
+                or not audio_info.audio_streams
+                or audio_info.audio_streams[0].sample_rate != 16000
+                or audio_info.audio_streams[0].channels != 1
+            ):
+                raise PipelineError("AUDIO_EXTRACTION_FAILED", "标准化音频完整性检查失败")
+            tracker.complete(message="标准化音频有效", output_artifacts=[str(audio_path)])
 
         asr_config = snapshot.get("asr") if isinstance(snapshot.get("asr"), dict) else {}
-        protocol = str(asr_config.get("provider") or "oneapi-openai-compatible")
-        if protocol == "oneapi-openai-compatible":
-            base_url, api_key, model = load_asr_credentials(snapshot)
+        if subtitle_mode:
+            protocol = "local-subtitle-import"
+            base_url = ""
+            api_key = ""
+            model = "not-applicable"
         else:
-            asr_config, api_key = load_asr_gateway_credentials(snapshot)
-            base_url = str(asr_config["base_url"])
-            model = str(asr_config["model"])
+            protocol = str(asr_config.get("provider") or "oneapi-openai-compatible")
+            if protocol == "oneapi-openai-compatible":
+                base_url, api_key, model = load_asr_credentials(snapshot)
+            else:
+                asr_config, api_key = load_asr_gateway_credentials(snapshot)
+                base_url = str(asr_config["base_url"])
+                model = str(asr_config["model"])
         continuous_stream = bool(
             protocol == "dashscope-fun-asr-websocket" and asr_config.get("streaming")
         )
@@ -360,68 +379,91 @@ async def run_real_pipeline(task_id: int) -> None:
             "audio_chunk_seconds", get_settings().audio_chunk_seconds
         )
         chunk_seconds = None if continuous_stream else float(raw_chunk_seconds)
-        tracker.start(
-            "AUDIO_CHUNK",
-            message=("Fun-ASR 将使用单个连续音频流" if continuous_stream else "正在为长音频生成稳定分块"),
-            input_artifacts=[str(audio_path)],
-        )
         overlap_seconds = 0.0 if continuous_stream else float(asr_config.get("overlap_seconds", 5.0))
-        if continuous_stream:
-            if audio_info.duration is None:
-                raise PipelineError("AUDIO_EXTRACTION_FAILED", "无法确定连续音频流时长")
+        if subtitle_mode:
             chunks = [
                 AudioChunk(
                     0,
                     0.0,
-                    audio_info.duration,
+                    audio_info.duration or 0.0,
                     str(audio_path),
                     provider=protocol,
                     model=model,
                     attempt=attempt,
                 )
             ]
-            write_json(
-                paths.chunks / "manifest.json",
-                {
-                    "schema_version": 2,
-                    "strategy": "continuous_stream_no_overlap",
-                    "chunk_seconds": None,
-                    "step_seconds": None,
-                    "overlap_seconds": 0.0,
-                    "chunks": [chunks[0].to_manifest_dict()],
-                },
-            )
-            tracker.progress(1.0, "连续流不重复发送音频，不创建人为重叠分块")
         else:
-            chunks = _load_chunks(
-                paths.chunks / "manifest.json",
-                expected_chunk_seconds=chunk_seconds,
-                expected_overlap_seconds=overlap_seconds,
+            tracker.start(
+                "AUDIO_CHUNK",
+                message=(
+                    "Fun-ASR 将使用单个连续音频流"
+                    if continuous_stream
+                    else "正在为长音频生成稳定分块"
+                ),
+                input_artifacts=[str(audio_path)],
             )
-            if not chunks or any(not Path(chunk.path).is_file() for chunk in chunks):
-                chunks = await AudioChunker(ffmpeg_executable).split(
-                    audio_path,
-                    audio_info.duration,
-                    paths,
-                    chunk_seconds=chunk_seconds,
-                    overlap_seconds=overlap_seconds,
-                    provider=protocol,
-                    model=model,
-                    attempt=attempt,
-                    cancel_check=cancelled,
-                    progress=tracker.progress,
+            if continuous_stream:
+                if audio_info.duration is None:
+                    raise PipelineError("AUDIO_EXTRACTION_FAILED", "无法确定连续音频流时长")
+                chunks = [
+                    AudioChunk(
+                        0,
+                        0.0,
+                        audio_info.duration,
+                        str(audio_path),
+                        provider=protocol,
+                        model=model,
+                        attempt=attempt,
+                    )
+                ]
+                write_json(
+                    paths.chunks / "manifest.json",
+                    {
+                        "schema_version": 2,
+                        "strategy": "continuous_stream_no_overlap",
+                        "chunk_seconds": None,
+                        "step_seconds": None,
+                        "overlap_seconds": 0.0,
+                        "chunks": [chunks[0].to_manifest_dict()],
+                    },
                 )
+                tracker.progress(1.0, "连续流不重复发送音频，不创建人为重叠分块")
             else:
-                tracker.progress(1.0, f"复用 {len(chunks)} 个现有音频分块")
-        tracker.complete(
-            message=f"音频分块完成，共 {len(chunks)} 块",
-            output_artifacts=[chunk.path for chunk in chunks] + [str(paths.chunks / "manifest.json")],
-        )
+                chunks = _load_chunks(
+                    paths.chunks / "manifest.json",
+                    expected_chunk_seconds=chunk_seconds,
+                    expected_overlap_seconds=overlap_seconds,
+                )
+                if not chunks or any(not Path(chunk.path).is_file() for chunk in chunks):
+                    chunks = await AudioChunker(ffmpeg_executable).split(
+                        audio_path,
+                        audio_info.duration,
+                        paths,
+                        chunk_seconds=chunk_seconds,
+                        overlap_seconds=overlap_seconds,
+                        provider=protocol,
+                        model=model,
+                        attempt=attempt,
+                        cancel_check=cancelled,
+                        progress=tracker.progress,
+                    )
+                else:
+                    tracker.progress(1.0, f"复用 {len(chunks)} 个现有音频分块")
+            tracker.complete(
+                message=f"音频分块完成，共 {len(chunks)} 块",
+                output_artifacts=[chunk.path for chunk in chunks]
+                + [str(paths.chunks / "manifest.json")],
+            )
 
         attempt_raw = paths.asr_raw / f"attempt_{attempt:04d}"
         attempt_paths = replace(paths, asr_raw=attempt_raw)
         attempt_paths.asr_raw.mkdir(parents=True, exist_ok=True)
-        provider: OpenAICompatibleAsrProvider | UnifiedAsrGatewayProvider | DashScopeFunAsrProvider
+        provider: (
+            OpenAICompatibleAsrProvider
+            | UnifiedAsrGatewayProvider
+            | DashScopeFunAsrProvider
+            | None
+        ) = None
         provider_options = {
             "base_url": base_url,
             "api_key": api_key,
@@ -430,7 +472,9 @@ async def run_real_pipeline(task_id: int) -> None:
             ),
             "max_retries": int(asr_config.get("max_retries", get_settings().asr_max_retries)),
         }
-        if protocol == "dashscope-fun-asr-websocket":
+        if subtitle_mode:
+            provider_name = "imported-subtitle"
+        elif protocol == "dashscope-fun-asr-websocket":
             provider = DashScopeFunAsrProvider(
                 **provider_options,
                 workspace_id=os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip() or None,
@@ -441,17 +485,50 @@ async def run_real_pipeline(task_id: int) -> None:
             provider = OpenAICompatibleAsrProvider(**provider_options)
         else:
             raise PipelineError("ASR_CONFIG_INVALID", f"不支持的 ASR Gateway 协议：{protocol}")
+        if provider is not None:
+            provider_name = provider.name
+        subtitle_path = str((snapshot.get("subtitle") or {}).get("workspace_path") or "")
         tracker.start(
-            "ASR_TRANSCRIBE",
-            message="正在提交 ASR 分块",
-            input_artifacts=[chunk.path for chunk in chunks],
+            "SUBTITLE_IMPORT" if subtitle_mode else "ASR_TRANSCRIBE",
+            message=("正在导入中文字幕并跳过 ASR" if subtitle_mode else "正在提交 ASR 分块"),
+            input_artifacts=(
+                [subtitle_path] if subtitle_mode else [chunk.path for chunk in chunks]
+            ),
         )
         results: list[AsrResult] = []
         language = asr_config.get("language")
-        timestamp_granularity = (
-            snapshot.get("gateways", {}).get("asr", {}).get("timestamp_strategy") or "segment"
+        gateway_collection = snapshot.get("gateways")
+        asr_gateway = (
+            gateway_collection.get("asr")
+            if isinstance(gateway_collection, dict)
+            else None
         )
-        if continuous_stream:
+        timestamp_granularity = (
+            asr_gateway.get("timestamp_strategy")
+            if isinstance(asr_gateway, dict)
+            else None
+        ) or "segment"
+        if subtitle_mode:
+            if not subtitle_path:
+                raise PipelineError("SUBTITLE_CONFIG_INVALID", "任务快照缺少字幕副本路径")
+            imported = import_subtitle(Path(subtitle_path))
+            results.append(
+                AsrResult(
+                    provider=provider_name,
+                    model=model,
+                    language="zh",
+                    chunk_index=0,
+                    raw_response_reference=subtitle_path,
+                    segments=tuple(imported.segments),
+                )
+            )
+            tracker.progress(
+                1.0,
+                f"已导入 {len(imported.segments)} 条字幕（{imported.subtitle_format.upper()} / "
+                f"{imported.encoding}）",
+            )
+        elif continuous_stream:
+            assert provider is not None
             reusable = _find_reusable_asr_response(paths.asr_raw, attempt, 0)
             request = AsrRequest(chunks[0], model, language, timestamp_granularity)
             if reusable:
@@ -470,8 +547,9 @@ async def run_real_pipeline(task_id: int) -> None:
             _update_chunk_manifest_status(paths.chunks / "manifest.json", 0, "COMPLETED", attempt)
             tracker.progress(1.0, "Fun-ASR 连续音频流识别完成")
         for index, chunk in enumerate(chunks):
-            if continuous_stream:
+            if subtitle_mode or continuous_stream:
                 break
+            assert provider is not None
             request = AsrRequest(
                 chunk=chunk,
                 model=model,
@@ -493,17 +571,28 @@ async def run_real_pipeline(task_id: int) -> None:
                 (index + 1) / len(chunks), f"ASR 已完成 {index + 1}/{len(chunks)} 个分块"
             )
         tracker.complete(
-            message=f"ASR 分块识别完成，共 {len(results)} 块",
+            message=(
+                f"中文字幕导入完成，共 {len(results[0].segments)} 条"
+                if subtitle_mode
+                else f"ASR 分块识别完成，共 {len(results)} 块"
+            ),
             output_artifacts=[result.raw_response_reference for result in results],
         )
 
-        tracker.start("ASR_COMBINE", message="正在映射全局时间轴并合并结果")
+        tracker.start(
+            "SUBTITLE_NORMALIZE" if subtitle_mode else "ASR_COMBINE",
+            message=(
+                "正在规范化字幕并保留原始时间轴"
+                if subtitle_mode
+                else "正在映射全局时间轴并合并结果"
+            ),
+        )
         merge_diagnostics: list[dict] = []
         segments = combine_asr_results(results, chunks, diagnostics=merge_diagnostics)
         artifacts = save_transcript_artifacts(
             paths,
             segments,
-            provider=provider.name,
+            provider=provider_name,
             model=model,
             language=next((item.language for item in results if item.language), None),
             chunk_count=len(chunks),
@@ -515,12 +604,15 @@ async def run_real_pipeline(task_id: int) -> None:
         )
 
         tracker.start(
-            "ASR_VALIDATE",
-            message="正在验证标准化转写结果",
+            "SUBTITLE_VALIDATE" if subtitle_mode else "ASR_VALIDATE",
+            message=(
+                "正在验证导入字幕的正文与时间顺序"
+                if subtitle_mode
+                else "正在验证标准化转写结果"
+            ),
             input_artifacts=[artifacts["normalized"]],
         )
         validate_segments(segments)
-        processing = snapshot.get("processing", {})
         ocr_enabled = bool(snapshot.get("processing", {}).get("ocr_enabled"))
         if not ocr_enabled:
             tracker.complete(

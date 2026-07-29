@@ -17,7 +17,9 @@ interface Props {
 
 export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Props) {
   const [sourceType, setSourceType] = useState<"URL" | "LOCAL_FILE">("URL");
+  const [textSource, setTextSource] = useState<"ASR" | "SUBTITLE">("ASR");
   const [sources, setSources] = useState("");
+  const [subtitlePath, setSubtitlePath] = useState("");
   const [profileId, setProfileId] = useState("");
   const [asrGatewayId, setAsrGatewayId] = useState("");
   const [asrGatewayModelId, setAsrGatewayModelId] = useState("");
@@ -26,8 +28,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
   const [ocrGatewayModelId, setOcrGatewayModelId] = useState("");
   const [textEditEnabled, setTextEditEnabled] = useState(false);
   const [textModelId, setTextModelId] = useState("");
-  const [exportVault, setExportVault] = useState("");
-  const [exportInbox, setExportInbox] = useState("Inbox");
+  const [exportDirectory, setExportDirectory] = useState("");
   const [frameStrategy, setFrameStrategy] = useState<
     "fixed_interval" | "scene_change" | "hybrid"
   >("hybrid");
@@ -37,6 +38,8 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
   const [fusionWindow, setFusionWindow] = useState(8);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [pickingSubtitle, setPickingSubtitle] = useState(false);
+  const [pickingOutput, setPickingOutput] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
@@ -45,10 +48,12 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       .then(value => {
         setSettings(value);
         setTextEditEnabled(value.default_text_edit_enabled);
-        setExportVault(value.obsidian_vault_path ?? "");
-        setExportInbox(value.inbox_path && !/^(?:[a-z]:[\\/]|\\\\)/i.test(value.inbox_path)
-          ? value.inbox_path
-          : "Inbox");
+        if (value.inbox_path && /^(?:[a-z]:[\\/]|\\\\)/i.test(value.inbox_path)) {
+          setExportDirectory(value.inbox_path);
+        } else if (value.obsidian_vault_path) {
+          const relative = (value.inbox_path || "Inbox").replace(/^[\\/]+/, "");
+          setExportDirectory(`${value.obsidian_vault_path.replace(/[\\/]+$/, "")}\\${relative}`);
+        }
       })
       .catch(error => setMessage(error instanceof Error ? error.message : "设置加载失败"));
   }, []);
@@ -112,6 +117,32 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
     }
   };
 
+  const pickSubtitle = async () => {
+    setPickingSubtitle(true);
+    setMessage(null);
+    try {
+      const result = await api.selectSubtitle();
+      if (result.path) setSubtitlePath(result.path);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "无法打开字幕文件选择器");
+    } finally {
+      setPickingSubtitle(false);
+    }
+  };
+
+  const pickOutput = async () => {
+    setPickingOutput(true);
+    setMessage(null);
+    try {
+      const result = await api.selectOutputDirectory();
+      if (result.path) setExportDirectory(result.path);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "无法打开导出目录选择器");
+    } finally {
+      setPickingOutput(false);
+    }
+  };
+
   const submit = async () => {
     const inputs = sources.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
     if (!inputs.length) {
@@ -129,6 +160,14 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       setMessage("本地媒体必须使用 Windows 绝对路径。");
       return;
     }
+    if (textSource === "SUBTITLE" && inputs.length !== 1) {
+      setMessage("导入字幕模式一次创建一个任务，以确保字幕与视频一一对应。");
+      return;
+    }
+    if (textSource === "SUBTITLE" && !subtitlePath) {
+      setMessage("请选择与当前视频对应的中文字幕文件。");
+      return;
+    }
     if (ocrEnabled && !ocrGatewayModelId && !selectedProfile?.ocr_gateway_model_id) {
       setMessage("启用 OCR 时必须选择 OCR Gateway 模型，或使用已配置 OCR 的处理方案。");
       return;
@@ -137,8 +176,8 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       setMessage("启用轻度文本整理时必须选择 TEXT_PROCESSING 模型。");
       return;
     }
-    if (exportVault && !/^(?:[a-z]:[\\/]|\\\\)/i.test(exportVault)) {
-      setMessage("Obsidian Vault 必须填写 Windows 绝对路径。");
+    if (exportDirectory && !/^(?:[a-z]:[\\/]|\\\\)/i.test(exportDirectory)) {
+      setMessage("导出目录必须填写 Windows 绝对路径。");
       return;
     }
     setBusy(true);
@@ -146,7 +185,12 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
     try {
       const tasks = await api.createTasks({
         pipeline_mode: "REAL",
-        inputs: inputs.map(source => ({ source, source_type: sourceType })),
+        inputs: inputs.map(source => ({
+          source,
+          source_type: sourceType,
+          text_source: textSource,
+          subtitle_path: textSource === "SUBTITLE" ? subtitlePath : null,
+        })),
         profile_id: profileId ? Number(profileId) : null,
         asr_gateway_model_id: asrGatewayModelId
           ? Number(asrGatewayModelId)
@@ -155,8 +199,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
           ? Number(ocrGatewayModelId)
           : null,
         text_model_id: textModelId ? Number(textModelId) : null,
-        export_vault_path: exportVault || null,
-        export_inbox_relative_path: exportInbox || "Inbox",
+        export_directory: exportDirectory || null,
         config_overrides: {
           ocr_enabled: ocrEnabled,
           text_edit_enabled: textEditEnabled,
@@ -165,9 +208,11 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
           scene_change_threshold: sceneThreshold,
           max_candidate_frames: maxCandidateFrames,
           fusion_window_seconds: fusionWindow,
+          keep_timestamps: false,
         },
       });
       setSources("");
+      setSubtitlePath("");
       setMessage(`已创建 ${tasks.length} 个完整转换任务。`);
       await onCreated();
     } catch (error) {
@@ -182,7 +227,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       <div>
         <p className="eyebrow">视频 / 音频 / 网页 URL</p>
         <h1>新建完整转换任务</h1>
-        <p>任务将依次完成媒体、ASR、可选 OCR、忠实整理、Markdown 与 Obsidian 导出。</p>
+        <p>文本可来自 ASR 或直接导入中文字幕；随后完成可选 OCR、忠实整理与 Markdown 导出。</p>
       </div>
     </header>
     <section className="panel form-panel">
@@ -214,6 +259,36 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
             : "D:\\Media\\lecture.mp4\nD:\\Media\\audio.m4a"}
         />
       </label>
+      <fieldset>
+        <legend>文本获取方式</legend>
+        <div className="segmented">
+          <button
+            className={textSource === "ASR" ? "selected" : ""}
+            onClick={() => setTextSource("ASR")}
+          >
+            ASR 语音识别
+          </button>
+          <button
+            className={textSource === "SUBTITLE" ? "selected" : ""}
+            onClick={() => setTextSource("SUBTITLE")}
+          >
+            导入中文字幕（跳过 ASR）
+          </button>
+        </div>
+        {textSource === "SUBTITLE" && <div className="form-grid">
+          <label>字幕文件
+            <input
+              value={subtitlePath}
+              onChange={event => setSubtitlePath(event.target.value)}
+              placeholder="D:\Subtitles\lecture.zh-CN.srt"
+            />
+          </label>
+          <button onClick={() => void pickSubtitle()} disabled={pickingSubtitle}>
+            {pickingSubtitle ? "等待选择…" : "选择 SRT / VTT / ASS / TXT…"}
+          </button>
+          <small>字幕会复制到任务工作区，原文件不会被移动、改名或覆盖。</small>
+        </div>}
+      </fieldset>
       <div className="form-grid">
         <label>处理方案
           <select
@@ -234,7 +309,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
             ))}
           </select>
         </label>
-        <label>ASR Gateway
+        {textSource === "ASR" && <label>ASR Gateway
           <select
             value={asrGatewayId}
             onChange={event => {
@@ -245,8 +320,8 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
             <option value="">使用处理方案中的 Gateway</option>
             {asrGateways.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
-        </label>
-        <label>ASR 模型
+        </label>}
+        {textSource === "ASR" && <label>ASR 模型
           <select
             value={asrGatewayModelId}
             disabled={!asrGatewayId}
@@ -257,8 +332,16 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
               <option key={item.id} value={item.id}>{item.display_name}</option>
             ))}
           </select>
-        </label>
+        </label>}
       </div>
+      {selectedProfile && <div className="notice">
+        <strong>当前方案模型：</strong>{" "}
+        ASR {selectedProfile.asr_selection?.display_name ?? "未设置"}；
+        OCR {selectedProfile.ocr_enabled
+          ? selectedProfile.ocr_selection?.display_name ?? "未设置"
+          : "关闭"}；
+        文本整理 {selectedProfile.text_selection?.display_name ?? "未启用"}。
+      </div>}
 
       <label className="check">
         <input
@@ -367,26 +450,23 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       </label>}
 
       <fieldset>
-        <legend>Obsidian 导出目标</legend>
+        <legend>任务导出位置</legend>
         <div className="form-grid">
-          <label>Vault 绝对路径
+          <label>成品目录（绝对路径）
             <input
-              value={exportVault}
-              onChange={event => setExportVault(event.target.value)}
-              placeholder="D:\\Notes\\MyVault"
+              value={exportDirectory}
+              onChange={event => setExportDirectory(event.target.value)}
+              placeholder="D:\\Notes\\Video2Doc"
             />
           </label>
-          <label>Inbox 相对路径
-            <input
-              value={exportInbox}
-              onChange={event => setExportInbox(event.target.value)}
-              placeholder="Inbox"
-            />
-          </label>
+          <button onClick={() => void pickOutput()} disabled={pickingOutput}>
+            {pickingOutput ? "等待选择…" : "选择导出文件夹…"}
+          </button>
         </div>
-        {!exportVault && <small>
-          未指定时使用应用设置中的 Vault；若也未设置，则使用本地测试 Inbox。
+        {!exportDirectory && <small>
+          未指定时使用应用设置中的默认导出位置。
         </small>}
+        <small>成品 Markdown 默认不写入媒体时间戳；图片与追溯 sidecar 会放在同一目录。</small>
       </fieldset>
 
       <div className="notice">

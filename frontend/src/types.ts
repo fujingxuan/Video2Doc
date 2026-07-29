@@ -86,8 +86,31 @@ export interface ProcessingProfile {
   markdown_template: string | null;
   output_directory: string | null;
   data_directory: string | null;
+  asr_selection: ProfileModelSelection | null;
+  ocr_selection: ProfileModelSelection | null;
+  text_selection: ProfileModelSelection | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProfileModelSelection {
+  capability: "ASR" | "OCR" | "TEXT_PROCESSING";
+  source: "GATEWAY" | "MODEL_CONFIG";
+  model_id: number;
+  model_name: string;
+  display_name: string;
+  gateway_id: number | null;
+  gateway_name: string | null;
+  protocol: string | null;
+}
+
+export interface ModelUsage {
+  capability: "ASR" | "OCR" | "TEXT_PROCESSING" | "TEXT_SOURCE";
+  mode: "GATEWAY_MODEL" | "IMPORTED_SUBTITLE";
+  gateway_name: string | null;
+  protocol: string | null;
+  model_name: string | null;
+  display_name: string;
 }
 
 export interface StageRun {
@@ -103,6 +126,7 @@ export interface StageRun {
   technical_error: string | null;
   input_artifacts: string[] | null;
   output_artifacts: string[] | null;
+  model_usage: ModelUsage[];
   log_path: string | null;
 }
 

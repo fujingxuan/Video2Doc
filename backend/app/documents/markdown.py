@@ -17,7 +17,6 @@ def render_obsidian_markdown(document: Document) -> str:
         "source": document.source.source,
         "source_type": document.source.source_type,
         "platform": document.source.platform,
-        "created_at": document.created_at.isoformat(),
         "duration_seconds": document.media_duration_seconds,
         "language": document.language,
         "video2doc_schema": document.schema_version,
@@ -32,11 +31,14 @@ def render_obsidian_markdown(document: Document) -> str:
     lines.append(f"- 来源类型：{document.source.source_type}")
     lines.append(f"- 来源：{document.source.source}")
     if document.media_duration_seconds is not None:
-        lines.append(f"- 时长：{_format_timestamp(document.media_duration_seconds)}")
+        lines.append(f"- 时长：{document.media_duration_seconds:.2f} 秒")
     lines.extend(["", "## 正文", ""])
 
     for section in document.sections:
-        lines.extend([f"### {section.title}", ""])
+        title = section.title
+        if not bool(document.processing.get("keep_timestamps", False)):
+            title = re.sub(r"^(?:\d{2}:\d{2}:\d{2}|未定时)\s+", "", title)
+        lines.extend([f"### {title}", ""])
         for block in section.blocks:
             lines.extend(_render_block(document, block))
     lines.extend(_traceability_appendix(document))
@@ -54,7 +56,7 @@ def _render_block(document: Document, block: DocumentBlock) -> list[str]:
         frame_ids = [
             item.frame_id for item in block.source_references if item.frame_id
         ]
-        detail = f"画面时间 {anchor}"
+        detail = f"画面位置 {anchor}" if anchor else "相关画面"
         if frame_ids:
             detail += f" · frame_id: `{frame_ids[0]}`"
         return [f"![{alt}]({relative})", "", f"*{detail}*", ""]
@@ -62,20 +64,21 @@ def _render_block(document: Document, block: DocumentBlock) -> list[str]:
     if not text:
         return []
     if block.block_type == "transcript":
-        lines = [f"{anchor} **讲者内容**", "", text, ""]
+        lines = [f"{anchor + ' ' if anchor else ''}**讲者内容**", "", text, ""]
     elif block.block_type == "code":
-        lines = [f"{anchor} **画面代码或公式**", "", text, ""]
+        lines = [f"{anchor + ' ' if anchor else ''}**画面代码或公式**", "", text, ""]
     elif block.block_type == "quote":
         quoted = "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
-        lines = [f"{anchor} **画面引用**", "", quoted, ""]
+        lines = [f"{anchor + ' ' if anchor else ''}**画面引用**", "", quoted, ""]
     else:
         quoted = "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
-        lines = [f"{anchor} **画面文字（OCR）**", "", quoted, ""]
+        lines = [f"{anchor + ' ' if anchor else ''}**画面文字（OCR）**", "", quoted, ""]
     lines.extend([f"<!-- video2doc-sources: {source_ids} -->", ""])
     return lines
 
 
 def _traceability_appendix(document: Document) -> list[str]:
+    keep_timestamps = bool(document.processing.get("keep_timestamps", False))
     lines = [
         "---",
         "",
@@ -86,22 +89,33 @@ def _traceability_appendix(document: Document) -> list[str]:
         f"- Markdown 模板：{MARKDOWN_TEMPLATE_VERSION}",
         f"- 文本整理：{_edit_status(document)}",
         "",
-        "| 文档块 | 类型 | 时间 | 来源 ID |",
-        "| --- | --- | --- | --- |",
+        (
+            "| 文档块 | 类型 | 时间 | 来源 ID |"
+            if keep_timestamps
+            else "| 文档块 | 类型 | 来源 ID |"
+        ),
+        "| --- | --- | --- | --- |" if keep_timestamps else "| --- | --- | --- |",
     ]
     for block in document.all_blocks():
         source_ids = "<br>".join(
             _table_escape(item.source_id) for item in block.source_references
         )
-        lines.append(
-            f"| `{_table_escape(block.block_id)}` | {block.block_type} | "
-            f"{_format_timestamp(block.timestamp.start_seconds)} | {source_ids} |"
-        )
+        if keep_timestamps:
+            lines.append(
+                f"| `{_table_escape(block.block_id)}` | {block.block_type} | "
+                f"{_format_timestamp(block.timestamp.start_seconds)} | {source_ids} |"
+            )
+        else:
+            lines.append(
+                f"| `{_table_escape(block.block_id)}` | {block.block_type} | {source_ids} |"
+            )
     lines.extend(["", "</details>", ""])
     return lines
 
 
 def _timestamp_anchor(document: Document, block: DocumentBlock) -> str:
+    if not bool(document.processing.get("keep_timestamps", False)):
+        return ""
     label = _format_timestamp(block.timestamp.start_seconds)
     seconds = block.timestamp.start_seconds
     if seconds is None or document.source.source_type != "URL":

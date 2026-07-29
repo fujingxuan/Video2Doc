@@ -7,7 +7,7 @@ import re
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Capability(StrEnum):
@@ -264,7 +264,7 @@ class ProfileFields(BaseModel):
     fix_sentences: bool = True
     auto_paragraphs: bool = True
     generate_headings: bool = True
-    keep_timestamps: bool = True
+    keep_timestamps: bool = False
     keep_raw_transcript: bool = True
     keep_downloaded_media: bool = False
     ocr_frame_interval_seconds: float = Field(default=5.0, gt=0, le=3600)
@@ -301,9 +301,23 @@ class ProfileUpdate(BaseModel):
     data_directory: str | None = None
 
 
+class ProfileModelSelection(BaseModel):
+    capability: Literal["ASR", "OCR", "TEXT_PROCESSING"]
+    source: Literal["GATEWAY", "MODEL_CONFIG"]
+    model_id: int
+    model_name: str
+    display_name: str
+    gateway_id: int | None = None
+    gateway_name: str | None = None
+    protocol: str | None = None
+
+
 class ProfileRead(ProfileFields):
     id: int
     is_builtin: bool
+    asr_selection: ProfileModelSelection | None = None
+    ocr_selection: ProfileModelSelection | None = None
+    text_selection: ProfileModelSelection | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -385,6 +399,8 @@ class TaskInput(BaseModel):
     source_type: Literal["URL", "LOCAL_FILE"]
     title: str | None = Field(default=None, max_length=300)
     simulate_failure: Literal["never", "once", "always"] = "never"
+    text_source: Literal["ASR", "SUBTITLE"] = "ASR"
+    subtitle_path: str | None = None
 
     @field_validator("source")
     @classmethod
@@ -393,6 +409,25 @@ class TaskInput(BaseModel):
         if not normalized or "\x00" in normalized:
             raise ValueError("输入来源不能为空或包含 NUL 字符")
         return normalized
+
+    @field_validator("subtitle_path")
+    @classmethod
+    def subtitle_must_be_absolute(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip()
+        path = Path(normalized)
+        if "\x00" in normalized or not path.is_absolute():
+            raise ValueError("Subtitle path must be an absolute path")
+        if path.suffix.casefold() not in {".srt", ".vtt", ".ass", ".ssa", ".txt"}:
+            raise ValueError("Subtitle file must be SRT, VTT, ASS, SSA, or TXT")
+        return normalized
+
+    @model_validator(mode="after")
+    def subtitle_required_for_subtitle_source(self) -> TaskInput:
+        if self.text_source == "SUBTITLE" and not self.subtitle_path:
+            raise ValueError("Subtitle text source requires a subtitle file")
+        return self
 
 
 class TaskBatchCreate(BaseModel):
@@ -404,8 +439,19 @@ class TaskBatchCreate(BaseModel):
     asr_gateway_model_id: int | None = None
     ocr_gateway_model_id: int | None = None
     text_model_id: int | None = None
+    export_directory: str | None = None
     export_vault_path: str | None = None
     export_inbox_relative_path: str | None = None
+
+    @field_validator("export_directory")
+    @classmethod
+    def export_directory_must_be_absolute(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip()
+        if "\x00" in normalized or not Path(normalized).is_absolute():
+            raise ValueError("Export directory must be an absolute path")
+        return normalized
 
     @field_validator("export_vault_path")
     @classmethod
@@ -451,6 +497,7 @@ class StageRead(BaseModel):
     retryable: bool | None
     input_artifacts: list[str] | None
     output_artifacts: list[str] | None
+    model_usage: list[dict[str, Any]] = Field(default_factory=list)
     log_path: str | None
 
 

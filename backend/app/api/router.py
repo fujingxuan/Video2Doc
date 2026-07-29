@@ -37,7 +37,12 @@ from app.schemas.api import (
 from app.services.catalog import CatalogService
 from app.services.gateways import GatewayService
 from app.services.settings import SettingsService
-from app.services.system import media_tool_status, select_media_files
+from app.services.system import (
+    media_tool_status,
+    select_media_files,
+    select_output_directory,
+    select_subtitle_file,
+)
 from app.services.tasks import TaskService
 from app.workers.queue import queue_worker
 
@@ -139,7 +144,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="1.0.0",
+        version="2.0.0",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -227,6 +232,16 @@ def system_status(session: Session = Depends(get_db)) -> dict:
 @router.post("/system/select-media", response_model=dict, tags=["system"])
 def select_media() -> dict[str, list[str]]:
     return {"paths": select_media_files()}
+
+
+@router.post("/system/select-subtitle", response_model=dict, tags=["system"])
+def select_subtitle() -> dict[str, str | None]:
+    return {"path": select_subtitle_file()}
+
+
+@router.post("/system/select-output-directory", response_model=dict, tags=["system"])
+def select_export_directory() -> dict[str, str | None]:
+    return {"path": select_output_directory()}
 
 
 @router.post("/system/shutdown", response_model=dict, tags=["system"])

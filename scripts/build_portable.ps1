@@ -67,7 +67,7 @@ try {
         --noconfirm `
         --clean `
         --onedir `
-        --console `
+        --windowed `
         --name Video2Doc `
         --distpath $distRoot `
         --workpath $work `
@@ -96,8 +96,8 @@ Video2Doc Portable
 ==================
 
 1. Double-click Video2Doc.exe.
-2. The local web interface opens automatically.
-3. Closing the launcher console or pressing Ctrl+C stops Video2Doc-managed processes.
+2. A standalone Video2Doc window opens automatically.
+3. Close that window with X to stop the Video2Doc backend started by it.
 
 Application data:
   %LOCALAPPDATA%\Video2Doc

@@ -4,12 +4,14 @@ from app.models import AppSetting, ModelConfig, ProcessingProfile, Task
 from app.schemas.api import (
     ModelRead,
     ProfileRead,
+    ProfileModelSelection,
     SettingsRead,
     SnapshotRead,
     StageRead,
     TaskDetail,
     TaskRead,
 )
+from app.pipeline.model_usage import stage_model_usage
 from app.storage.workspace import list_artifacts, read_json
 from pathlib import Path
 
@@ -27,9 +29,50 @@ def model_read(item: ModelConfig) -> ModelRead:
 
 
 def profile_read(item: ProcessingProfile) -> ProfileRead:
+    values = {
+        column.name: getattr(item, column.name) for column in item.__table__.columns
+    }
     return ProfileRead.model_validate(
-        {column.name: getattr(item, column.name) for column in item.__table__.columns}
+        {
+            **values,
+            "asr_selection": _profile_selection(
+                "ASR", item.asr_gateway_model, item.asr_model
+            ),
+            "ocr_selection": _profile_selection(
+                "OCR", item.ocr_gateway_model, item.ocr_model
+            ),
+            "text_selection": _profile_selection(
+                "TEXT_PROCESSING", None, item.text_model
+            ),
+        }
     )
+
+
+def _profile_selection(
+    capability: str,
+    gateway_model,
+    model,
+) -> ProfileModelSelection | None:
+    if gateway_model is not None:
+        return ProfileModelSelection(
+            capability=capability,
+            source="GATEWAY",
+            model_id=gateway_model.id,
+            model_name=gateway_model.model_name,
+            display_name=gateway_model.display_name,
+            gateway_id=gateway_model.gateway_id,
+            gateway_name=gateway_model.gateway.name,
+            protocol=gateway_model.gateway.protocol,
+        )
+    if model is not None:
+        return ProfileModelSelection(
+            capability=capability,
+            source="MODEL_CONFIG",
+            model_id=model.id,
+            model_name=model.name,
+            display_name=model.name,
+        )
+    return None
 
 
 def settings_read(item: AppSetting) -> SettingsRead:
@@ -148,7 +191,19 @@ def task_detail(item: Task) -> TaskDetail:
             snapshot_json=item.snapshot.snapshot_json,
             created_at=item.snapshot.created_at,
         ),
-        stages=[StageRead.model_validate(stage) for stage in item.stages],
+        stages=[
+            StageRead.model_validate(
+                {
+                    column.name: getattr(stage, column.name)
+                    for column in stage.__table__.columns
+                }
+                | {
+                    "model_usage": stage.model_usage
+                    or stage_model_usage(stage.stage, item.snapshot.snapshot_json)
+                }
+            )
+            for stage in item.stages
+        ],
         media_info=media_info,
         transcript_preview=transcript_preview,
         frame_summary=frame_summary,

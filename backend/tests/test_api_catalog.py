@@ -39,6 +39,18 @@ def test_health_models_profiles_settings_and_immutable_snapshot(
     )
     selected = client.post("/api/v1/system/select-media")
     assert selected.json()["paths"] == [r"D:\Video2Doc-Test\sample.mp4"]
+    monkeypatch.setattr(
+        "app.api.router.select_subtitle_file",
+        lambda: r"D:\Video2Doc-Test\sample.zh-CN.srt",
+    )
+    subtitle = client.post("/api/v1/system/select-subtitle")
+    assert subtitle.json()["path"].endswith("sample.zh-CN.srt")
+    monkeypatch.setattr(
+        "app.api.router.select_output_directory",
+        lambda: r"D:\Video2Doc-Output",
+    )
+    output = client.post("/api/v1/system/select-output-directory")
+    assert output.json()["path"] == r"D:\Video2Doc-Output"
     shutdown_called: list[bool] = []
     client.app.state.request_shutdown = lambda: shutdown_called.append(True)
     shutdown = client.post("/api/v1/system/shutdown")
@@ -117,6 +129,18 @@ def test_health_models_profiles_settings_and_immutable_snapshot(
     profile_response = client.post("/api/v1/profiles", json=profile_payload)
     assert profile_response.status_code == 201, profile_response.text
     profile = profile_response.json()
+    assert profile["asr_selection"] == {
+        "capability": "ASR",
+        "source": "GATEWAY",
+        "model_id": asr_gateway_model["id"],
+        "model_name": "test-asr",
+        "display_name": "Test ASR",
+        "gateway_id": asr_gateway["id"],
+        "gateway_name": "test-asr-gateway",
+        "protocol": "video2doc-asr-http-v1",
+    }
+    assert profile["ocr_selection"]["display_name"] == "Test OCR"
+    assert profile["text_selection"]["display_name"] == "gpt-5-mini"
 
     invalid = client.post(
         "/api/v1/profiles",
@@ -160,7 +184,7 @@ def test_health_models_profiles_settings_and_immutable_snapshot(
     assert created.status_code == 201, created.text
     task_id = created.json()[0]["id"]
     snapshot_before = client.get(f"/api/v1/tasks/{task_id}/snapshot").json()
-    assert snapshot_before["schema_version"] == 5
+    assert snapshot_before["schema_version"] == 6
     assert snapshot_before["processing"]["prompt_version"] == "faithful-edit-v1"
     assert snapshot_before["processing"]["markdown_template_version"] == "obsidian-v1"
     assert snapshot_before["export"]["conflict_policy"] == "rename"
