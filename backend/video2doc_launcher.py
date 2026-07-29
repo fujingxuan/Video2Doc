@@ -14,10 +14,12 @@ import urllib.request
 import webbrowser
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TextIO
 
 
 DEFAULT_PORT = 8765
 FALLBACK_PORT_ATTEMPTS = 100
+_OUTPUT_STREAM: TextIO | None = None
 
 
 def main() -> int:
@@ -49,6 +51,7 @@ def main() -> int:
     logs = app_root / "logs"
     for path in (app_root, data_root, default_vault / "Inbox", logs):
         path.mkdir(parents=True, exist_ok=True)
+    _ensure_output_streams(logs / "launcher.log")
 
     frontend = _first_existing(
         bundle_root / "frontend_dist",
@@ -174,6 +177,7 @@ def main() -> int:
             port=args.port,
             log_level=os.getenv("VIDEO2DOC_LOG_LEVEL", "info").casefold(),
             access_log=False,
+            use_colors=False,
         )
         server = uvicorn.Server(config)
         shutdown_requested = threading.Event()
@@ -226,6 +230,21 @@ def main() -> int:
 
 def _first_existing(*candidates: Path) -> Path | None:
     return next((path.resolve() for path in candidates if path.exists()), None)
+
+
+def _ensure_output_streams(log_path: Path) -> TextIO | None:
+    global _OUTPUT_STREAM
+
+    if sys.stdout is not None and sys.stderr is not None:
+        return _OUTPUT_STREAM
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    stream = log_path.open("a", encoding="utf-8", buffering=1)
+    _OUTPUT_STREAM = stream
+    if sys.stdout is None:
+        sys.stdout = stream
+    if sys.stderr is None:
+        sys.stderr = stream
+    return stream
 
 
 def _port_available(port: int) -> bool:

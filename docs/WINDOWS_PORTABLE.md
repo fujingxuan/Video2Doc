@@ -63,6 +63,7 @@ Set-Location D:\Projects\Video2Doc
 
 - “发行包缺少前端/迁移资源”：发行目录不完整，应重新解压 ZIP。
 - “数据库迁移失败”：查看 `<app-home>\logs\launcher-error.log`。
+- 无控制台便携版的启动与 Uvicorn 日志写入 `<app-home>\logs\launcher.log`。
 - 显式端口提示“被其他程序占用”：关闭冲突程序或改用另一个 `--port`。
 - 媒体工具缺失：应用仍能启动；在设置页补充路径后重新检查。
 - Gateway 缺失或不可用：任务结构化失败并保留错误/attempt，恢复服务后重试。

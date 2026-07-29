@@ -56,3 +56,26 @@ def test_edge_executable_prefers_explicit_configuration(tmp_path: Path) -> None:
     assert launcher._edge_executable(
         {"VIDEO2DOC_BROWSER_EXECUTABLE": str(executable)}
     ) == executable.resolve()
+
+
+def test_windowless_launcher_supplies_streams_for_uvicorn(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from uvicorn.logging import DefaultFormatter
+
+    monkeypatch.setattr(launcher.sys, "stdout", None)
+    monkeypatch.setattr(launcher.sys, "stderr", None)
+
+    stream = launcher._ensure_output_streams(tmp_path / "launcher.log")
+    try:
+        DefaultFormatter("%(message)s")
+        print("windowless-output")
+        assert launcher.sys.stdout is stream
+        assert launcher.sys.stderr is stream
+    finally:
+        stream.close()
+
+    assert "windowless-output" in (tmp_path / "launcher.log").read_text(
+        encoding="utf-8"
+    )

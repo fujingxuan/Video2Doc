@@ -102,6 +102,9 @@ Video2Doc Portable
 Application data:
   %LOCALAPPDATA%\Video2Doc
 
+Startup log:
+  %LOCALAPPDATA%\Video2Doc\logs\launcher.log
+
 External requirements for real tasks:
   FFmpeg, ffprobe, yt-dlp, and the selected ASR/OCR Gateway.
 
