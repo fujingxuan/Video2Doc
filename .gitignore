@@ -208,6 +208,7 @@ data/*
 !data/.gitkeep
 backend/data/*
 !backend/data/.gitkeep
+backend/.test-runtime-*/
 *.db
 *.db-shm
 *.db-wal
