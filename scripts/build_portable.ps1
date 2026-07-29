@@ -98,6 +98,7 @@ Video2Doc Portable
 1. Double-click Video2Doc.exe.
 2. A standalone Video2Doc window opens automatically.
 3. Close that window with X to stop the Video2Doc backend started by it.
+4. Starting Video2Doc again while it is running does not open another window.
 
 Application data:
   %LOCALAPPDATA%\Video2Doc

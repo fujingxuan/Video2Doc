@@ -30,10 +30,18 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: { "Content-Type": "application/json", ...init?.headers },
+    });
+  } catch {
+    throw new ApiError(
+      "无法连接 Video2Doc 后端。请关闭失效窗口后重新启动应用。",
+      0,
+    );
+  }
   if (!response.ok) {
     let message = `请求失败 (${response.status})`;
     try {
@@ -49,7 +57,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ status: string; database: string; queue_worker: string }>("/health"),
+  health: () =>
+    request<{ status: string; version: string; database: string; queue_worker: string }>(
+      "/health",
+    ),
   models: (capability?: Capability) =>
     request<ModelConfig[]>(`/models${capability ? `?capability=${capability}` : ""}`),
   createModel: (payload: {

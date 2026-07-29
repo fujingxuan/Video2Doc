@@ -19,10 +19,15 @@ from typing import TextIO
 
 DEFAULT_PORT = 8765
 FALLBACK_PORT_ATTEMPTS = 100
+INSTANCE_MUTEX_NAME = r"Local\Video2Doc.Desktop.SingleInstance"
+WINDOWS_ERROR_ALREADY_EXISTS = 183
 _OUTPUT_STREAM: TextIO | None = None
+_INSTANCE_MUTEX_HANDLE: int | None = None
 
 
 def main() -> int:
+    global _INSTANCE_MUTEX_HANDLE
+
     launch_argv = sys.argv[1:]
     port_is_explicit = _requested_port_is_explicit(launch_argv, os.environ)
     parser = argparse.ArgumentParser(description="Video2Doc Windows launcher")
@@ -52,6 +57,17 @@ def main() -> int:
     for path in (app_root, data_root, default_vault / "Inbox", logs):
         path.mkdir(parents=True, exist_ok=True)
     _ensure_output_streams(logs / "launcher.log")
+    if not args.check_only:
+        try:
+            _INSTANCE_MUTEX_HANDLE = _try_acquire_instance_mutex()
+        except OSError as exc:
+            return _fatal(
+                f"无法建立应用单实例锁：{exc}",
+                logs / "launcher-error.log",
+            )
+        if _INSTANCE_MUTEX_HANDLE is None:
+            print("Video2Doc 已在运行；已阻止重复窗口。")
+            return 0
 
     frontend = _first_existing(
         bundle_root / "frontend_dist",
@@ -74,8 +90,6 @@ def main() -> int:
     app_url = f"http://127.0.0.1:{args.port}/"
     if not _port_available(args.port):
         if _is_video2doc(health_url):
-            if not args.no_browser:
-                _show_existing_app(app_url, health_url, app_root)
             print(f"Video2Doc 已在运行：{app_url}")
             return 0
         if port_is_explicit:
@@ -94,12 +108,6 @@ def main() -> int:
         fallback_kind, fallback_port = fallback
         fallback_url = f"http://127.0.0.1:{fallback_port}/"
         if fallback_kind == "video2doc":
-            if not args.no_browser:
-                _show_existing_app(
-                    fallback_url,
-                    f"http://127.0.0.1:{fallback_port}/api/v1/health",
-                    app_root,
-                )
             print(f"Video2Doc 已在运行：{fallback_url}")
             return 0
         print(
@@ -202,8 +210,9 @@ def main() -> int:
                 webbrowser.open(app_url)
                 server_thread.join()
             else:
+                app_window_handle = _wait_for_descendant_window(window.pid)
                 while (
-                    window.poll() is None
+                    _standalone_window_running(window, app_window_handle)
                     and server_thread.is_alive()
                     and not shutdown_requested.wait(0.25)
                 ):
@@ -245,6 +254,45 @@ def _ensure_output_streams(log_path: Path) -> TextIO | None:
     if sys.stderr is None:
         sys.stderr = stream
     return stream
+
+
+def _try_acquire_instance_mutex(name: str = INSTANCE_MUTEX_NAME) -> int | None:
+    if os.name != "nt":
+        return -1
+
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_mutex = kernel32.CreateMutexW
+    create_mutex.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+    create_mutex.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+
+    ctypes.set_last_error(0)
+    handle = create_mutex(None, True, name)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if ctypes.get_last_error() == WINDOWS_ERROR_ALREADY_EXISTS:
+        close_handle(handle)
+        return None
+    return int(handle)
+
+
+def _close_instance_mutex(handle: int) -> None:
+    if os.name != "nt" or handle < 0:
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    close_handle(handle)
 
 
 def _port_available(port: int) -> bool:
@@ -358,22 +406,129 @@ def _open_standalone_window(
         return None
 
 
-def _show_existing_app(
-    app_url: str,
-    health_url: str,
-    app_root: Path,
-) -> None:
-    window = _open_standalone_window(app_url, app_root)
-    if window is None:
-        webbrowser.open(app_url)
-        return
-    window.wait()
-    shutdown_url = health_url.rsplit("/health", 1)[0] + "/system/shutdown"
+def _standalone_window_running(
+    process: subprocess.Popen[bytes],
+    window_handle: int | None,
+) -> bool:
+    if window_handle is not None:
+        return _is_window_open(window_handle)
+    return process.poll() is None
+
+
+def _wait_for_descendant_window(
+    root_process_id: int,
+    attempts: int = 40,
+) -> int | None:
+    if os.name != "nt":
+        return None
+    for _attempt in range(attempts):
+        handle = _find_descendant_window(root_process_id)
+        if handle is not None:
+            return handle
+        time.sleep(0.25)
+    return None
+
+
+def _find_descendant_window(root_process_id: int) -> int | None:
+    if os.name != "nt":
+        return None
+
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessEntry(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", wintypes.LONG),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", wintypes.WCHAR * 260),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_snapshot = kernel32.CreateToolhelp32Snapshot
+    create_snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    create_snapshot.restype = wintypes.HANDLE
+    snapshot = create_snapshot(0x00000002, 0)
+    if snapshot == ctypes.c_void_p(-1).value:
+        return None
+    process_first = kernel32.Process32FirstW
+    process_first.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(ProcessEntry),
+    )
+    process_first.restype = wintypes.BOOL
+    process_next = kernel32.Process32NextW
+    process_next.argtypes = (
+        wintypes.HANDLE,
+        ctypes.POINTER(ProcessEntry),
+    )
+    process_next.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    parents: dict[int, int] = {}
+    entry = ProcessEntry()
+    entry.dwSize = ctypes.sizeof(ProcessEntry)
     try:
-        request = urllib.request.Request(shutdown_url, data=b"", method="POST")
-        urllib.request.urlopen(request, timeout=3).close()
-    except (OSError, urllib.error.URLError):
-        pass
+        has_entry = process_first(snapshot, ctypes.byref(entry))
+        while has_entry:
+            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+            has_entry = process_next(snapshot, ctypes.byref(entry))
+    finally:
+        close_handle(snapshot)
+
+    process_ids = {root_process_id}
+    changed = True
+    while changed:
+        changed = False
+        for process_id, parent_id in parents.items():
+            if parent_id in process_ids and process_id not in process_ids:
+                process_ids.add(process_id)
+                changed = True
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    found_handle = 0
+    callback_type = ctypes.WINFUNCTYPE(
+        wintypes.BOOL,
+        wintypes.HWND,
+        wintypes.LPARAM,
+    )
+
+    def inspect_window(window_handle: int, _parameter: int) -> bool:
+        nonlocal found_handle
+        if not user32.IsWindowVisible(window_handle):
+            return True
+        process_id = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(
+            window_handle,
+            ctypes.byref(process_id),
+        )
+        if int(process_id.value) not in process_ids:
+            return True
+        if user32.GetWindowTextLengthW(window_handle) <= 0:
+            return True
+        found_handle = int(window_handle)
+        return False
+
+    callback = callback_type(inspect_window)
+    user32.EnumWindows(callback, 0)
+    return found_handle or None
+
+
+def _is_window_open(window_handle: int) -> bool:
+    if os.name != "nt":
+        return False
+
+    import ctypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    return bool(user32.IsWindow(window_handle))
 
 
 def _fatal(message: str, log_path: Path | None = None) -> int:

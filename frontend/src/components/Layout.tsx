@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import packageInfo from "../../package.json";
 
 const links = [
   ["/", "总览"],
@@ -19,7 +20,7 @@ export function Layout({ path, children }: { path: string; children: ReactNode }
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">V2D</span>
-          <div><strong>Video2Doc</strong><small>忠实转换与 Obsidian 导出 · v1.0</small></div>
+          <div><strong>Video2Doc</strong><small>忠实转换与 Obsidian 导出 · v{packageInfo.version}</small></div>
         </div>
         <nav>
           {links.map(([target, label]) => (

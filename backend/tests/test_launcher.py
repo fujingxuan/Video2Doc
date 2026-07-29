@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
+import pytest
 import video2doc_launcher as launcher
 
 
@@ -79,3 +82,44 @@ def test_windowless_launcher_supplies_streams_for_uvicorn(
     assert "windowless-output" in (tmp_path / "launcher.log").read_text(
         encoding="utf-8"
     )
+
+
+def test_windows_instance_mutex_blocks_duplicate_process() -> None:
+    if launcher.os.name != "nt":
+        pytest.skip("Windows named mutex is only available on Windows")
+
+    name = rf"Local\Video2Doc.Test.{uuid4().hex}"
+    first_handle = launcher._try_acquire_instance_mutex(name)
+    assert first_handle is not None
+    try:
+        assert launcher._try_acquire_instance_mutex(name) is None
+    finally:
+        launcher._close_instance_mutex(first_handle)
+
+
+def test_duplicate_launch_exits_before_opening_another_window(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        launcher.sys,
+        "argv",
+        ["Video2Doc.exe", "--app-home", str(tmp_path)],
+    )
+    monkeypatch.setattr(launcher, "_try_acquire_instance_mutex", lambda: None)
+    monkeypatch.setattr(
+        launcher,
+        "_open_standalone_window",
+        lambda *_args: pytest.fail("duplicate launch must not open a window"),
+    )
+
+    assert launcher.main() == 0
+
+
+def test_standalone_window_tracks_real_window_handle(monkeypatch) -> None:
+    process = SimpleNamespace(poll=lambda: None)
+    monkeypatch.setattr(launcher, "_is_window_open", lambda handle: handle == 100)
+
+    assert launcher._standalone_window_running(process, 100)
+    assert not launcher._standalone_window_running(process, 200)
+    assert launcher._standalone_window_running(process, None)

@@ -121,6 +121,8 @@ D:\Projects\Video2Doc\dist\Video2Doc-Portable\Video2Doc.exe
 
 程序会升级自己的 SQLite、检查端口、启动 FastAPI、托管已构建前端并打开 Edge 独立应用窗口。点击窗口右上角 X 会停止由该窗口启动的 Video2Doc 后端，不停止外部管理的 Docker OCR。完整参数和隔离数据目录方式见 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)。
 
+2.2 起应用使用 Windows 单实例锁：重复双击不会再打开第二个窗口，也不会误关正在运行的后端。侧边栏版本号直接来自前端包版本。
+
 开发环境仍可分别启动：
 
 后端：
