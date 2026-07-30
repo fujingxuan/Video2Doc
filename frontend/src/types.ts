@@ -106,7 +106,7 @@ export interface ProfileModelSelection {
 
 export interface ModelUsage {
   capability: "ASR" | "OCR" | "TEXT_PROCESSING" | "TEXT_SOURCE";
-  mode: "GATEWAY_MODEL" | "IMPORTED_SUBTITLE";
+  mode: "GATEWAY_MODEL" | "URL_SUBTITLE";
   gateway_name: string | null;
   protocol: string | null;
   model_name: string | null;

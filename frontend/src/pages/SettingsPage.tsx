@@ -159,9 +159,11 @@ export function SettingsPage() {
     <section className="panel form-panel settings-form">
       <h2>忠实文本整理</h2>
       <div className="notice">
-        OneAPI：{settings.api_key_configured
-          ? "ONEAPI_API_KEY 环境变量已配置"
-          : "未配置；关闭整理时不影响完整转换"}
+        OneAPI API Key：{settings.api_key_configured ? "已配置" : "未配置"}；
+        Base URL：{settings.oneapi_base_url?.trim() ? "已配置" : "未配置"}。
+        {!settings.api_key_configured || !settings.oneapi_base_url?.trim()
+          ? " 两项都配置后才能启用文本整理；关闭整理时不影响完整转换。"
+          : " 文本整理连接信息完整。"}
       </div>
       <label>OneAPI Base URL
         <input

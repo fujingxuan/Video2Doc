@@ -78,7 +78,7 @@ OneAPI ── 仅可选的受约束文本轻度编辑
 - 本地文件必须是存在的绝对文件路径，拒绝目录和 NUL 字符。
 - 本地文件采用只读引用策略，工作区记录规范化路径和大小，不复制原文件。
 - URL 下载到 `00_source/media`。
-- 字幕模式只读选择本地字幕，创建任务时复制到 `00_source/subtitles` 并记录 SHA-256；原文件不移动、不覆盖。
+- 字幕模式仅接受视频网页 URL；Worker 使用 yt-dlp 抓取人工/自动字幕，按中文优先选择，写入 `00_source/subtitles` 并记录 SHA-256。重试会复用已验证的抓取清单和字幕文件。
 - 字幕模式跳过音频提取、分块与 ASR Provider，解析结果仍进入统一的 normalized transcript、融合和 Document IR。
 - 扩展名仅作界面提示；最终媒体有效性、音视频流和容器以 ffprobe 为准。
 
@@ -282,15 +282,15 @@ FINALIZE (99-100)
 - `task_stage_runs.model_usage`：阶段实际使用的 Gateway、协议、能力和模型显示名
 - 现有方案与应用设置迁移到“成品不写入时间戳”的默认值
 
-旧迁移没有修改。新快照版本为 6，除版本 5 内容外，还冻结 ASR/字幕文本来源、字幕工作区副本与 SHA-256、任务级直接导出目录和无时间戳策略。数据库与快照都只保存密钥环境变量名称。
+旧迁移没有修改。新快照版本为 6，除版本 5 内容外，还冻结 ASR/字幕文本来源、链接字幕 Provider 与语言优先级、任务级直接导出目录和无时间戳策略。抓取后的字幕文件与 SHA-256 记录在任务产物清单中。数据库与快照都只保存密钥环境变量名称。
 
 ## 16. API、前端与 Windows 启动器
 
 原任务 API 保持兼容。真实任务选择 `asr_gateway_model_id`，处理方案分别引用 ASR/OCR Gateway 模型；模拟模式仍供显式自动化兼容测试。
 
-新增帧、OCR、融合、文档、Markdown、系统状态、原生媒体/字幕/目录选择和受边界约束的打开/产物 API。前端新建任务页配置 ASR 或字幕、OCR、文本处理和直接导出目录；处理方案显示完整模型名称；详情页显示 attempt、错误、阶段进度及逐阶段模型、统计、融合、Document、Markdown 和导出位置，并提供取消、重试、打开与复制错误。SSE 和 REST 回退没有改变。
+新增帧、OCR、融合、文档、Markdown、系统状态、原生媒体/目录选择和受边界约束的打开/产物 API。前端新建任务页配置 ASR 或链接字幕、OCR、文本处理和直接导出目录；处理方案显示完整模型名称；详情页显示 attempt、错误、阶段进度及逐阶段模型、统计、融合、Document、Markdown 和导出位置，并提供取消、重试、打开与复制错误。SSE 和 REST 回退没有改变。
 
-`video2doc_launcher.py` 是 Windows 单入口。它在独立 app-home 中设置数据库、数据和默认 Inbox，执行 Alembic upgrade，拒绝占用端口，启动单个 Uvicorn/FastAPI 进程并由后端托管前端；默认使用隔离 Edge profile 的应用模式窗口，窗口关闭后停止受管后端。退出 API 只在 launcher 注入回调时可用；应用不控制外部管理的 Docker OCR。
+`video2doc_launcher.py` 是 Windows 单入口。它在独立 app-home 中设置数据库、数据和默认 Inbox，执行 Alembic upgrade，拒绝占用端口，启动单个 Uvicorn/FastAPI 进程并由后端托管前端；默认使用隔离 Edge profile 的应用模式窗口。命名互斥锁阻止第二个主进程，重复启动只唤醒标题精确匹配的已有窗口；主进程按真实顶层窗口句柄监控生命周期，窗口关闭后停止受管后端。退出 API 只在 launcher 注入回调时可用；应用不控制外部管理的 Docker OCR。
 
 ## 17. 安全边界
 

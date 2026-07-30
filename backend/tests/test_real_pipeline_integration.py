@@ -7,9 +7,10 @@ from PIL import Image
 
 from app.providers.asr import AsrResult, AsrSegment
 from app.providers.frames import FrameExtractionResult, FrameRecord
-from app.providers.media import MediaInfo, MediaStream
+from app.providers.media import MediaAcquisitionResult, MediaInfo, MediaStream
 from app.providers.ocr import OcrBlock, OcrResult
 from app.providers.ocr_timeline import OcrRunResult
+from app.providers.subtitles import SubtitleAcquisition
 from app.storage.workspace import write_json
 from tests.helpers import wait_for_status
 
@@ -180,7 +181,7 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
     assert "integration-secret" not in snapshot_text
 
 
-def test_imported_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown(
+def test_url_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown(
     client: TestClient, tmp_path: Path, monkeypatch
 ) -> None:
     source = tmp_path / "subtitle-video.mp4"
@@ -197,9 +198,64 @@ def test_imported_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown
     async def fake_probe(self, media_path, paths, *, cancel_check, artifact_name="ffprobe"):
         return media_info(paths.metadata / f"{artifact_name}.json", video=True)
 
+    async def fake_media_acquire(
+        self,
+        source_url,
+        source_type,
+        paths,
+        *,
+        cancel_check,
+        progress,
+    ):
+        metadata_path = paths.metadata / "ytdlp.json"
+        write_json(
+            metadata_path,
+            {"subtitles": {"zh-CN": [{"ext": "srt"}]}, "title": "字幕视频"},
+        )
+        progress(1.0, "受控媒体获取完成")
+        return MediaAcquisitionResult(
+            source_type=source_type,
+            original_input=source_url,
+            local_media_path=str(source),
+            title="字幕视频",
+            duration=4.0,
+            container="mp4",
+            has_audio=True,
+            has_video=True,
+            metadata_path=str(metadata_path),
+            provider="controlled-yt-dlp",
+        )
+
+    async def fake_subtitle_acquire(
+        self,
+        source_url,
+        paths,
+        *,
+        cancel_check,
+        progress,
+    ):
+        progress(1.0, "受控链接字幕抓取完成")
+        return SubtitleAcquisition(
+            path=str(subtitle),
+            language="zh-CN",
+            source_kind="manual",
+            subtitle_format="srt",
+            sha256="controlled-subtitle-sha256",
+            size_bytes=subtitle.stat().st_size,
+            manifest_path=str(paths.metadata / "subtitle_acquisition.json"),
+        )
+
     async def forbidden_audio(*args, **kwargs):
         raise AssertionError("subtitle mode must not normalize audio")
 
+    monkeypatch.setattr(
+        "app.pipeline.real.MediaSourceResolver.acquire",
+        fake_media_acquire,
+    )
+    monkeypatch.setattr(
+        "app.pipeline.real.YtDlpSubtitleSource.acquire",
+        fake_subtitle_acquire,
+    )
     monkeypatch.setattr("app.pipeline.real.FfprobeProvider.probe", fake_probe)
     monkeypatch.setattr(
         "app.pipeline.real.FfmpegProvider.normalize_audio",
@@ -212,10 +268,9 @@ def test_imported_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown
             "pipeline_mode": "REAL",
             "inputs": [
                 {
-                    "source": str(source),
-                    "source_type": "LOCAL_FILE",
+                    "source": "https://example.com/watch?v=subtitle",
+                    "source_type": "URL",
                     "text_source": "SUBTITLE",
-                    "subtitle_path": str(subtitle),
                 }
             ],
             "export_directory": str(export_directory),
@@ -236,9 +291,9 @@ def test_imported_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown
     subtitle_stage = next(
         stage for stage in completed["stages"] if stage["stage"] == "SUBTITLE_IMPORT"
     )
-    assert subtitle_stage["model_usage"][0]["mode"] == "IMPORTED_SUBTITLE"
+    assert subtitle_stage["model_usage"][0]["mode"] == "URL_SUBTITLE"
     assert subtitle_stage["model_usage"][0]["model_name"] is None
-    assert completed["transcript_preview"]["provider"] == "imported-subtitle"
+    assert completed["transcript_preview"]["provider"] == "yt-dlp-subtitle"
     assert completed["transcript_preview"]["text"] == (
         "第一段中文字幕。\n第二段保留完整内容。"
     )
@@ -248,8 +303,9 @@ def test_imported_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown
     assert "created_at:" not in markdown
     snapshot = completed["snapshot"]["snapshot_json"]
     assert snapshot["models"]["asr"] is None
-    assert snapshot["subtitle"]["sha256"]
-    assert Path(snapshot["subtitle"]["workspace_path"]).is_file()
+    assert snapshot["subtitle"]["mode"] == "URL_SUBTITLE_FETCH"
+    assert snapshot["subtitle"]["provider"] == "yt-dlp-subtitle"
+    assert snapshot["subtitle"]["source_url"].startswith("https://")
 
 
 def test_database_worker_runs_ocr_fusion_stages_and_serves_traceable_artifacts(

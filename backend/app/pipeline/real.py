@@ -53,7 +53,7 @@ from app.providers.media import (
     classify_input,
 )
 from app.providers.process import process_registry
-from app.providers.subtitles import import_subtitle
+from app.providers.subtitles import YtDlpSubtitleSource, import_subtitle
 from app.providers.ocr_timeline import (
     build_ocr_timeline,
     recognize_retained_frames,
@@ -359,8 +359,11 @@ async def run_real_pipeline(task_id: int) -> None:
             tracker.complete(message="标准化音频有效", output_artifacts=[str(audio_path)])
 
         asr_config = snapshot.get("asr") if isinstance(snapshot.get("asr"), dict) else {}
+        subtitle_config = (
+            snapshot.get("subtitle") if isinstance(snapshot.get("subtitle"), dict) else {}
+        )
         if subtitle_mode:
-            protocol = "local-subtitle-import"
+            protocol = str(subtitle_config.get("provider") or "yt-dlp-subtitle")
             base_url = ""
             api_key = ""
             model = "not-applicable"
@@ -487,12 +490,23 @@ async def run_real_pipeline(task_id: int) -> None:
             raise PipelineError("ASR_CONFIG_INVALID", f"不支持的 ASR Gateway 协议：{protocol}")
         if provider is not None:
             provider_name = provider.name
-        subtitle_path = str((snapshot.get("subtitle") or {}).get("workspace_path") or "")
+        subtitle_path = str(subtitle_config.get("workspace_path") or "")
+        subtitle_language = str(subtitle_config.get("language") or "").strip() or None
         tracker.start(
             "SUBTITLE_IMPORT" if subtitle_mode else "ASR_TRANSCRIBE",
-            message=("正在导入中文字幕并跳过 ASR" if subtitle_mode else "正在提交 ASR 分块"),
+            message=(
+                "正在从视频链接抓取字幕并跳过 ASR"
+                if subtitle_mode
+                else "正在提交 ASR 分块"
+            ),
             input_artifacts=(
-                [subtitle_path] if subtitle_mode else [chunk.path for chunk in chunks]
+                (
+                    [subtitle_path]
+                    if subtitle_path
+                    else [str(source_record), acquisition.metadata_path]
+                )
+                if subtitle_mode
+                else [chunk.path for chunk in chunks]
             ),
         )
         results: list[AsrResult] = []
@@ -510,8 +524,25 @@ async def run_real_pipeline(task_id: int) -> None:
         ) or "segment"
         if subtitle_mode:
             if not subtitle_path:
-                raise PipelineError("SUBTITLE_CONFIG_INVALID", "任务快照缺少字幕副本路径")
-            imported = import_subtitle(Path(subtitle_path))
+                if kind != "URL":
+                    raise PipelineError(
+                        "SUBTITLE_CONFIG_INVALID",
+                        "从视频链接抓取字幕仅支持 URL 输入",
+                    )
+                subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
+                    normalized_source,
+                    paths,
+                    cancel_check=cancelled,
+                    progress=tracker.progress,
+                )
+                subtitle_path = subtitle.path
+                subtitle_language = subtitle.language
+                provider_name = subtitle.provider
+            imported = import_subtitle(
+                Path(subtitle_path),
+                language=subtitle_language or "zh",
+                provider=provider_name,
+            )
             results.append(
                 AsrResult(
                     provider=provider_name,
@@ -524,8 +555,9 @@ async def run_real_pipeline(task_id: int) -> None:
             )
             tracker.progress(
                 1.0,
-                f"已导入 {len(imported.segments)} 条字幕（{imported.subtitle_format.upper()} / "
-                f"{imported.encoding}）",
+                f"已从链接抓取并导入 {len(imported.segments)} 条字幕"
+                f"（{subtitle_language or '未知语言'} / "
+                f"{imported.subtitle_format.upper()} / {imported.encoding}）",
             )
         elif continuous_stream:
             assert provider is not None
@@ -572,7 +604,7 @@ async def run_real_pipeline(task_id: int) -> None:
             )
         tracker.complete(
             message=(
-                f"中文字幕导入完成，共 {len(results[0].segments)} 条"
+                f"链接字幕导入完成，共 {len(results[0].segments)} 条"
                 if subtitle_mode
                 else f"ASR 分块识别完成，共 {len(results)} 块"
             ),

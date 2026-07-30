@@ -19,7 +19,6 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
   const [sourceType, setSourceType] = useState<"URL" | "LOCAL_FILE">("URL");
   const [textSource, setTextSource] = useState<"ASR" | "SUBTITLE">("ASR");
   const [sources, setSources] = useState("");
-  const [subtitlePath, setSubtitlePath] = useState("");
   const [profileId, setProfileId] = useState("");
   const [asrGatewayId, setAsrGatewayId] = useState("");
   const [asrGatewayModelId, setAsrGatewayModelId] = useState("");
@@ -38,7 +37,6 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
   const [fusionWindow, setFusionWindow] = useState(8);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
-  const [pickingSubtitle, setPickingSubtitle] = useState(false);
   const [pickingOutput, setPickingOutput] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -117,19 +115,6 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
     }
   };
 
-  const pickSubtitle = async () => {
-    setPickingSubtitle(true);
-    setMessage(null);
-    try {
-      const result = await api.selectSubtitle();
-      if (result.path) setSubtitlePath(result.path);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "无法打开字幕文件选择器");
-    } finally {
-      setPickingSubtitle(false);
-    }
-  };
-
   const pickOutput = async () => {
     setPickingOutput(true);
     setMessage(null);
@@ -160,12 +145,8 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       setMessage("本地媒体必须使用 Windows 绝对路径。");
       return;
     }
-    if (textSource === "SUBTITLE" && inputs.length !== 1) {
-      setMessage("导入字幕模式一次创建一个任务，以确保字幕与视频一一对应。");
-      return;
-    }
-    if (textSource === "SUBTITLE" && !subtitlePath) {
-      setMessage("请选择与当前视频对应的中文字幕文件。");
+    if (textSource === "SUBTITLE" && sourceType !== "URL") {
+      setMessage("从视频链接抓取字幕仅支持视频网页 URL。");
       return;
     }
     if (ocrEnabled && !ocrGatewayModelId && !selectedProfile?.ocr_gateway_model_id) {
@@ -174,6 +155,14 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
     }
     if (textEditEnabled && !textModelId && !selectedProfile?.text_model_id) {
       setMessage("启用轻度文本整理时必须选择 TEXT_PROCESSING 模型。");
+      return;
+    }
+    if (textEditEnabled && !settings?.api_key_configured) {
+      setMessage("启用轻度文本整理前必须配置 ONEAPI_API_KEY 环境变量。");
+      return;
+    }
+    if (textEditEnabled && !settings?.oneapi_base_url?.trim()) {
+      setMessage("API Key 与服务地址是两项独立配置；请先在设置中填写 OneAPI Base URL。");
       return;
     }
     if (exportDirectory && !/^(?:[a-z]:[\\/]|\\\\)/i.test(exportDirectory)) {
@@ -189,7 +178,6 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
           source,
           source_type: sourceType,
           text_source: textSource,
-          subtitle_path: textSource === "SUBTITLE" ? subtitlePath : null,
         })),
         profile_id: profileId ? Number(profileId) : null,
         asr_gateway_model_id: asrGatewayModelId
@@ -212,7 +200,6 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
         },
       });
       setSources("");
-      setSubtitlePath("");
       setMessage(`已创建 ${tasks.length} 个完整转换任务。`);
       await onCreated();
     } catch (error) {
@@ -227,7 +214,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       <div>
         <p className="eyebrow">视频 / 音频 / 网页 URL</p>
         <h1>新建完整转换任务</h1>
-        <p>文本可来自 ASR 或直接导入中文字幕；随后完成可选 OCR、忠实整理与 Markdown 导出。</p>
+        <p>文本可来自 ASR，或由视频网页链接直接抓取字幕；随后完成可选 OCR、忠实整理与 Markdown 导出。</p>
       </div>
     </header>
     <section className="panel form-panel">
@@ -240,7 +227,11 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
         </button>
         <button
           className={sourceType === "LOCAL_FILE" ? "selected" : ""}
-          onClick={() => { setSourceType("LOCAL_FILE"); setSources(""); }}
+          onClick={() => {
+            setSourceType("LOCAL_FILE");
+            setTextSource("ASR");
+            setSources("");
+          }}
         >
           本地视频 / 音频
         </button>
@@ -270,23 +261,20 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
           </button>
           <button
             className={textSource === "SUBTITLE" ? "selected" : ""}
-            onClick={() => setTextSource("SUBTITLE")}
+            onClick={() => {
+              setTextSource("SUBTITLE");
+              if (sourceType !== "URL") {
+                setSourceType("URL");
+                setSources("");
+              }
+            }}
           >
-            导入中文字幕（跳过 ASR）
+            从链接抓取字幕（跳过 ASR）
           </button>
         </div>
-        {textSource === "SUBTITLE" && <div className="form-grid">
-          <label>字幕文件
-            <input
-              value={subtitlePath}
-              onChange={event => setSubtitlePath(event.target.value)}
-              placeholder="D:\Subtitles\lecture.zh-CN.srt"
-            />
-          </label>
-          <button onClick={() => void pickSubtitle()} disabled={pickingSubtitle}>
-            {pickingSubtitle ? "等待选择…" : "选择 SRT / VTT / ASS / TXT…"}
-          </button>
-          <small>字幕会复制到任务工作区，原文件不会被移动、改名或覆盖。</small>
+        {textSource === "SUBTITLE" && <div className="notice">
+          yt-dlp 会从每个视频 URL 抓取字幕，优先人工中文字幕，并回退到自动中文字幕或英文字幕。
+          找不到可用字幕时任务会给出明确错误；此模式不会调用 ASR。
         </div>}
       </fieldset>
       <div className="form-grid">

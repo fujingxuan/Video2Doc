@@ -11,6 +11,7 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
   → 输入验证
   → 本地只读引用或 yt-dlp 下载
   → ffprobe 探测
+  → 可选：由 yt-dlp 从视频 URL 抓取字幕并跳过 ASR
   → FFmpeg 提取为 PCM 16kHz 单声道 WAV
   → 模型能力驱动分块（离线模型默认 5 秒重叠）
   → 独立 ASR Gateway（DashScope / FireRed / Qwen3 / Whisper）
@@ -28,9 +29,9 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
   → Windows 单入口应用查看、取消、重试和打开结果
 ```
 
-所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；有效媒体、ASR、字幕副本、帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；结构校验、来源引用、数字/术语/代码/公式/长度和顺序检查失败时会拒绝模型输出并回退原文。
+所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；有效媒体、ASR、链接字幕抓取产物、帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；结构校验、来源引用、数字/术语/代码/公式/长度和顺序检查失败时会拒绝模型输出并回退原文。
 
-完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。操作说明见 [应用使用手册](docs/USER_GUIDE.md)、[Obsidian 导出说明](docs/OBSIDIAN_EXPORT.md) 和 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)；本轮真实证据见 [应用完成验收报告](docs/APP_COMPLETION_ACCEPTANCE_REPORT.md)。
+完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。操作说明见 [应用使用手册](docs/USER_GUIDE.md)、[Obsidian 导出说明](docs/OBSIDIAN_EXPORT.md) 和 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)；本轮真实证据见 [2.2.1 链接字幕与单窗口补丁验收报告](docs/ITERATION_2_2_1_ACCEPTANCE_REPORT.md)。
 
 ## 技术栈
 
@@ -109,7 +110,7 @@ Set-Location D:\Projects\Video2Doc\backend
 .\.venv\Scripts\python.exe -m alembic check
 ```
 
-`0005_independent_model_gateways` 新增独立 ASR/OCR Gateway；`0006_ocr_fusion_artifacts` 新增帧、OCR 与融合产物；`0007_document_exports` 新增文档、文本编辑与导出记录；`0008_v2_traceable_inputs` 新增逐阶段模型记录，并把成品无时间戳设为默认。新任务使用快照版本 6，额外冻结文本来源、字幕副本指纹、文本模型、提示词/模板版本、忠实性阈值、图片策略、直接导出目录、文件名与冲突策略和 sidecar 开关；只保存密钥环境变量名称，不保存密钥值。
+`0005_independent_model_gateways` 新增独立 ASR/OCR Gateway；`0006_ocr_fusion_artifacts` 新增帧、OCR 与融合产物；`0007_document_exports` 新增文档、文本编辑与导出记录；`0008_v2_traceable_inputs` 新增逐阶段模型记录，并把成品无时间戳设为默认。新任务使用快照版本 6，额外冻结文本来源、链接字幕抓取策略、文本模型、提示词/模板版本、忠实性阈值、图片策略、直接导出目录、文件名与冲突策略和 sidecar 开关；只保存密钥环境变量名称，不保存密钥值。
 
 ## 启动
 
@@ -121,7 +122,7 @@ D:\Projects\Video2Doc\dist\Video2Doc-Portable\Video2Doc.exe
 
 程序会升级自己的 SQLite、检查端口、启动 FastAPI、托管已构建前端并打开 Edge 独立应用窗口。点击窗口右上角 X 会停止由该窗口启动的 Video2Doc 后端，不停止外部管理的 Docker OCR。完整参数和隔离数据目录方式见 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)。
 
-2.2 起应用使用 Windows 单实例锁：重复双击不会再打开第二个窗口，也不会误关正在运行的后端。侧边栏版本号直接来自前端包版本。
+2.2.1 使用 Windows 单实例锁和按窗口标题跟踪：重复双击只会尝试唤醒已有窗口，不会再创建第二个 Edge 窗口，也不会误关正在运行的后端。侧边栏版本号直接来自前端包版本。
 
 开发环境仍可分别启动：
 
@@ -160,16 +161,16 @@ Set-Location D:\Projects\Video2Doc
 
 本地输入必须是存在的绝对文件路径。应用不会只根据扩展名认定媒体有效，而是最终以 ffprobe 流信息为准。当前浏览器不能安全返回任意本地绝对路径，因此前端使用路径输入；后端仍执行完整验证。
 
-Windows 便携版和本机开发版可通过后端 WinForms 选择媒体、字幕和导出目录；手工粘贴路径仍受相同校验。本地媒体采用“只读引用原文件”策略；导入字幕会复制到任务工作区，原字幕不移动、不改名、不覆盖。URL 媒体下载到任务工作区。外部命令始终使用参数列表启动，不经过 shell 拼接用户输入。
+Windows 便携版和本机开发版可通过后端 WinForms 选择媒体和导出目录；手工粘贴路径仍受相同校验。本地媒体采用“只读引用原文件”策略；URL 媒体下载到任务工作区。链接字幕由 yt-dlp 写入当前任务工作区，不修改任何本地原文件。外部命令始终使用参数列表启动，不经过 shell 拼接用户输入。
 
 ## 文本来源与任务级导出
 
 新建任务时可选择：
 
 - `ASR 语音识别`：使用方案或本次任务选定的 ASR Gateway 模型；
-- `导入中文字幕`：选择 SRT、VTT、ASS、SSA 或 TXT，复制并解析字幕，完全跳过音频提取和 ASR 模型调用。
+- `从链接抓取字幕`：仅用于视频网页 URL；yt-dlp 优先人工中文字幕，回退自动中文字幕或英文字幕，写入任务工作区后解析，并完全跳过音频提取和 ASR 模型调用。
 
-字幕模式一次创建一个任务，确保字幕与视频一一对应。任务详情中的每个阶段都会显示实际模型，未调用模型的本地阶段会明确标注；历史任务可根据不可变快照补全模型名称。任务创建页可直接选择任意成品目录，最终 Markdown、附件和追溯 sidecar 原子写入该目录。新任务的成品 Markdown 默认不写入媒体时间戳或生成时间字段，原始 JSON/SRT 仍保留时间信息用于追溯。
+字幕模式可批量填写视频 URL，每个任务只抓取自己链接对应的字幕。找不到可用字幕时任务以 `SUBTITLE_NOT_FOUND` 明确失败。任务详情中的每个阶段都会显示实际模型，未调用模型的本地阶段会明确标注；历史任务可根据不可变快照补全模型名称。任务创建页可直接选择任意成品目录，最终 Markdown、附件和追溯 sidecar 原子写入该目录。新任务的成品 Markdown 默认不写入媒体时间戳或生成时间字段，原始 JSON/SRT 仍保留时间信息用于追溯。
 
 ## ASR 配置
 
@@ -202,7 +203,7 @@ Windows 便携版和本机开发版可通过后端 WinForms 选择媒体、字�
 | `ASR_TRANSCRIBE` | 已完成 ASR 分块数 / 总分块数 |
 | `ASR_COMBINE` | 全局时间轴映射和产物写入 |
 | `ASR_VALIDATE` | 结果顺序、时间戳和文本检查 |
-| `SUBTITLE_IMPORT` | 复制后的字幕解析；明确不调用 ASR |
+| `SUBTITLE_IMPORT` | 从视频 URL 抓取并解析字幕；明确不调用 ASR |
 | `SUBTITLE_NORMALIZE` | 字幕段落与原始时间轴规范化 |
 | `SUBTITLE_VALIDATE` | 字幕正文与时间顺序检查 |
 | `FRAME_EXTRACT` | FFmpeg 已扫描媒体时间 / 媒体总时长 |
@@ -368,6 +369,6 @@ ASR 部署与横向结果见 `docs/MODEL_DEPLOYMENT_REPORT.md`、`docs/ASR_MODEL
 - 当前视觉去重使用内容裁剪 dHash 与灰度像素差异，不是语义视觉模型；边缘情况按保留优先。
 - OCR 事件只做确定性空白清理、块级去重和相似页合并，不补写、改写或总结识别文本。
 - Windows 发行物是便携目录/ZIP，不是带自动升级和卸载器的 MSI 安装包。
-- 前端由系统浏览器显示；当前没有独立 WebView 窗口或系统托盘。
+- 前端由隔离配置的 Edge 应用模式窗口显示；当前没有内嵌 WebView 或系统托盘。
 - 浏览器内 Markdown 预览是文本预览，不模拟 Obsidian 的完整主题与插件渲染。
 - RAG、问答、自动总结、向量数据库、Embedding 和语义搜索是永久排除功能，不是待办事项。

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import os
-import shutil
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -26,12 +24,9 @@ from app.schemas.api import QueueStatus, TaskBatchCreate, TaskDetail, TaskRead
 from app.services.gateways import sanitize_gateway_metadata
 from app.services.serializers import task_detail, task_read
 from app.storage.workspace import (
-    WorkspacePaths,
     create_workspace,
     list_artifacts,
     read_json,
-    safe_filename,
-    write_json,
 )
 
 
@@ -48,11 +43,6 @@ class TaskService:
     def create_batch(self, payload: TaskBatchCreate) -> list[TaskRead]:
         settings = self._get_or_create_settings()
         profile = self._resolve_profile(payload.profile_id, settings)
-        subtitle_inputs = {
-            index: self._resolve_subtitle(item.subtitle_path)
-            for index, item in enumerate(payload.inputs)
-            if item.text_source == "SUBTITLE"
-        }
         base_snapshot = self._build_snapshot(
             profile,
             settings,
@@ -68,7 +58,7 @@ class TaskService:
             require_asr=any(item.text_source == "ASR" for item in payload.inputs),
         )
         tasks: list[Task] = []
-        for input_index, task_input in enumerate(payload.inputs):
+        for task_input in payload.inputs:
             title = task_input.title or Path(task_input.source).name or task_input.source[:100]
             snapshot = copy.deepcopy(base_snapshot)
             snapshot["processing"]["text_source"] = task_input.text_source
@@ -82,6 +72,22 @@ class TaskService:
                 snapshot["models"]["asr"] = None
                 snapshot["gateways"]["asr"] = None
                 snapshot["asr"] = None
+                snapshot["subtitle"] = {
+                    "mode": "URL_SUBTITLE_FETCH",
+                    "provider": "yt-dlp-subtitle",
+                    "source_url": task_input.source,
+                    "language_priority": [
+                        "zh-Hans",
+                        "zh-CN",
+                        "zh-Hant",
+                        "zh-TW",
+                        "zh-HK",
+                        "zh",
+                        "en",
+                        "en-orig",
+                    ],
+                }
+                snapshot["input"]["subtitle"] = copy.deepcopy(snapshot["subtitle"])
             snapshot["simulation"] = {
                 "enabled": payload.pipeline_mode == "SIMULATED",
                 "failure_mode": task_input.simulate_failure,
@@ -100,14 +106,6 @@ class TaskService:
                 data_root, task_id=item.id, title=title, snapshot=snapshot
             )
             item.workspace_path = str(workspace)
-            if task_input.text_source == "SUBTITLE":
-                subtitle_path = subtitle_inputs[input_index]
-                snapshot["subtitle"] = self._copy_subtitle(
-                    subtitle_path,
-                    workspace,
-                )
-                snapshot["input"]["subtitle"] = copy.deepcopy(snapshot["subtitle"])
-                write_json(workspace / "task_config.json", snapshot)
             item.snapshot = TaskConfigSnapshot(schema_version=6, snapshot_json=snapshot)
             tasks.append(item)
         settings.last_profile_id = profile.id if profile else None
@@ -466,9 +464,11 @@ class TaskService:
             raise ConflictError("An OCR-enabled task must select an independent OCR gateway model")
         if processing.get("text_edit_enabled"):
             if not models["text_processing"]:
-                raise ConflictError("Text editing requires a configured text model")
+                raise ConflictError("启用文本整理前必须配置并选择 TEXT_PROCESSING 模型")
             if not (settings.oneapi_base_url or os.getenv("ONEAPI_BASE_URL")):
-                raise ConflictError("Text editing requires a configured OneAPI Base URL")
+                raise ConflictError("启用文本整理前必须在设置中填写 OneAPI Base URL")
+            if not os.getenv("ONEAPI_API_KEY"):
+                raise ConflictError("启用文本整理前必须配置 ONEAPI_API_KEY 环境变量")
         if asr_gateway_model:
             models["asr"] = asr_gateway_model.model_name
         if ocr_gateway_model:
@@ -574,42 +574,6 @@ class TaskService:
                     "faithfulness_formula_symbol_ratio"
                 ],
             },
-        }
-
-    @staticmethod
-    def _resolve_subtitle(value: str | None) -> Path:
-        if not value:
-            raise ConflictError("Subtitle text source requires a subtitle file")
-        try:
-            path = Path(value).resolve(strict=True)
-        except OSError as exc:
-            raise ConflictError("The selected subtitle file does not exist") from exc
-        if not path.is_file():
-            raise ConflictError("The selected subtitle path is not a file")
-        if path.suffix.casefold() not in {".srt", ".vtt", ".ass", ".ssa", ".txt"}:
-            raise ConflictError("Subtitle file must be SRT, VTT, ASS, SSA, or TXT")
-        if path.stat().st_size > 64 * 1024 * 1024:
-            raise ConflictError("Subtitle file exceeds the 64 MiB safety limit")
-        return path
-
-    @staticmethod
-    def _copy_subtitle(source: Path, workspace: Path) -> dict[str, Any]:
-        paths = WorkspacePaths.from_root(workspace)
-        destination_directory = paths.source / "subtitles"
-        destination_directory.mkdir(parents=True, exist_ok=True)
-        destination = destination_directory / safe_filename(
-            source.name,
-            fallback=f"imported-subtitle{source.suffix.casefold()}",
-        )
-        shutil.copy2(source, destination)
-        digest = hashlib.sha256(destination.read_bytes()).hexdigest()
-        return {
-            "mode": "IMPORTED_SUBTITLE",
-            "original_path": str(source),
-            "original_filename": source.name,
-            "workspace_path": str(destination),
-            "sha256": digest,
-            "size_bytes": destination.stat().st_size,
         }
 
     def _resolve_gateway_model(

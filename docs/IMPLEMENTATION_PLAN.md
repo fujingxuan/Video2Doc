@@ -169,7 +169,7 @@
 
 - [x] 处理方案 API 返回 ASR/OCR/Text 的 Gateway、协议和模型显示名
 - [x] 阶段执行记录持久化 `model_usage`，历史记录可从不可变快照回填
-- [x] SRT/VTT/ASS/SSA/TXT 中文字幕选择、工作区副本、SHA-256 与编码解析
+- [x] SRT/VTT/ASS/SSA/TXT 字幕解析、工作区副本、SHA-256 与编码处理
 - [x] 字幕模式跳过音频提取、分块和 ASR 模型调用，进入统一融合/文档链路
 - [x] `SUBTITLE_IMPORT` / `SUBTITLE_NORMALIZE` / `SUBTITLE_VALIDATE` 可追溯阶段
 - [x] 创建任务时直接选择成品导出目录
@@ -178,6 +178,13 @@
 - [x] PyInstaller 改为无控制台窗口发行
 - [x] `0008_v2_traceable_inputs` 与任务快照版本 6
 - [x] 字幕无 ASR 闭环、无时间戳 Markdown、方案模型和启动器回归
+
+## 迭代 2.2.1：链接字幕与单窗口补丁
+
+- [x] 字幕模式改为由 yt-dlp 从视频 URL 抓取人工/自动字幕，中文优先并可回退英文
+- [x] 多链接分别抓取字幕；找不到字幕时返回可操作错误；重试复用已抓取产物
+- [x] OneAPI API Key、Base URL 与文本模型分别校验并显示中文诊断
+- [x] 单实例重复启动唤醒已有窗口；按顶层 Video2Doc 窗口句柄监控，不再依赖 Edge 子进程关系
 
 ## 有意不实施与可选强化
 

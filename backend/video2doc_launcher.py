@@ -21,6 +21,7 @@ DEFAULT_PORT = 8765
 FALLBACK_PORT_ATTEMPTS = 100
 INSTANCE_MUTEX_NAME = r"Local\Video2Doc.Desktop.SingleInstance"
 WINDOWS_ERROR_ALREADY_EXISTS = 183
+APP_WINDOW_TITLE = "Video2Doc"
 _OUTPUT_STREAM: TextIO | None = None
 _INSTANCE_MUTEX_HANDLE: int | None = None
 
@@ -66,6 +67,7 @@ def main() -> int:
                 logs / "launcher-error.log",
             )
         if _INSTANCE_MUTEX_HANDLE is None:
+            _activate_existing_window()
             print("Video2Doc 已在运行；已阻止重复窗口。")
             return 0
 
@@ -205,26 +207,39 @@ def main() -> int:
                     "应用后端未能在 30 秒内启动。",
                     logs / "launcher-error.log",
                 )
+            previous_windows = set(_find_application_windows())
             window = _open_standalone_window(app_url, app_root)
             if window is None:
-                webbrowser.open(app_url)
-                server_thread.join()
-            else:
-                app_window_handle = _wait_for_descendant_window(window.pid)
-                while (
-                    _standalone_window_running(window, app_window_handle)
-                    and server_thread.is_alive()
-                    and not shutdown_requested.wait(0.25)
-                ):
-                    pass
+                server.should_exit = True
+                server_thread.join(timeout=5)
+                return _fatal(
+                    "无法启动 Video2Doc 独立窗口；请确认 Microsoft Edge 已安装。",
+                    logs / "launcher-error.log",
+                )
+            app_window_handle = _wait_for_application_window(previous_windows)
+            if app_window_handle is None:
                 if window.poll() is None:
                     window.terminate()
-                    try:
-                        window.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        window.kill()
                 server.should_exit = True
-                server_thread.join(timeout=15)
+                server_thread.join(timeout=5)
+                return _fatal(
+                    "Video2Doc 独立窗口未能在 10 秒内创建。",
+                    logs / "launcher-error.log",
+                )
+            while (
+                _standalone_window_running(window, app_window_handle)
+                and server_thread.is_alive()
+                and not shutdown_requested.wait(0.25)
+            ):
+                pass
+            if window.poll() is None:
+                window.terminate()
+                try:
+                    window.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    window.kill()
+            server.should_exit = True
+            server_thread.join(timeout=15)
         else:
             server.run()
     except KeyboardInterrupt:
@@ -415,85 +430,34 @@ def _standalone_window_running(
     return process.poll() is None
 
 
-def _wait_for_descendant_window(
-    root_process_id: int,
+def _wait_for_application_window(
+    excluded_handles: set[int] | None = None,
     attempts: int = 40,
 ) -> int | None:
     if os.name != "nt":
         return None
+    excluded = excluded_handles or set()
     for _attempt in range(attempts):
-        handle = _find_descendant_window(root_process_id)
-        if handle is not None:
-            return handle
+        handles = [
+            handle
+            for handle in _find_application_windows()
+            if handle not in excluded
+        ]
+        if handles:
+            return handles[0]
         time.sleep(0.25)
     return None
 
 
-def _find_descendant_window(root_process_id: int) -> int | None:
+def _find_application_windows(title: str = APP_WINDOW_TITLE) -> tuple[int, ...]:
     if os.name != "nt":
-        return None
+        return ()
 
     import ctypes
     from ctypes import wintypes
 
-    class ProcessEntry(ctypes.Structure):
-        _fields_ = [
-            ("dwSize", wintypes.DWORD),
-            ("cntUsage", wintypes.DWORD),
-            ("th32ProcessID", wintypes.DWORD),
-            ("th32DefaultHeapID", ctypes.c_size_t),
-            ("th32ModuleID", wintypes.DWORD),
-            ("cntThreads", wintypes.DWORD),
-            ("th32ParentProcessID", wintypes.DWORD),
-            ("pcPriClassBase", wintypes.LONG),
-            ("dwFlags", wintypes.DWORD),
-            ("szExeFile", wintypes.WCHAR * 260),
-        ]
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    create_snapshot = kernel32.CreateToolhelp32Snapshot
-    create_snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
-    create_snapshot.restype = wintypes.HANDLE
-    snapshot = create_snapshot(0x00000002, 0)
-    if snapshot == ctypes.c_void_p(-1).value:
-        return None
-    process_first = kernel32.Process32FirstW
-    process_first.argtypes = (
-        wintypes.HANDLE,
-        ctypes.POINTER(ProcessEntry),
-    )
-    process_first.restype = wintypes.BOOL
-    process_next = kernel32.Process32NextW
-    process_next.argtypes = (
-        wintypes.HANDLE,
-        ctypes.POINTER(ProcessEntry),
-    )
-    process_next.restype = wintypes.BOOL
-    close_handle = kernel32.CloseHandle
-    close_handle.argtypes = (wintypes.HANDLE,)
-    close_handle.restype = wintypes.BOOL
-    parents: dict[int, int] = {}
-    entry = ProcessEntry()
-    entry.dwSize = ctypes.sizeof(ProcessEntry)
-    try:
-        has_entry = process_first(snapshot, ctypes.byref(entry))
-        while has_entry:
-            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
-            has_entry = process_next(snapshot, ctypes.byref(entry))
-    finally:
-        close_handle(snapshot)
-
-    process_ids = {root_process_id}
-    changed = True
-    while changed:
-        changed = False
-        for process_id, parent_id in parents.items():
-            if parent_id in process_ids and process_id not in process_ids:
-                process_ids.add(process_id)
-                changed = True
-
     user32 = ctypes.WinDLL("user32", use_last_error=True)
-    found_handle = 0
+    found_handles: list[int] = []
     callback_type = ctypes.WINFUNCTYPE(
         wintypes.BOOL,
         wintypes.HWND,
@@ -501,24 +465,35 @@ def _find_descendant_window(root_process_id: int) -> int | None:
     )
 
     def inspect_window(window_handle: int, _parameter: int) -> bool:
-        nonlocal found_handle
         if not user32.IsWindowVisible(window_handle):
             return True
-        process_id = wintypes.DWORD()
-        user32.GetWindowThreadProcessId(
-            window_handle,
-            ctypes.byref(process_id),
-        )
-        if int(process_id.value) not in process_ids:
+        length = user32.GetWindowTextLengthW(window_handle)
+        if length <= 0:
             return True
-        if user32.GetWindowTextLengthW(window_handle) <= 0:
-            return True
-        found_handle = int(window_handle)
-        return False
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(window_handle, buffer, length + 1)
+        if buffer.value == title:
+            found_handles.append(int(window_handle))
+        return True
 
     callback = callback_type(inspect_window)
     user32.EnumWindows(callback, 0)
-    return found_handle or None
+    return tuple(found_handles)
+
+
+def _activate_existing_window() -> bool:
+    if os.name != "nt":
+        return False
+    handles = _find_application_windows()
+    if not handles:
+        return False
+
+    import ctypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    handle = handles[0]
+    user32.ShowWindow(handle, 9)
+    return bool(user32.SetForegroundWindow(handle))
 
 
 def _is_window_open(window_handle: int) -> bool:

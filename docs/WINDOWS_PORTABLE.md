@@ -25,7 +25,7 @@ dist\Video2Doc-Portable.zip
 4. 检查 `127.0.0.1:8765`，若被其他程序占用则选择后续空闲端口；
 5. 启动 Uvicorn/FastAPI 并托管前端；
 6. 健康后用 Microsoft Edge 应用模式打开独立 Video2Doc 窗口。
-7. 使用 Windows 命名互斥锁保证整个登录会话中只有一个 Video2Doc 进程和一个应用窗口。
+7. 使用 Windows 命名互斥锁保证整个登录会话中只有一个 Video2Doc 主进程和一个应用窗口；重复启动只唤醒已有窗口。
 
 命令行选项：
 
@@ -36,7 +36,7 @@ Video2Doc.exe --app-home D:\Video2Doc-AppData
 Video2Doc.exe --app-home D:\Video2Doc-AppData --check-only
 ```
 
-显式 `--app-home` 会覆盖继承的数据库/数据目录环境变量，便于隔离验收和诊断。应用已经运行时再次双击，第二个启动进程会立即正常退出，不新建窗口，也不会关闭现有后端。默认端口被其他程序占用时会按顺序选择后续空闲端口。显式传入 `--port` 或设置 `VIDEO2DOC_PORT` 时采用严格端口语义，冲突会报错，不会悄悄改变用户指定值。
+显式 `--app-home` 会覆盖继承的数据库/数据目录环境变量，便于隔离验收和诊断。应用已经运行时再次双击，第二个启动进程会尝试唤醒已有窗口后立即正常退出，不新建窗口，也不会关闭现有后端。主进程按标题精确匹配的真实顶层窗口句柄监控生命周期，不依赖 Edge 是否把新窗口进程挂在启动进程之下。默认端口被其他程序占用时会按顺序选择后续空闲端口。显式传入 `--port` 或设置 `VIDEO2DOC_PORT` 时采用严格端口语义，冲突会报错，不会悄悄改变用户指定值。
 
 ## 退出与进程边界
 
@@ -65,9 +65,9 @@ Set-Location D:\Projects\Video2Doc
 - “发行包缺少前端/迁移资源”：发行目录不完整，应重新解压 ZIP。
 - “数据库迁移失败”：查看 `<app-home>\logs\launcher-error.log`。
 - 无控制台便携版的启动与 Uvicorn 日志写入 `<app-home>\logs\launcher.log`。
-- 页面提示“无法连接 Video2Doc 后端”：关闭旧版遗留的失效窗口，只保留并重新启动一个 2.2 窗口。
+- 页面提示“无法连接 Video2Doc 后端”：关闭旧版遗留的失效窗口，只保留并重新启动一个 2.2.1 窗口。
 - 显式端口提示“被其他程序占用”：关闭冲突程序或改用另一个 `--port`。
 - 媒体工具缺失：应用仍能启动；在设置页补充路径后重新检查。
 - Gateway 缺失或不可用：任务结构化失败并保留错误/attempt，恢复服务后重试。
 
-独立窗口使用 Windows 自带的 Microsoft Edge 应用模式和隔离的 `%LOCALAPPDATA%\Video2Doc\browser-profile`。若系统找不到 Edge，会回退到默认浏览器，此时可在设置页退出应用。当前发行版不是 MSI、自动更新器或系统托盘应用。
+独立窗口使用 Windows 自带的 Microsoft Edge 应用模式和隔离的 `%LOCALAPPDATA%\Video2Doc\browser-profile`。若系统找不到 Edge，启动器会明确报错，不会回退并额外打开默认浏览器窗口。当前发行版不是 MSI、自动更新器或系统托盘应用。

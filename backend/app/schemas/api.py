@@ -400,7 +400,6 @@ class TaskInput(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     simulate_failure: Literal["never", "once", "always"] = "never"
     text_source: Literal["ASR", "SUBTITLE"] = "ASR"
-    subtitle_path: str | None = None
 
     @field_validator("source")
     @classmethod
@@ -410,23 +409,10 @@ class TaskInput(BaseModel):
             raise ValueError("输入来源不能为空或包含 NUL 字符")
         return normalized
 
-    @field_validator("subtitle_path")
-    @classmethod
-    def subtitle_must_be_absolute(cls, value: str | None) -> str | None:
-        if value is None or not value.strip():
-            return None
-        normalized = value.strip()
-        path = Path(normalized)
-        if "\x00" in normalized or not path.is_absolute():
-            raise ValueError("Subtitle path must be an absolute path")
-        if path.suffix.casefold() not in {".srt", ".vtt", ".ass", ".ssa", ".txt"}:
-            raise ValueError("Subtitle file must be SRT, VTT, ASS, SSA, or TXT")
-        return normalized
-
     @model_validator(mode="after")
-    def subtitle_required_for_subtitle_source(self) -> TaskInput:
-        if self.text_source == "SUBTITLE" and not self.subtitle_path:
-            raise ValueError("Subtitle text source requires a subtitle file")
+    def subtitle_requires_video_url(self) -> TaskInput:
+        if self.text_source == "SUBTITLE" and self.source_type != "URL":
+            raise ValueError("从视频链接抓取字幕仅支持 URL 输入")
         return self
 
 

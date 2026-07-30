@@ -26,14 +26,32 @@ if (-not $SkipInstall) {
     }
     finally { Pop-Location }
 }
+else {
+    Push-Location $backend
+    try {
+        & $python -m pip install --no-build-isolation --no-deps -e "."
+        if ($LASTEXITCODE -ne 0) { throw "Backend package metadata refresh failed." }
+    }
+    finally { Pop-Location }
+}
 if (-not (Test-Path -LiteralPath $pyinstaller)) {
     throw "PyInstaller is missing from the backend virtual environment."
 }
 
 Push-Location $frontend
 try {
-    pnpm build
-    if ($LASTEXITCODE -ne 0) { throw "Frontend production build failed." }
+    $tsc = Join-Path $frontend "node_modules\.bin\tsc.cmd"
+    $vite = Join-Path $frontend "node_modules\.bin\vite.cmd"
+    if ((Test-Path -LiteralPath $tsc) -and (Test-Path -LiteralPath $vite)) {
+        & $tsc --noEmit
+        if ($LASTEXITCODE -ne 0) { throw "Frontend typecheck failed." }
+        & $vite build
+        if ($LASTEXITCODE -ne 0) { throw "Frontend production build failed." }
+    }
+    else {
+        pnpm build
+        if ($LASTEXITCODE -ne 0) { throw "Frontend production build failed." }
+    }
 }
 finally { Pop-Location }
 

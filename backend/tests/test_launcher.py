@@ -101,6 +101,7 @@ def test_duplicate_launch_exits_before_opening_another_window(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    activated: list[bool] = []
     monkeypatch.setattr(
         launcher.sys,
         "argv",
@@ -112,8 +113,14 @@ def test_duplicate_launch_exits_before_opening_another_window(
         "_open_standalone_window",
         lambda *_args: pytest.fail("duplicate launch must not open a window"),
     )
+    monkeypatch.setattr(
+        launcher,
+        "_activate_existing_window",
+        lambda: activated.append(True) or True,
+    )
 
     assert launcher.main() == 0
+    assert activated == [True]
 
 
 def test_standalone_window_tracks_real_window_handle(monkeypatch) -> None:
@@ -123,3 +130,16 @@ def test_standalone_window_tracks_real_window_handle(monkeypatch) -> None:
     assert launcher._standalone_window_running(process, 100)
     assert not launcher._standalone_window_running(process, 200)
     assert launcher._standalone_window_running(process, None)
+
+
+def test_application_window_wait_ignores_preexisting_edge_windows(monkeypatch) -> None:
+    observed = iter([(11,), (11, 22)])
+    monkeypatch.setattr(launcher.os, "name", "nt")
+    monkeypatch.setattr(
+        launcher,
+        "_find_application_windows",
+        lambda: next(observed),
+    )
+    monkeypatch.setattr(launcher.time, "sleep", lambda _seconds: None)
+
+    assert launcher._wait_for_application_window({11}, attempts=2) == 22

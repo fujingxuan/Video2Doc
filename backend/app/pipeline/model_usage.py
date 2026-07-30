@@ -11,14 +11,20 @@ SUBTITLE_STAGES = {"SUBTITLE_IMPORT", "SUBTITLE_NORMALIZE", "SUBTITLE_VALIDATE"}
 
 def stage_model_usage(stage: str, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     if stage in SUBTITLE_STAGES:
+        subtitle = snapshot.get("subtitle")
+        protocol = (
+            subtitle.get("provider")
+            if isinstance(subtitle, dict)
+            else "yt-dlp-subtitle"
+        )
         return [
             {
                 "capability": "TEXT_SOURCE",
-                "mode": "IMPORTED_SUBTITLE",
+                "mode": "URL_SUBTITLE",
                 "gateway_name": None,
-                "protocol": "local-subtitle-import",
+                "protocol": protocol,
                 "model_name": None,
-                "display_name": "导入中文字幕（未调用 ASR 模型）",
+                "display_name": "从视频链接抓取字幕（未调用 ASR 模型）",
             }
         ]
     if stage in ASR_MODEL_STAGES:
