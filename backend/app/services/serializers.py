@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.models import AppSetting, ModelConfig, ProcessingProfile, Task
+from app.core.credentials import credential_is_configured, credential_source
 from app.schemas.api import (
     ModelRead,
     ProfileRead,
@@ -23,6 +24,11 @@ def model_read(item: ModelConfig) -> ModelRead:
         capabilities=[cap.capability for cap in item.capabilities],
         notes=item.notes,
         enabled=item.enabled,
+        provider=item.provider,
+        base_url=item.base_url,
+        secret_env_name=item.secret_env_name,
+        secret_source=credential_source(item),
+        secret_configured=credential_is_configured(item),
         created_at=item.created_at,
         updated_at=item.updated_at,
     )

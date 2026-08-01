@@ -83,14 +83,23 @@ export default function App() {
       case "/": return <OverviewPage queue={queue} tasks={tasks} connected={connected} />;
       case "/new": return <NewTaskPage profiles={profiles} gatewayModels={gatewayModels} models={models} onCreated={refreshTasks} />;
       case "/queue": return <QueuePage tasks={tasks} refresh={refreshTasks} />;
+      case "/llm":
       case "/models": return <ModelsPage models={models} refresh={refreshCatalog} />;
-      case "/gateways": return <GatewaysPage gateways={gateways} gatewayModels={gatewayModels} refresh={refreshCatalog} />;
+      case "/ocr": return <GatewaysPage key="OCR" gatewayType="OCR" gateways={gateways} gatewayModels={gatewayModels} refresh={refreshCatalog} />;
+      case "/asr":
+      case "/gateways": return <GatewaysPage key="ASR" gatewayType="ASR" gateways={gateways} gatewayModels={gatewayModels} refresh={refreshCatalog} />;
       case "/profiles": return <ProfilesPage profiles={profiles} models={models} gatewayModels={gatewayModels} refresh={refreshCatalog} />;
       case "/settings": return <SettingsPage />;
       default: return <div className="state-card">页面不存在。<button onClick={() => { window.location.hash = "/"; }}>返回总览</button></div>;
     }
   }, [connected, gatewayModels, gateways, models, path, profiles, queue, refreshCatalog, refreshTasks, tasks]);
 
-  const navPath = path.match(/^\/tasks\//) ? "/queue" : path;
+  const navPath = path.match(/^\/tasks\//)
+    ? "/queue"
+    : path === "/models"
+      ? "/llm"
+      : path === "/gateways"
+        ? "/asr"
+        : path;
   return <Layout path={navPath}><StateView loading={loading} error={error}>{content}</StateView></Layout>;
 }

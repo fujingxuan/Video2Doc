@@ -402,14 +402,7 @@ def _open_standalone_window(
     profile.mkdir(parents=True, exist_ok=True)
     try:
         return subprocess.Popen(
-            [
-                str(executable),
-                f"--app={app_url}",
-                f"--user-data-dir={profile}",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--disable-background-mode",
-            ],
+            _standalone_window_arguments(executable, app_url, profile),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -419,6 +412,26 @@ def _open_standalone_window(
         )
     except OSError:
         return None
+
+
+def _standalone_window_arguments(
+    executable: Path,
+    app_url: str,
+    profile: Path,
+) -> list[str]:
+    return [
+        str(executable),
+        f"--app={app_url}",
+        f"--user-data-dir={profile}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-background-mode",
+        # Enterprise policy or sync can provision regular Edge extensions into
+        # a new profile.  Disable them in this app-only profile so extension
+        # onboarding pages never become a second browser window.
+        "--disable-extensions",
+        "--disable-component-extensions-with-background-pages",
+    ]
 
 
 def _standalone_window_running(

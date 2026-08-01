@@ -63,13 +63,9 @@ export const api = {
     ),
   models: (capability?: Capability) =>
     request<ModelConfig[]>(`/models${capability ? `?capability=${capability}` : ""}`),
-  createModel: (payload: {
-    name: string;
-    capabilities: Capability[];
-    notes?: string;
-    enabled?: boolean;
-  }) => request<ModelConfig>("/models", { method: "POST", body: JSON.stringify(payload) }),
-  updateModel: (id: number, payload: Partial<ModelConfig>) =>
+  createModel: (payload: Record<string, unknown>) =>
+    request<ModelConfig>("/models", { method: "POST", body: JSON.stringify(payload) }),
+  updateModel: (id: number, payload: Record<string, unknown>) =>
     request<ModelConfig>(`/models/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteModel: (id: number) => request<void>(`/models/${id}`, { method: "DELETE" }),
   gateways: (gatewayType?: GatewayType) =>

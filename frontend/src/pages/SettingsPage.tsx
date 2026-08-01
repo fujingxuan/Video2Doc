@@ -157,21 +157,8 @@ export function SettingsPage() {
     </section>
 
     <section className="panel form-panel settings-form">
-      <h2>忠实文本整理</h2>
-      <div className="notice">
-        OneAPI API Key：{settings.api_key_configured ? "已配置" : "未配置"}；
-        Base URL：{settings.oneapi_base_url?.trim() ? "已配置" : "未配置"}。
-        {!settings.api_key_configured || !settings.oneapi_base_url?.trim()
-          ? " 两项都配置后才能启用文本整理；关闭整理时不影响完整转换。"
-          : " 文本整理连接信息完整。"}
-      </div>
-      <label>OneAPI Base URL
-        <input
-          value={settings.oneapi_base_url ?? ""}
-          placeholder="https://oneapi.example/v1"
-          onChange={event => update("oneapi_base_url", event.target.value)}
-        />
-      </label>
+      <h2>忠实文本整理策略</h2>
+      <div className="notice">LLM 平台、Base URL、模型和密钥已移到独立的“LLM”页面；这里仅保留默认模型名与忠实性阈值。</div>
       <div className="form-grid">
         <label>默认文本模型名称
           <input

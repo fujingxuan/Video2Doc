@@ -5,8 +5,9 @@ const links = [
   ["/", "总览"],
   ["/new", "新建任务"],
   ["/queue", "任务队列"],
-  ["/models", "模型管理"],
-  ["/gateways", "Gateway"],
+  ["/llm", "LLM"],
+  ["/ocr", "OCR"],
+  ["/asr", "ASR"],
   ["/profiles", "处理方案"],
   ["/settings", "应用设置"],
 ];
@@ -27,7 +28,7 @@ export function Layout({ path, children }: { path: string; children: ReactNode }
             <button key={target} className={path === target ? "active" : ""} onClick={() => navigate(target)}>{label}</button>
           ))}
         </nav>
-        <p className="scope-note">ASR 与 OCR 使用独立 Gateway；OneAPI 只用于可选的忠实轻度整理。应用不生成摘要、问答或知识库索引。</p>
+        <p className="scope-note">LLM、OCR、ASR 分别配置；密钥可引用环境变量，也可由 Windows 当前用户加密保存。应用不生成摘要、问答或知识库索引。</p>
       </aside>
       <main className="main">{children}</main>
     </div>

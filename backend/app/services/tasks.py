@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError
+from app.core.credentials import credential_is_configured, credential_source
 from app.models import (
     AppSetting,
     GatewayModel,
@@ -86,6 +87,14 @@ class TaskService:
                         "en",
                         "en-orig",
                     ],
+                    "embedded_ocr_fallback": bool(
+                        snapshot["processing"].get("embedded_subtitle_ocr_fallback")
+                    ),
+                    "embedded_ocr_interval_seconds": float(
+                        snapshot["processing"].get(
+                            "embedded_subtitle_interval_seconds", 1.0
+                        )
+                    ),
                 }
                 snapshot["input"]["subtitle"] = copy.deepcopy(snapshot["subtitle"])
             snapshot["simulation"] = {
@@ -382,6 +391,8 @@ class TaskService:
             "audio_chunk_seconds": get_settings().audio_chunk_seconds,
             "asr_language": None,
             "text_edit_enabled": settings.default_text_edit_enabled,
+            "embedded_subtitle_ocr_fallback": False,
+            "embedded_subtitle_interval_seconds": 1.0,
             "prompt_version": settings.text_prompt_version,
             "faithfulness_min_length_ratio": settings.faithfulness_min_length_ratio,
             "faithfulness_formula_symbol_ratio": (
@@ -401,6 +412,7 @@ class TaskService:
             "export_copy_subtitles": settings.export_copy_subtitles,
         }
         models: dict[str, str | None] = {"asr": None, "ocr": None, "text_processing": None}
+        text_model_config: ModelConfig | None = None
         profile_data: dict[str, Any] | None = None
         if profile:
             profile_data = {
@@ -416,6 +428,7 @@ class TaskService:
                 "ocr": profile.ocr_model.name if profile.ocr_model else None,
                 "text_processing": profile.text_model.name if profile.text_model else None,
             }
+            text_model_config = profile.text_model
         if asr_model_id is not None:
             asr_model = self.session.get(ModelConfig, asr_model_id)
             if (
@@ -439,8 +452,15 @@ class TaskService:
                     "Selected text model is unavailable or lacks TEXT_PROCESSING"
                 )
             models["text_processing"] = text_model.name
+            text_model_config = text_model
         elif settings.default_text_model_name and not models["text_processing"]:
             models["text_processing"] = settings.default_text_model_name
+            text_model_config = self.session.scalar(
+                select(ModelConfig).where(
+                    ModelConfig.name == settings.default_text_model_name,
+                    ModelConfig.enabled.is_(True),
+                )
+            )
         asr_gateway_model = self._resolve_gateway_model(
             asr_gateway_model_id
             if asr_gateway_model_id is not None
@@ -460,15 +480,29 @@ class TaskService:
         processing.update(copy.deepcopy(overrides))
         if pipeline_mode == "REAL" and require_asr and asr_gateway_model is None:
             raise ConflictError("A real task must select an independent ASR gateway model")
-        if processing.get("ocr_enabled") and ocr_gateway_model is None:
+        if (
+            processing.get("ocr_enabled")
+            or processing.get("embedded_subtitle_ocr_fallback")
+        ) and ocr_gateway_model is None:
             raise ConflictError("An OCR-enabled task must select an independent OCR gateway model")
         if processing.get("text_edit_enabled"):
             if not models["text_processing"]:
                 raise ConflictError("启用文本整理前必须配置并选择 TEXT_PROCESSING 模型")
-            if not (settings.oneapi_base_url or os.getenv("ONEAPI_BASE_URL")):
-                raise ConflictError("启用文本整理前必须在设置中填写 OneAPI Base URL")
-            if not os.getenv("ONEAPI_API_KEY"):
-                raise ConflictError("启用文本整理前必须配置 ONEAPI_API_KEY 环境变量")
+            text_base_url = (
+                (text_model_config.base_url if text_model_config else None)
+                or settings.oneapi_base_url
+                or os.getenv("ONEAPI_BASE_URL")
+            )
+            if not text_base_url:
+                raise ConflictError("启用文本整理前必须在 LLM 页面配置 Base URL")
+            if text_model_config and not credential_is_configured(text_model_config):
+                if text_model_config.secret_env_name:
+                    raise ConflictError(
+                        f"缺少 LLM 密钥环境变量 {text_model_config.secret_env_name}"
+                    )
+                raise ConflictError("无法读取 LLM 页面中直接保存的密钥")
+            if text_model_config is None and not os.getenv("ONEAPI_API_KEY", "").strip():
+                raise ConflictError("缺少兼容配置使用的 ONEAPI_API_KEY 环境变量")
         if asr_gateway_model:
             models["asr"] = asr_gateway_model.model_name
         if ocr_gateway_model:
@@ -532,9 +566,11 @@ class TaskService:
             "gateways": {"asr": asr_gateway_snapshot, "ocr": ocr_gateway_snapshot},
             "asr": (
                 {
+                    "gateway_id": asr_gateway_snapshot["gateway_id"],
                     "provider": asr_gateway_snapshot["protocol"],
                     "base_url": asr_gateway_snapshot["base_url"],
                     "secret_env_name": asr_gateway_snapshot["secret_env_name"],
+                    "secret_source": asr_gateway_snapshot["secret_source"],
                     "model": asr_gateway_snapshot["model_name"],
                     "language": processing.get("asr_language"),
                     "timeout_seconds": asr_gateway_snapshot["timeout_seconds"],
@@ -547,9 +583,11 @@ class TaskService:
             ),
             "ocr": (
                 {
+                    "gateway_id": ocr_gateway_snapshot["gateway_id"],
                     "provider": ocr_gateway_snapshot["protocol"],
                     "base_url": ocr_gateway_snapshot["base_url"],
                     "secret_env_name": ocr_gateway_snapshot["secret_env_name"],
+                    "secret_source": ocr_gateway_snapshot["secret_source"],
                     "model": ocr_gateway_snapshot["model_name"],
                     "language": processing.get("ocr_language") or "ch",
                     "timeout_seconds": ocr_gateway_snapshot["timeout_seconds"],
@@ -561,9 +599,28 @@ class TaskService:
                 else None
             ),
             "text_processing": {
-                "provider": "oneapi-openai-compatible",
-                "base_url": settings.oneapi_base_url or os.getenv("ONEAPI_BASE_URL", ""),
-                "secret_env_name": "ONEAPI_API_KEY",
+                "provider": (
+                    text_model_config.provider
+                    if text_model_config and text_model_config.provider
+                    else "oneapi"
+                ),
+                "protocol": "openai-chat-completions",
+                "base_url": (
+                    (text_model_config.base_url if text_model_config else None)
+                    or settings.oneapi_base_url
+                    or os.getenv("ONEAPI_BASE_URL", "")
+                ),
+                "model_config_id": text_model_config.id if text_model_config else None,
+                "secret_env_name": (
+                    text_model_config.secret_env_name
+                    if text_model_config
+                    else "ONEAPI_API_KEY"
+                ),
+                "secret_source": (
+                    credential_source(text_model_config)
+                    if text_model_config
+                    else "ENVIRONMENT"
+                ),
                 "model": models["text_processing"],
                 "enabled": bool(processing["text_edit_enabled"]),
                 "prompt_version": processing["prompt_version"],
@@ -695,6 +752,7 @@ def _gateway_model_snapshot(
         "base_url": item.gateway.base_url,
         "protocol": item.gateway.protocol,
         "secret_env_name": item.gateway.secret_env_name,
+        "secret_source": credential_source(item.gateway),
         "model_id": item.id,
         "model_name": item.model_name,
         "display_name": item.display_name,

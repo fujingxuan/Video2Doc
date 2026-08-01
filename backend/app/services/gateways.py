@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import ConflictError, NotFoundError
+from app.core.credentials import credential_is_configured, credential_source
+from app.core.secrets import SecretStorageError, protect_secret
 from app.models import GatewayConfig, GatewayModel
 from app.providers.gateways import discover_gateway_models, probe_gateway
 from app.schemas.api import (
@@ -37,7 +38,14 @@ class GatewayService:
         return _gateway_read(self._gateway(gateway_id))
 
     def create_gateway(self, payload: GatewayCreate) -> GatewayRead:
-        item = GatewayConfig(**payload.model_dump(mode="json"))
+        values = payload.model_dump(mode="json", exclude={"secret_value"})
+        item = GatewayConfig(**values)
+        if payload.secret_value:
+            try:
+                item.secret_ciphertext = protect_secret(payload.secret_value)
+            except SecretStorageError as exc:
+                raise ConflictError(str(exc)) from exc
+            item.secret_env_name = None
         item.name = item.name.strip()
         item.protocol = item.protocol.strip()
         item.base_url = item.base_url.strip().rstrip("/")
@@ -47,7 +55,21 @@ class GatewayService:
 
     def update_gateway(self, gateway_id: int, payload: GatewayUpdate) -> GatewayRead:
         item = self._gateway(gateway_id)
-        for key, value in payload.model_dump(exclude_unset=True, mode="json").items():
+        values = payload.model_dump(exclude_unset=True, mode="json")
+        secret_value = values.pop("secret_value", None)
+        clear_secret = bool(values.pop("clear_secret", False))
+        if clear_secret:
+            item.secret_ciphertext = None
+            item.secret_env_name = None
+        if secret_value:
+            try:
+                item.secret_ciphertext = protect_secret(secret_value)
+            except SecretStorageError as exc:
+                raise ConflictError(str(exc)) from exc
+            item.secret_env_name = None
+        elif "secret_env_name" in values and values["secret_env_name"]:
+            item.secret_ciphertext = None
+        for key, value in values.items():
             if isinstance(value, str) and key in {"name", "protocol", "base_url", "secret_env_name"}:
                 value = value.strip()
             setattr(item, key, value)
@@ -192,7 +214,8 @@ def _gateway_read(item: GatewayConfig) -> GatewayRead:
         protocol=item.protocol,
         base_url=item.base_url,
         secret_env_name=item.secret_env_name,
-        secret_configured=bool(item.secret_env_name and os.getenv(item.secret_env_name)),
+        secret_source=credential_source(item),
+        secret_configured=credential_is_configured(item),
         enabled=item.enabled,
         health_status=item.health_status,
         last_checked_at=item.last_checked_at,
@@ -336,7 +359,14 @@ def seed_default_gateways(session: Session) -> None:
             "gateway_type": "ASR",
             "protocol": "video2doc-asr-http-v1",
             "base_url": "http://127.0.0.1:8101",
-            "settings": {"timeout_seconds": 300, "max_retries": 1},
+            "settings": {
+                "timeout_seconds": 300,
+                "max_retries": 1,
+                "managed_lifecycle": True,
+                "runtime_kind": "asr",
+                "runtime_provider": "firered",
+                "startup_timeout_seconds": 600,
+            },
             "models": [
                 {
                     "model_name": "FireRedTeam/FireRedASR2-AED",
@@ -356,7 +386,14 @@ def seed_default_gateways(session: Session) -> None:
             "gateway_type": "ASR",
             "protocol": "video2doc-asr-http-v1",
             "base_url": "http://127.0.0.1:8102",
-            "settings": {"timeout_seconds": 900, "max_retries": 0},
+            "settings": {
+                "timeout_seconds": 900,
+                "max_retries": 0,
+                "managed_lifecycle": True,
+                "runtime_kind": "asr",
+                "runtime_provider": "qwen",
+                "startup_timeout_seconds": 600,
+            },
             "models": [
                 {
                     "model_name": "Qwen/Qwen3-ASR-1.7B",
@@ -378,7 +415,14 @@ def seed_default_gateways(session: Session) -> None:
             "gateway_type": "ASR",
             "protocol": "video2doc-asr-http-v1",
             "base_url": "http://127.0.0.1:8103",
-            "settings": {"timeout_seconds": 600, "max_retries": 1},
+            "settings": {
+                "timeout_seconds": 600,
+                "max_retries": 1,
+                "managed_lifecycle": True,
+                "runtime_kind": "asr",
+                "runtime_provider": "whisper",
+                "startup_timeout_seconds": 600,
+            },
             "models": [
                 {
                     "model_name": "large-v3",
@@ -428,6 +472,10 @@ def seed_default_gateways(session: Session) -> None:
                 "timeout_seconds": 180,
                 "max_retries": 1,
                 "runtime": "paddleocr",
+                "managed_lifecycle": True,
+                "runtime_kind": "ocr",
+                "runtime_provider": "paddleocr",
+                "startup_timeout_seconds": 120,
             },
             "models": [
                 {

@@ -7,6 +7,43 @@ from app.services.gateways import seed_default_gateways
 from tests.helpers import wait_for_status
 
 
+def test_direct_credentials_are_encrypted_and_never_returned(client: TestClient) -> None:
+    secret = "direct-secret-value-for-test"
+    model_response = client.post(
+        "/api/v1/models",
+        json={
+            "name": "direct-credential-model",
+            "provider": "custom",
+            "base_url": "http://127.0.0.1:13000/v1",
+            "capabilities": ["TEXT_PROCESSING"],
+            "secret_value": secret,
+        },
+    )
+    assert model_response.status_code == 201, model_response.text
+    model = model_response.json()
+    assert model["secret_source"] == "DIRECT"
+    assert model["secret_configured"] is True
+    assert secret not in model_response.text
+    assert secret not in client.get("/api/v1/models").text
+
+    gateway_response = client.post(
+        "/api/v1/gateways",
+        json={
+            "name": "direct-credential-asr",
+            "gateway_type": "ASR",
+            "protocol": "video2doc-asr-http-v1",
+            "base_url": "http://127.0.0.1:18109",
+            "secret_value": secret,
+        },
+    )
+    assert gateway_response.status_code == 201, gateway_response.text
+    gateway = gateway_response.json()
+    assert gateway["secret_source"] == "DIRECT"
+    assert gateway["secret_configured"] is True
+    assert secret not in gateway_response.text
+    assert secret not in client.get("/api/v1/gateways").text
+
+
 def test_health_models_profiles_settings_and_immutable_snapshot(
     client: TestClient,
     monkeypatch,

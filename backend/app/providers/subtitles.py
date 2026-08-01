@@ -2,17 +2,32 @@ from __future__ import annotations
 
 import hashlib
 import html
+import inspect
 import json
+import math
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+import httpx
+from PIL import Image, ImageOps
 
 from app.core.config import get_settings
 from app.core.errors import PipelineError
-from app.providers.asr import AsrSegment
+from app.providers.asr import AsrSegment, format_srt_time
 from app.providers.process import CancelCheck, ExternalProcessRunner
+from app.providers.gateways import trust_environment_proxy
+from app.providers.frames import (
+    FrameExtractionConfig,
+    FrameExtractionResult,
+    VideoFrameExtractor,
+)
+from app.providers.ocr_timeline import recognize_retained_frames
+from app.providers.ocr import OcrResult
 from app.storage.workspace import WorkspacePaths, read_json, write_json
 
 
@@ -96,6 +111,14 @@ class YtDlpSubtitleSource:
             )
         selected_language = _select_available_language(metadata, self.languages)
         if selected_language is None:
+            bilibili = await BilibiliSubtitleSource(self.languages).acquire_if_available(
+                source,
+                paths,
+                cancel_check=cancel_check,
+                progress=progress,
+            )
+            if bilibili is not None:
+                return bilibili
             raise PipelineError(
                 "SUBTITLE_NOT_FOUND",
                 "视频链接没有可用的中文或英文字幕（已同时检查人工字幕和自动字幕）",
@@ -155,6 +178,14 @@ class YtDlpSubtitleSource:
             and 0 < path.stat().st_size <= MAX_SUBTITLE_BYTES
         ]
         if not candidates:
+            bilibili = await BilibiliSubtitleSource(self.languages).acquire_if_available(
+                source,
+                paths,
+                cancel_check=cancel_check,
+                progress=progress,
+            )
+            if bilibili is not None:
+                return bilibili
             raise PipelineError(
                 "SUBTITLE_NOT_FOUND",
                 "视频链接没有可用的中文或英文字幕（已同时尝试人工字幕和自动字幕）",
@@ -237,6 +268,522 @@ class YtDlpSubtitleSource:
             ) from exc
         write_json(paths.metadata / "ytdlp.json", metadata)
         return metadata
+
+
+class BilibiliSubtitleSource:
+    """Independent fallback for Bilibili player subtitle tracks omitted by yt-dlp."""
+
+    _BVID_RE = re.compile(r"\b(BV[0-9A-Za-z]{10})\b", re.IGNORECASE)
+
+    def __init__(
+        self,
+        languages: tuple[str, ...] = DEFAULT_SUBTITLE_LANGUAGES,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.languages = languages
+        self.transport = transport
+
+    async def acquire_if_available(
+        self,
+        source: str,
+        paths: WorkspacePaths,
+        *,
+        cancel_check: CancelCheck,
+        progress: Callable[[float | None, str], None],
+    ) -> SubtitleAcquisition | None:
+        parsed = urlparse(source)
+        if parsed.hostname not in {"bilibili.com", "www.bilibili.com", "m.bilibili.com"}:
+            return None
+        match = self._BVID_RE.search(source)
+        if match is None:
+            return None
+        bvid = match.group(1)
+        await _ensure_subtitle_active(cancel_check)
+        headers = {
+            "User-Agent": "Mozilla/5.0 Video2Doc/2.3",
+            "Referer": f"https://www.bilibili.com/video/{bvid}",
+        }
+        try:
+            async with httpx.AsyncClient(
+                timeout=20.0,
+                headers=headers,
+                follow_redirects=True,
+                trust_env=trust_environment_proxy("https://api.bilibili.com"),
+                transport=self.transport,
+            ) as client:
+                view_response = await client.get(
+                    "https://api.bilibili.com/x/web-interface/view",
+                    params={"bvid": bvid},
+                )
+                view_response.raise_for_status()
+                view = view_response.json()
+                if view.get("code") != 0 or not isinstance(view.get("data"), dict):
+                    return None
+                pages = view["data"].get("pages")
+                page_index = max(
+                    0,
+                    int((parse_qs(parsed.query).get("p") or ["1"])[0]) - 1,
+                )
+                if isinstance(pages, list) and pages:
+                    selected_page = pages[min(page_index, len(pages) - 1)]
+                    cid = selected_page.get("cid") if isinstance(selected_page, dict) else None
+                else:
+                    cid = view["data"].get("cid")
+                if not cid:
+                    return None
+                subtitle_items: list[dict[str, Any]] = []
+                for endpoint in ("/x/player/wbi/v2", "/x/player/v2"):
+                    await _ensure_subtitle_active(cancel_check)
+                    response = await client.get(
+                        "https://api.bilibili.com" + endpoint,
+                        params={"bvid": bvid, "cid": cid},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                    subtitle = (payload.get("data") or {}).get("subtitle")
+                    raw_items = (
+                        subtitle.get("subtitles") or subtitle.get("list")
+                        if isinstance(subtitle, dict)
+                        else None
+                    )
+                    if isinstance(raw_items, list):
+                        subtitle_items = [item for item in raw_items if isinstance(item, dict)]
+                    if subtitle_items:
+                        break
+                selected = _select_bilibili_subtitle(subtitle_items, self.languages)
+                if selected is None:
+                    return None
+                subtitle_url = str(
+                    selected.get("subtitle_url") or selected.get("url") or ""
+                ).strip()
+                if subtitle_url.startswith("//"):
+                    subtitle_url = "https:" + subtitle_url
+                if not subtitle_url.startswith("https://"):
+                    return None
+                await _ensure_subtitle_active(cancel_check)
+                body_response = await client.get(subtitle_url)
+                body_response.raise_for_status()
+                body_payload = body_response.json()
+        except (httpx.HTTPError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            progress(None, f"B 站播放器字幕接口未返回可用字幕：{type(exc).__name__}")
+            return None
+
+        body = body_payload.get("body") if isinstance(body_payload, dict) else None
+        if not isinstance(body, list):
+            return None
+        cues: list[tuple[float, float, str]] = []
+        for item in body:
+            if not isinstance(item, dict):
+                continue
+            try:
+                start = max(0.0, float(item.get("from")))
+                end = max(start, float(item.get("to")))
+            except (TypeError, ValueError):
+                continue
+            content = html.unescape(str(item.get("content") or "")).strip()
+            if content:
+                cues.append((start, end, content))
+        if not cues:
+            return None
+        destination = paths.source / "subtitles" / "source.bilibili.srt"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(_render_srt(cues), encoding="utf-8")
+        data = destination.read_bytes()
+        language = str(selected.get("lan") or selected.get("lang") or "zh")
+        manifest_path = paths.metadata / "subtitle_acquisition.json"
+        acquisition = SubtitleAcquisition(
+            path=str(destination.resolve()),
+            language=language,
+            source_kind=("automatic" if selected.get("ai_type") else "manual"),
+            subtitle_format="srt",
+            sha256=hashlib.sha256(data).hexdigest(),
+            size_bytes=len(data),
+            manifest_path=str(manifest_path),
+            provider="bilibili-player-api",
+        )
+        write_json(
+            manifest_path,
+            {
+                "schema_version": 2,
+                "source_url": source,
+                "bvid": bvid,
+                "cid": cid,
+                "language_priority": list(self.languages),
+                **acquisition.to_dict(),
+            },
+        )
+        progress(1.0, f"已从 B 站播放器接口抓取字幕：{language}")
+        return acquisition
+
+
+class EmbeddedCaptionOcrSource:
+    """Recognize burned-in captions from a dense crop of the lower video area."""
+
+    async def acquire(
+        self,
+        media_path: Path,
+        *,
+        source: str,
+        duration: float,
+        ffmpeg_executable: str,
+        ocr_config: dict[str, Any],
+        attempt: int,
+        paths: WorkspacePaths,
+        cancel_check: CancelCheck,
+        progress: Callable[[float | None, str], None],
+        interval_seconds: float = 1.0,
+        crop_top_ratio: float = 0.55,
+        crop_bottom_ratio: float = 0.98,
+    ) -> SubtitleAcquisition:
+        if duration <= 0:
+            raise PipelineError(
+                "EMBEDDED_SUBTITLE_FAILED",
+                "无法确定视频时长，不能识别画面内嵌字幕",
+            )
+        if not isinstance(ocr_config, dict) or not ocr_config.get("model"):
+            raise PipelineError(
+                "EMBEDDED_SUBTITLE_OCR_REQUIRED",
+                "视频没有平台字幕；识别画面下方内嵌字幕需要选择 OCR 模型",
+            )
+        effective_interval = max(
+            0.5,
+            float(interval_seconds),
+            duration / 9_999,
+        )
+        caption_root = paths.extract / "embedded_subtitles"
+        caption_paths = replace(
+            paths,
+            frames=caption_root / "frames",
+            frame_candidates=caption_root / "frames" / "candidates",
+            frame_normalized=caption_root / "frames" / "normalized",
+            ocr=caption_root / "ocr",
+            ocr_raw=caption_root / "ocr" / "provider_raw",
+            ocr_normalized=caption_root / "ocr" / "normalized",
+        )
+        for directory in (
+            caption_paths.frames,
+            caption_paths.frame_candidates,
+            caption_paths.frame_normalized,
+            caption_paths.ocr,
+            caption_paths.ocr_raw,
+            caption_paths.ocr_normalized,
+        ):
+            directory.mkdir(parents=True, exist_ok=True)
+        frame_result = await VideoFrameExtractor(ffmpeg_executable).extract(
+            media_path,
+            duration=duration,
+            paths=caption_paths,
+            config=FrameExtractionConfig(
+                strategy="fixed_interval",
+                interval_seconds=effective_interval,
+                max_candidate_frames=min(10_000, math.ceil(duration / effective_interval) + 2),
+                normalized_max_width=1600,
+            ),
+            cancel_check=cancel_check,
+            progress=lambda value, message: progress(
+                None if value is None else value * 0.35,
+                "内嵌字幕抽帧：" + message,
+            ),
+        )
+        crop_directory = caption_root / "caption_crops"
+        crop_directory.mkdir(parents=True, exist_ok=True)
+        caption_records = []
+        for index, record in enumerate(frame_result.records):
+            await _ensure_subtitle_active(cancel_check)
+            destination = crop_directory / f"{record.frame_id}.png"
+            width, height = _crop_caption_region(
+                Path(record.normalized_image_path),
+                destination,
+                crop_top_ratio,
+                crop_bottom_ratio,
+            )
+            payload = destination.read_bytes()
+            digest = hashlib.sha256(payload).hexdigest()
+            caption_records.append(
+                replace(
+                    record,
+                    normalized_image_path=str(destination),
+                    width=width,
+                    height=height,
+                    file_size=len(payload),
+                    sha256=digest,
+                    perceptual_hash=digest[:16],
+                    kept=True,
+                    drop_reason=None,
+                    duplicate_of=None,
+                )
+            )
+            progress(
+                0.35 + 0.05 * (index + 1) / len(frame_result.records),
+                f"正在裁剪视频下方字幕区域 {index + 1}/{len(frame_result.records)}",
+            )
+        caption_frame_result = FrameExtractionResult(
+            tuple(caption_records),
+            frame_result.manifest_path,
+            frame_result.config_fingerprint + ":caption-crop-v1",
+            frame_result.reused,
+        )
+        ocr_run = await recognize_retained_frames(
+            caption_frame_result,
+            ocr_config=ocr_config,
+            attempt=attempt,
+            paths=caption_paths,
+            cancel_check=cancel_check,
+            progress=lambda value, message: progress(
+                None if value is None else 0.4 + value * 0.55,
+                "内嵌字幕 OCR：" + message,
+            ),
+        )
+        cues = _caption_cues(
+            ocr_run.results,
+            duration=duration,
+            interval_seconds=effective_interval,
+        )
+        if not cues:
+            raise PipelineError(
+                "EMBEDDED_SUBTITLE_NOT_FOUND",
+                "平台没有字幕轨道，OCR 也未在视频下方识别出稳定内嵌字幕",
+            )
+        destination = paths.source / "subtitles" / "source.embedded-ocr.srt"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(_render_srt(cues), encoding="utf-8")
+        payload = destination.read_bytes()
+        manifest_path = paths.metadata / "subtitle_acquisition.json"
+        acquisition = SubtitleAcquisition(
+            path=str(destination.resolve()),
+            language=str(ocr_config.get("language") or "zh"),
+            source_kind="embedded-ocr",
+            subtitle_format="srt",
+            sha256=hashlib.sha256(payload).hexdigest(),
+            size_bytes=len(payload),
+            manifest_path=str(manifest_path),
+            provider="embedded-caption-ocr",
+        )
+        write_json(
+            manifest_path,
+            {
+                "schema_version": 2,
+                "source_url": source,
+                "method": "lower-frame-region-ocr",
+                "interval_seconds": effective_interval,
+                "crop_top_ratio": crop_top_ratio,
+                "crop_bottom_ratio": crop_bottom_ratio,
+                "frame_manifest": frame_result.manifest_path,
+                "ocr_artifacts": {
+                    "normalized": ocr_run.normalized_path,
+                    "raw_index": ocr_run.raw_index_path,
+                    "preview": ocr_run.preview_path,
+                },
+                "cue_count": len(cues),
+                **acquisition.to_dict(),
+            },
+        )
+        progress(1.0, f"已从视频画面下方识别 {len(cues)} 条内嵌字幕")
+        return acquisition
+
+
+def _select_bilibili_subtitle(
+    items: list[dict[str, Any]],
+    priorities: tuple[str, ...],
+) -> dict[str, Any] | None:
+    if not items:
+        return None
+    priority_map = {value.casefold(): index for index, value in enumerate(priorities)}
+
+    def rank(item: dict[str, Any]) -> tuple[int, int, str]:
+        language = str(item.get("lan") or item.get("lang") or "").casefold()
+        exact = priority_map.get(language)
+        if exact is None:
+            exact = min(
+                (
+                    index
+                    for value, index in priority_map.items()
+                    if language.startswith(value + "-") or value.startswith(language + "-")
+                ),
+                default=len(priority_map) + 10,
+            )
+        automatic = int(bool(item.get("ai_type") or item.get("ai_status")))
+        return exact, automatic, language
+
+    selected = min(items, key=rank)
+    return selected if rank(selected)[0] < len(priority_map) + 10 else None
+
+
+def _render_srt(cues: list[tuple[float, float, str]]) -> str:
+    blocks = []
+    for index, (start, end, text) in enumerate(cues, start=1):
+        normalized = re.sub(r"[\r\n]+", " ", text).strip()
+        if normalized:
+            blocks.append(
+                f"{index}\n{format_srt_time(start)} --> {format_srt_time(end)}\n{normalized}"
+            )
+    return "\n\n".join(blocks) + "\n"
+
+
+def _crop_caption_region(
+    source: Path,
+    destination: Path,
+    top_ratio: float,
+    bottom_ratio: float,
+) -> tuple[int, int]:
+    if not 0 <= top_ratio < bottom_ratio <= 1:
+        raise PipelineError("EMBEDDED_SUBTITLE_CONFIG_INVALID", "内嵌字幕裁剪区域无效")
+    partial = destination.with_name(f"{destination.stem}.part{destination.suffix}")
+    with Image.open(source) as image:
+        rgb = ImageOps.exif_transpose(image).convert("RGB")
+        top = max(0, min(rgb.height - 1, round(rgb.height * top_ratio)))
+        bottom = max(top + 1, min(rgb.height, round(rgb.height * bottom_ratio)))
+        cropped = rgb.crop((0, top, rgb.width, bottom))
+        if cropped.height < 360:
+            scale = min(3.0, 360 / max(1, cropped.height))
+            cropped = cropped.resize(
+                (max(1, round(cropped.width * scale)), max(1, round(cropped.height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+        width, height = cropped.size
+        cropped.save(partial, format="PNG", optimize=True)
+    partial.replace(destination)
+    return width, height
+
+
+def _caption_cues(
+    results: tuple[OcrResult, ...],
+    *,
+    duration: float,
+    interval_seconds: float,
+) -> list[tuple[float, float, str]]:
+    ordered = sorted(
+        (item for item in results if item.media_timestamp is not None),
+        key=lambda item: float(item.media_timestamp or 0.0),
+    )
+    half_interval = interval_seconds / 2
+    cues: list[tuple[float, float, str]] = []
+    current_text = ""
+    current_start = 0.0
+    last_seen = 0.0
+
+    def close(end: float) -> None:
+        nonlocal current_text
+        if not current_text:
+            return
+        bounded_end = min(duration, max(current_start + 0.1, end))
+        cues.append((current_start, bounded_end, current_text))
+        current_text = ""
+
+    for item in ordered:
+        timestamp = max(0.0, float(item.media_timestamp or 0.0))
+        text = _clean_caption_candidate(item)
+        if not text:
+            close(max(current_start + 0.1, timestamp - half_interval))
+            continue
+        if not current_text:
+            current_text = text
+            current_start = max(0.0, timestamp - half_interval)
+            last_seen = timestamp
+            continue
+        if _caption_text_similar(current_text, text):
+            if (
+                len(_caption_key(text)) > len(_caption_key(current_text))
+                or (
+                    _caption_key(text) == _caption_key(current_text)
+                    and len(text) > len(current_text)
+                )
+            ):
+                current_text = text
+            last_seen = timestamp
+            continue
+        close(max(current_start + 0.1, timestamp - half_interval))
+        current_text = text
+        current_start = max(0.0, timestamp - half_interval)
+        last_seen = timestamp
+    close(min(duration, last_seen + half_interval))
+
+    merged: list[tuple[float, float, str]] = []
+    for cue in cues:
+        if (
+            merged
+            and _caption_key(merged[-1][2]) == _caption_key(cue[2])
+            and cue[0] - merged[-1][1] <= interval_seconds
+        ):
+            previous = merged[-1]
+            merged[-1] = (previous[0], cue[1], previous[2])
+        else:
+            merged.append(cue)
+    return merged
+
+
+def _clean_caption_candidate(result: OcrResult) -> str:
+    if result.blocks:
+        candidates: list[tuple[float, float, float, float, str]] = []
+        for block in result.blocks:
+            box = block.bounding_box
+            value = html.unescape(block.text).strip()
+            key = _caption_key(value)
+            if not box or len(box) < 4 or len(key) < 2:
+                continue
+            left, top, right, bottom = (float(item) for item in box[:4])
+            height = abs(bottom - top)
+            center_y = (top + bottom) / 2
+            confidence = float(block.confidence or 0.0)
+            if center_y < 120 or height < 20 or confidence < 0.55:
+                continue
+            score = (
+                center_y
+                + min(height, 140.0) * 1.25
+                + min(len(key), 30) * 1.5
+                + confidence * 20
+            )
+            candidates.append((score, center_y, height, left, value))
+        if not candidates:
+            return ""
+        winner = max(candidates, key=lambda item: item[0])
+        vertical_window = max(35.0, winner[2] * 1.5)
+        selected = [
+            item
+            for item in candidates
+            if abs(item[1] - winner[1]) <= vertical_window
+            and item[2] >= winner[2] * 0.5
+        ]
+        selected.sort(key=lambda item: (item[1], item[3]))
+        return " ".join(dict.fromkeys(item[4] for item in selected)).strip()
+
+    source = result.text
+    lines = []
+    for raw in re.split(r"[\r\n]+", source):
+        value = html.unescape(raw).strip()
+        value = re.sub(r"\s+", " ", value)
+        if len(_caption_key(value)) >= 2:
+            lines.append(value)
+    return " ".join(dict.fromkeys(lines)).strip()
+
+
+def _caption_key(value: str) -> str:
+    return re.sub(r"[^0-9a-z\u3400-\u9fff]+", "", value.casefold())
+
+
+def _caption_text_similar(left: str, right: str) -> bool:
+    left_key = _caption_key(left)
+    right_key = _caption_key(right)
+    if not left_key or not right_key:
+        return False
+    if left_key == right_key:
+        return True
+    shorter, longer = sorted((left_key, right_key), key=len)
+    if shorter in longer and len(shorter) / len(longer) >= 0.72:
+        return True
+    return SequenceMatcher(None, left_key, right_key, autojunk=False).ratio() >= 0.84
+
+
+async def _ensure_subtitle_active(cancel_check: CancelCheck) -> None:
+    value = cancel_check()
+    if inspect.isawaitable(value):
+        value = await value
+    if value:
+        raise PipelineError(
+            "PROCESS_CANCELLED",
+            "字幕抓取已取消",
+            stage="SUBTITLE_IMPORT",
+        )
 
 
 def import_subtitle(

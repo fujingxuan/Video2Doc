@@ -11,7 +11,7 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
   → 输入验证
   → 本地只读引用或 yt-dlp 下载
   → ffprobe 探测
-  → 可选：由 yt-dlp 从视频 URL 抓取字幕并跳过 ASR
+  → 可选：从视频 URL 抓取字幕轨；无轨道时 OCR 视频下方烧录字幕并跳过 ASR
   → FFmpeg 提取为 PCM 16kHz 单声道 WAV
   → 模型能力驱动分块（离线模型默认 5 秒重叠）
   → 独立 ASR Gateway（DashScope / FireRed / Qwen3 / Whisper）
@@ -22,16 +22,16 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
   → OCR 原始响应、规范化文本块与稳定事件
   → ASR segment / OCR event / frame event 统一时间线
   → 结构化 Document IR
-  → 无模型确定性整理，或 OneAPI 受约束轻度编辑
+  → 无模型确定性整理，或多平台 OpenAI 兼容 LLM 受约束轻度编辑
   → 忠实性校验与失败回退
   → Obsidian Markdown、图片和 JSON sidecar
   → 用户指定 Vault / Inbox 原子导出
   → Windows 单入口应用查看、取消、重试和打开结果
 ```
 
-所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；有效媒体、ASR、链接字幕抓取产物、帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；结构校验、来源引用、数字/术语/代码/公式/长度和顺序检查失败时会拒绝模型输出并回退原文。
+所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；有效媒体、ASR、链接字幕抓取产物、内嵌字幕抽帧/OCR、常规帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；结构校验、来源引用、数字/术语/代码/公式/长度和顺序检查失败时会拒绝模型输出并回退原文。
 
-完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。操作说明见 [应用使用手册](docs/USER_GUIDE.md)、[Obsidian 导出说明](docs/OBSIDIAN_EXPORT.md) 和 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)；本轮真实证据见 [2.2.1 链接字幕与单窗口补丁验收报告](docs/ITERATION_2_2_1_ACCEPTANCE_REPORT.md)。
+完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。操作说明见 [应用使用手册](docs/USER_GUIDE.md)、[Obsidian 导出说明](docs/OBSIDIAN_EXPORT.md) 和 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)；本轮真实证据见 [2.3.0 三类模型、托管 Gateway 与画面字幕验收报告](docs/ITERATION_2_3_ACCEPTANCE_REPORT.md)。
 
 ## 技术栈
 
@@ -110,7 +110,7 @@ Set-Location D:\Projects\Video2Doc\backend
 .\.venv\Scripts\python.exe -m alembic check
 ```
 
-`0005_independent_model_gateways` 新增独立 ASR/OCR Gateway；`0006_ocr_fusion_artifacts` 新增帧、OCR 与融合产物；`0007_document_exports` 新增文档、文本编辑与导出记录；`0008_v2_traceable_inputs` 新增逐阶段模型记录，并把成品无时间戳设为默认。新任务使用快照版本 6，额外冻结文本来源、链接字幕抓取策略、文本模型、提示词/模板版本、忠实性阈值、图片策略、直接导出目录、文件名与冲突策略和 sidecar 开关；只保存密钥环境变量名称，不保存密钥值。
+`0005_independent_model_gateways` 新增独立 ASR/OCR Gateway；`0006_ocr_fusion_artifacts` 新增帧、OCR 与融合产物；`0007_document_exports` 新增文档、文本编辑与导出记录；`0008_v2_traceable_inputs` 新增逐阶段模型记录，并把成品无时间戳设为默认；`0009_three_model_credentials` 新增 LLM Provider/Base URL 与 Windows DPAPI 密钥字段。新任务使用快照版本 6，额外冻结文本来源、链接字幕与内嵌 OCR 策略、文本模型、提示词/模板版本、忠实性阈值、图片策略、直接导出目录、文件名与冲突策略和 sidecar 开关；快照只保存密钥来源状态，不保存密钥值。
 
 ## 启动
 
@@ -120,7 +120,7 @@ Set-Location D:\Projects\Video2Doc\backend
 D:\Projects\Video2Doc\dist\Video2Doc-Portable\Video2Doc.exe
 ```
 
-程序会升级自己的 SQLite、检查端口、启动 FastAPI、托管已构建前端并打开 Edge 独立应用窗口。点击窗口右上角 X 会停止由该窗口启动的 Video2Doc 后端，不停止外部管理的 Docker OCR。完整参数和隔离数据目录方式见 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)。
+程序会升级自己的 SQLite、检查端口、启动 FastAPI、托管已构建前端并打开 Edge 独立应用窗口。该窗口禁用浏览器扩展，避免插件欢迎页抢占应用；点击窗口右上角 X 会停止由该窗口启动的 Video2Doc 后端，不停止外部管理的 Docker OCR。完整参数和隔离数据目录方式见 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)。
 
 2.2.1 使用 Windows 单实例锁和按窗口标题跟踪：重复双击只会尝试唤醒已有窗口，不会再创建第二个 Edge 窗口，也不会误关正在运行的后端。侧边栏版本号直接来自前端包版本。
 
@@ -168,16 +168,16 @@ Windows 便携版和本机开发版可通过后端 WinForms 选择媒体和导�
 新建任务时可选择：
 
 - `ASR 语音识别`：使用方案或本次任务选定的 ASR Gateway 模型；
-- `从链接抓取字幕`：仅用于视频网页 URL；yt-dlp 优先人工中文字幕，回退自动中文字幕或英文字幕，写入任务工作区后解析，并完全跳过音频提取和 ASR 模型调用。
+- `从链接抓取字幕`：仅用于视频网页 URL；先由 yt-dlp 抓取字幕轨，再尝试 B 站播放器字幕接口；可选的嵌入字幕 OCR 回退会密集抽取视频下方区域并生成 SRT，整个模式完全跳过音频提取和 ASR 模型调用。
 
-字幕模式可批量填写视频 URL，每个任务只抓取自己链接对应的字幕。找不到可用字幕时任务以 `SUBTITLE_NOT_FOUND` 明确失败。任务详情中的每个阶段都会显示实际模型，未调用模型的本地阶段会明确标注；历史任务可根据不可变快照补全模型名称。任务创建页可直接选择任意成品目录，最终 Markdown、附件和追溯 sidecar 原子写入该目录。新任务的成品 Markdown 默认不写入媒体时间戳或生成时间字段，原始 JSON/SRT 仍保留时间信息用于追溯。
+字幕模式可批量填写视频 URL，每个任务只处理自己链接对应的字幕。启用嵌入字幕 OCR 后需要选择 OCR 模型；没有轨道且画面下方也没有稳定文字时以 `EMBEDDED_SUBTITLE_NOT_FOUND` 明确失败。任务详情中的每个阶段都会显示实际模型，未调用模型的本地阶段会明确标注；历史任务可根据不可变快照补全模型名称。任务创建页可直接选择任意成品目录，最终 Markdown、附件和追溯 sidecar 原子写入该目录。新任务的成品 Markdown 默认不写入媒体时间戳或生成时间字段，原始 JSON/SRT 仍保留时间信息用于追溯。
 
 ## ASR 配置
 
-1. 在“Gateway”页面创建或启用 ASR Gateway，填写协议、Base URL 与密钥环境变量名称。
+1. 在“ASR”页面创建或启用 ASR Gateway，填写协议、Base URL 与密钥来源；内置本地 Gateway 会在任务需要时自动启动。
 2. 执行健康检查和模型发现，或手动添加模型及其能力上限。
-3. 在处理方案中分别选择 ASR Gateway 模型、OCR Gateway 模型与 OneAPI 文本模型。
-4. 云端密钥只通过 Gateway 记录的环境变量名称（例如 `DASHSCOPE_API_KEY`）在执行时读取。
+3. 在处理方案中分别选择 ASR Gateway 模型、OCR Gateway 模型与 LLM 文本模型。
+4. 云端密钥可通过环境变量名称（例如 `DASHSCOPE_API_KEY`）执行时读取，或用 Windows 当前用户 DPAPI 加密保存；API 与快照均不回显密钥。
 
 统一 ASR 协议使用 multipart 字段 `file`、`model`、`language`、`timestamp_granularity`、`prompt` 和 `task`。Fun-ASR 对完整音频保持单一连续流；只有连接限制或恢复需要拆会话时才使用 5 秒重叠，连续会话绝不重复发送音频。
 

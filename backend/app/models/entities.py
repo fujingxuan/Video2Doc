@@ -37,6 +37,10 @@ class ModelConfig(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    provider: Mapped[str | None] = mapped_column(String(100))
+    base_url: Mapped[str | None] = mapped_column(Text)
+    secret_env_name: Mapped[str | None] = mapped_column(String(200))
+    secret_ciphertext: Mapped[str | None] = mapped_column(Text)
     capabilities: Mapped[list[ModelCapability]] = relationship(
         back_populates="model", cascade="all, delete-orphan", lazy="selectin"
     )
@@ -61,6 +65,7 @@ class GatewayConfig(TimestampMixin, Base):
     protocol: Mapped[str] = mapped_column(String(64), index=True)
     base_url: Mapped[str] = mapped_column(Text)
     secret_env_name: Mapped[str | None] = mapped_column(String(200))
+    secret_ciphertext: Mapped[str | None] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     health_status: Mapped[str] = mapped_column(String(32), default="UNKNOWN", index=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

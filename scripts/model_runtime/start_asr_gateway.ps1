@@ -18,6 +18,12 @@ $runtimeRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $servicePath = (& wsl.exe -d $Distribution -- wslpath -a (($runtimeRoot + "\asr_gateway_service.py") -replace "\\", "/")).Trim()
 $launcherPath = (& wsl.exe -d $Distribution -- wslpath -a (($runtimeRoot + "\run_asr_gateway.sh") -replace "\\", "/")).Trim()
 $wslModelRoot = (& wsl.exe -d $Distribution -- wslpath -a ($ModelRoot -replace "\\", "/")).Trim()
+if ([string]::IsNullOrWhiteSpace($EnvironmentRoot)) {
+    $modelRootEnvironment = Join-Path $ModelRoot "envs\$Provider"
+    if (Test-Path -LiteralPath $modelRootEnvironment -PathType Container) {
+        $EnvironmentRoot = $ModelRoot
+    }
+}
 $wslEnvironmentRoot = if ([string]::IsNullOrWhiteSpace($EnvironmentRoot)) {
     (& wsl.exe -d $Distribution -- bash -lc 'printf %s "${XDG_DATA_HOME:-$HOME/.local/share}/video2doc-model-runtime"').Trim()
 } elseif ($EnvironmentRoot -match '^[A-Za-z]:\\') {

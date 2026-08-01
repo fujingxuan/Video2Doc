@@ -203,7 +203,11 @@ class FaithfulTextEditor:
                 ) as client:
                     return await client.post(
                         self.endpoint,
-                        headers={"Authorization": f"Bearer {self.api_key}"},
+                        headers=(
+                            {"Authorization": f"Bearer {self.api_key}"}
+                            if self.api_key
+                            else {}
+                        ),
                         json=payload,
                     )
             except httpx.TimeoutException as exc:
@@ -332,7 +336,9 @@ def _chat_completions_endpoint(base_url: str) -> str:
         raise ValueError("Text Gateway Base URL must be an absolute HTTP(S) URL")
     if parsed.username or parsed.password:
         raise ValueError("Text Gateway Base URL cannot contain credentials")
-    suffix = "/chat/completions" if parsed.path.rstrip("/").endswith("/v1") else (
-        "/v1/chat/completions"
-    )
+    path = parsed.path.rstrip("/")
+    if path.endswith("/chat/completions"):
+        return base
+    compatible_roots = ("/v1", "/v3", "/v4", "/v1beta/openai")
+    suffix = "/chat/completions" if path.endswith(compatible_roots) else "/v1/chat/completions"
     return f"{base}{suffix}"

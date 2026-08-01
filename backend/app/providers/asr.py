@@ -19,6 +19,8 @@ import httpx
 import websockets
 
 from app.core.config import get_settings
+from app.core.credentials import resolve_gateway_credential
+from app.core.secrets import SecretStorageError
 from app.core.errors import PipelineCancelled, PipelineError
 from app.providers.process import CancelCheck, ExternalProcessRunner, process_registry
 from app.providers.gateways import gateway_endpoint, trust_environment_proxy
@@ -1309,10 +1311,20 @@ def load_asr_gateway_credentials(snapshot: dict[str, Any]) -> tuple[dict[str, An
     model = str(config.get("model") or "").strip()
     protocol = str(config.get("provider") or "").strip()
     secret_env_name = str(config.get("secret_env_name") or "").strip()
-    secret = os.getenv(secret_env_name, "").strip() if secret_env_name else ""
+    gateway_id = config.get("gateway_id")
+    try:
+        secret = (
+            resolve_gateway_credential(int(gateway_id))
+            if gateway_id is not None
+            else (os.getenv(secret_env_name, "").strip() if secret_env_name else "")
+        )
+    except (SecretStorageError, TypeError, ValueError) as exc:
+        raise PipelineError(
+            "ASR_SECRET_MISSING", "无法读取 ASR Gateway 密钥", technical_detail=str(exc)
+        ) from exc
     if not base_url or not model or not protocol:
         raise PipelineError("ASR_CONFIG_INVALID", "任务快照中的 ASR Gateway 配置不完整")
-    if secret_env_name and not secret:
+    if (secret_env_name or config.get("secret_source") == "DIRECT") and not secret:
         code = "DASHSCOPE_KEY_MISSING" if protocol == "dashscope-fun-asr-websocket" else "ASR_SECRET_MISSING"
         raise PipelineError(code, f"缺少 ASR Gateway 密钥环境变量 {secret_env_name}")
     return config, secret

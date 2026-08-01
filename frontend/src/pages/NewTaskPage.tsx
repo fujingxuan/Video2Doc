@@ -23,6 +23,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
   const [asrGatewayId, setAsrGatewayId] = useState("");
   const [asrGatewayModelId, setAsrGatewayModelId] = useState("");
   const [ocrEnabled, setOcrEnabled] = useState(false);
+  const [embeddedCaptionFallback, setEmbeddedCaptionFallback] = useState(true);
   const [ocrGatewayId, setOcrGatewayId] = useState("");
   const [ocrGatewayModelId, setOcrGatewayModelId] = useState("");
   const [textEditEnabled, setTextEditEnabled] = useState(false);
@@ -98,6 +99,15 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
     () => profiles.find(item => String(item.id) === profileId),
     [profileId, profiles],
   );
+  const selectedTextModel = useMemo(
+    () => models.find(item => item.id === (
+      textModelId ? Number(textModelId) : selectedProfile?.text_model_id
+    )),
+    [models, selectedProfile, textModelId],
+  );
+  const ocrRequired = ocrEnabled || (
+    textSource === "SUBTITLE" && embeddedCaptionFallback
+  );
 
   const pickFiles = async () => {
     setPicking(true);
@@ -149,20 +159,24 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       setMessage("从视频链接抓取字幕仅支持视频网页 URL。");
       return;
     }
-    if (ocrEnabled && !ocrGatewayModelId && !selectedProfile?.ocr_gateway_model_id) {
-      setMessage("启用 OCR 时必须选择 OCR Gateway 模型，或使用已配置 OCR 的处理方案。");
+    if (ocrRequired && !ocrGatewayModelId && !selectedProfile?.ocr_gateway_model_id) {
+      setMessage("识别画面文字或内嵌字幕时必须选择 OCR Gateway 模型，或使用已配置 OCR 的处理方案。");
       return;
     }
     if (textEditEnabled && !textModelId && !selectedProfile?.text_model_id) {
       setMessage("启用轻度文本整理时必须选择 TEXT_PROCESSING 模型。");
       return;
     }
-    if (textEditEnabled && !settings?.api_key_configured) {
-      setMessage("启用轻度文本整理前必须配置 ONEAPI_API_KEY 环境变量。");
+    if (textEditEnabled && !selectedTextModel?.base_url?.trim()) {
+      setMessage("启用轻度文本整理前必须在 LLM 页面为所选模型配置 Base URL。");
       return;
     }
-    if (textEditEnabled && !settings?.oneapi_base_url?.trim()) {
-      setMessage("API Key 与服务地址是两项独立配置；请先在设置中填写 OneAPI Base URL。");
+    if (
+      textEditEnabled
+      && selectedTextModel?.secret_source !== "NONE"
+      && !selectedTextModel?.secret_configured
+    ) {
+      setMessage("所选 LLM 的密钥尚不可用；请检查环境变量或重新直接填写密钥。");
       return;
     }
     if (exportDirectory && !/^(?:[a-z]:[\\/]|\\\\)/i.test(exportDirectory)) {
@@ -190,6 +204,8 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
         export_directory: exportDirectory || null,
         config_overrides: {
           ocr_enabled: ocrEnabled,
+          embedded_subtitle_ocr_fallback: textSource === "SUBTITLE" && embeddedCaptionFallback,
+          embedded_subtitle_interval_seconds: 1,
           text_edit_enabled: textEditEnabled,
           frame_sampling_strategy: frameStrategy,
           ocr_frame_interval_seconds: frameInterval,
@@ -273,9 +289,13 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
           </button>
         </div>
         {textSource === "SUBTITLE" && <div className="notice">
-          yt-dlp 会从每个视频 URL 抓取字幕，优先人工中文字幕，并回退到自动中文字幕或英文字幕。
-          找不到可用字幕时任务会给出明确错误；此模式不会调用 ASR。
+          先检查 yt-dlp 与 B 站播放器字幕接口，优先人工中文字幕，再回退到自动字幕。
+          启用下方选项后，平台没有字幕轨道时会密集抽帧并 OCR 视频下方的硬字幕；此模式不会调用 ASR。
         </div>}
+        {textSource === "SUBTITLE" && <label className="check">
+          <input type="checkbox" checked={embeddedCaptionFallback} onChange={event => setEmbeddedCaptionFallback(event.target.checked)} />
+          没有平台字幕时识别视频下方内嵌字幕（需要 OCR 模型）
+        </label>}
       </fieldset>
       <div className="form-grid">
         <label>处理方案
@@ -339,7 +359,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
         />
         启用真实视频抽帧、OCR 与 ASR/OCR 时间线融合
       </label>
-      {ocrEnabled && <>
+      {ocrRequired && <>
         <div className="form-grid">
           <label>OCR Gateway
             <select
@@ -368,7 +388,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
             </select>
           </label>
         </div>
-        <details>
+        {ocrEnabled && <details>
           <summary>OCR 抽帧与融合参数</summary>
           <div className="form-grid">
             <label>抽帧策略
@@ -419,7 +439,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
               />
             </label>
           </div>
-        </details>
+        </details>}
       </>}
 
       <label className="check">
@@ -428,7 +448,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
           checked={textEditEnabled}
           onChange={event => setTextEditEnabled(event.target.checked)}
         />
-        启用 OneAPI 忠实轻度整理（响应不合规则自动回退原文）
+        启用 LLM 忠实轻度整理（响应不合规则自动回退原文）
       </label>
       {textEditEnabled && <label>文本模型
         <select value={textModelId} onChange={event => setTextModelId(event.target.value)}>
@@ -459,7 +479,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
 
       <div className="notice">
         无文本模型也能完成完整 Markdown；应用不会生成摘要、核心观点、问答、RAG 或知识库索引。
-        当前 OneAPI 密钥状态：{settings?.api_key_configured ? "已配置" : "未配置"}。
+        LLM、OCR、ASR 连接分别在左侧对应页面配置。
       </div>
       {message && <p className="form-message">{message}</p>}
       <div className="actions">

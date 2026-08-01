@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import ConflictError, NotFoundError
+from app.core.secrets import SecretStorageError, protect_secret
 from app.models import GatewayModel, ModelCapability, ModelConfig, ProcessingProfile
 from app.repositories.catalog import CatalogRepository
 from app.schemas.api import ModelCreate, ModelRead, ModelUpdate, ProfileCreate, ProfileRead, ProfileUpdate
@@ -37,7 +38,18 @@ class CatalogService:
         return model_read(item)
 
     def create_model(self, payload: ModelCreate) -> ModelRead:
-        item = ModelConfig(name=payload.name.strip(), notes=payload.notes, enabled=payload.enabled)
+        values = payload.model_dump(exclude={"capabilities", "secret_value"})
+        secret_value = payload.secret_value
+        item = ModelConfig(**values)
+        item.name = item.name.strip()
+        item.provider = item.provider.strip() if item.provider else None
+        item.base_url = item.base_url.strip().rstrip("/") if item.base_url else None
+        if secret_value:
+            try:
+                item.secret_ciphertext = protect_secret(secret_value)
+            except SecretStorageError as exc:
+                raise ConflictError(str(exc)) from exc
+            item.secret_env_name = None
         item.capabilities = [ModelCapability(capability=value.value) for value in payload.capabilities]
         self.session.add(item)
         self._commit_unique("A model with that name already exists")
@@ -49,8 +61,25 @@ class CatalogService:
             raise NotFoundError("Model", model_id)
         values = payload.model_dump(exclude_unset=True)
         capabilities = values.pop("capabilities", None)
+        secret_value = values.pop("secret_value", None)
+        clear_secret = bool(values.pop("clear_secret", False))
+        if clear_secret:
+            item.secret_ciphertext = None
+            item.secret_env_name = None
+        if secret_value:
+            try:
+                item.secret_ciphertext = protect_secret(secret_value)
+            except SecretStorageError as exc:
+                raise ConflictError(str(exc)) from exc
+            item.secret_env_name = None
+        elif "secret_env_name" in values and values["secret_env_name"]:
+            item.secret_ciphertext = None
         for key, value in values.items():
-            setattr(item, key, value.strip() if key == "name" and value else value)
+            if key in {"name", "provider"} and value:
+                value = value.strip()
+            elif key == "base_url" and value:
+                value = value.strip().rstrip("/")
+            setattr(item, key, value)
         if capabilities is not None:
             if not capabilities:
                 raise ConflictError("A model must have at least one capability")

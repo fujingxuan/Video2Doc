@@ -61,6 +61,20 @@ def test_edge_executable_prefers_explicit_configuration(tmp_path: Path) -> None:
     ) == executable.resolve()
 
 
+def test_standalone_edge_profile_disables_extension_onboarding(tmp_path: Path) -> None:
+    executable = tmp_path / "msedge.exe"
+    profile = tmp_path / "profile"
+    arguments = launcher._standalone_window_arguments(
+        executable,
+        "http://127.0.0.1:8765/",
+        profile,
+    )
+
+    assert "--disable-extensions" in arguments
+    assert "--disable-component-extensions-with-background-pages" in arguments
+    assert f"--user-data-dir={profile}" in arguments
+
+
 def test_windowless_launcher_supplies_streams_for_uvicorn(
     tmp_path: Path,
     monkeypatch,

@@ -144,7 +144,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="2.2.1",
+        version="2.3.0",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )

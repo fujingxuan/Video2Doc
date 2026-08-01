@@ -13,11 +13,16 @@ export interface ModelConfig {
   capabilities: Capability[];
   notes: string | null;
   enabled: boolean;
+  provider: string | null;
+  base_url: string | null;
+  secret_env_name: string | null;
+  secret_source: "NONE" | "ENVIRONMENT" | "DIRECT";
+  secret_configured: boolean;
   created_at: string;
   updated_at: string;
 }
 
-export type GatewayType = "ASR" | "OCR";
+export type GatewayType = "LLM" | "ASR" | "OCR";
 
 export interface GatewayConfig {
   id: number;
@@ -26,6 +31,7 @@ export interface GatewayConfig {
   protocol: string;
   base_url: string;
   secret_env_name: string | null;
+  secret_source: "NONE" | "ENVIRONMENT" | "DIRECT";
   secret_configured: boolean;
   enabled: boolean;
   health_status: string;

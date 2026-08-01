@@ -10,6 +10,8 @@ from sqlalchemy import select, update
 
 from app.core.config import get_settings
 from app.core.errors import PipelineCancelled, PipelineError, PipelineInterrupted
+from app.core.credentials import resolve_model_credential
+from app.core.secrets import SecretStorageError
 from app.db.session import SessionLocal
 from app.documents.builder import build_document
 from app.documents.editor import FaithfulTextEditor, PROMPT_VERSION
@@ -52,8 +54,13 @@ from app.providers.media import (
     MediaStream,
     classify_input,
 )
+from app.providers.managed_runtime import ensure_managed_gateway
 from app.providers.process import process_registry
-from app.providers.subtitles import YtDlpSubtitleSource, import_subtitle
+from app.providers.subtitles import (
+    EmbeddedCaptionOcrSource,
+    YtDlpSubtitleSource,
+    import_subtitle,
+)
 from app.providers.ocr_timeline import (
     build_ocr_timeline,
     recognize_retained_frames,
@@ -359,6 +366,18 @@ async def run_real_pipeline(task_id: int) -> None:
             tracker.complete(message="标准化音频有效", output_artifacts=[str(audio_path)])
 
         asr_config = snapshot.get("asr") if isinstance(snapshot.get("asr"), dict) else {}
+        ocr_config = snapshot.get("ocr") if isinstance(snapshot.get("ocr"), dict) else {}
+        gateway_collection = snapshot.get("gateways")
+        asr_gateway = (
+            gateway_collection.get("asr")
+            if isinstance(gateway_collection, dict)
+            else None
+        )
+        ocr_gateway = (
+            gateway_collection.get("ocr")
+            if isinstance(gateway_collection, dict)
+            else None
+        )
         subtitle_config = (
             snapshot.get("subtitle") if isinstance(snapshot.get("subtitle"), dict) else {}
         )
@@ -509,14 +528,12 @@ async def run_real_pipeline(task_id: int) -> None:
                 else [chunk.path for chunk in chunks]
             ),
         )
+        if not subtitle_mode and isinstance(asr_gateway, dict):
+            started = await ensure_managed_gateway(asr_gateway, log_dir=paths.logs)
+            if started:
+                tracker.progress(None, "本地 ASR Gateway 已按需启动，正在提交音频")
         results: list[AsrResult] = []
         language = asr_config.get("language")
-        gateway_collection = snapshot.get("gateways")
-        asr_gateway = (
-            gateway_collection.get("asr")
-            if isinstance(gateway_collection, dict)
-            else None
-        )
         timestamp_granularity = (
             asr_gateway.get("timestamp_strategy")
             if isinstance(asr_gateway, dict)
@@ -529,15 +546,55 @@ async def run_real_pipeline(task_id: int) -> None:
                         "SUBTITLE_CONFIG_INVALID",
                         "从视频链接抓取字幕仅支持 URL 输入",
                     )
-                subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
-                    normalized_source,
-                    paths,
-                    cancel_check=cancelled,
-                    progress=tracker.progress,
-                )
+                try:
+                    subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
+                        normalized_source,
+                        paths,
+                        cancel_check=cancelled,
+                        progress=tracker.progress,
+                    )
+                except PipelineError as exc:
+                    embedded_fallback = bool(
+                        subtitle_config.get("embedded_ocr_fallback")
+                    )
+                    if exc.code != "SUBTITLE_NOT_FOUND" or not embedded_fallback:
+                        raise
+                    if not ocr_config:
+                        raise PipelineError(
+                            "EMBEDDED_SUBTITLE_OCR_REQUIRED",
+                            "视频没有平台字幕；识别画面下方内嵌字幕需要选择 OCR 模型",
+                        ) from exc
+                    if isinstance(ocr_gateway, dict):
+                        started = await ensure_managed_gateway(
+                            ocr_gateway, log_dir=paths.logs
+                        )
+                        if started:
+                            tracker.progress(
+                                None,
+                                "未找到平台字幕；本地 OCR Gateway 已启动，"
+                                "正在识别视频下方内嵌字幕",
+                            )
+                    subtitle = await EmbeddedCaptionOcrSource().acquire(
+                        Path(acquisition.local_media_path),
+                        source=normalized_source,
+                        duration=float(media_info.duration or 0.0),
+                        ffmpeg_executable=ffmpeg_executable,
+                        ocr_config=ocr_config,
+                        attempt=attempt,
+                        paths=paths,
+                        cancel_check=cancelled,
+                        progress=tracker.progress,
+                        interval_seconds=float(
+                            subtitle_config.get(
+                                "embedded_ocr_interval_seconds", 1.0
+                            )
+                        ),
+                    )
                 subtitle_path = subtitle.path
                 subtitle_language = subtitle.language
                 provider_name = subtitle.provider
+                if subtitle.provider == "embedded-caption-ocr":
+                    model = str(ocr_config.get("model") or model)
             imported = import_subtitle(
                 Path(subtitle_path),
                 language=subtitle_language or "zh",
@@ -547,7 +604,7 @@ async def run_real_pipeline(task_id: int) -> None:
                 AsrResult(
                     provider=provider_name,
                     model=model,
-                    language="zh",
+                    language=subtitle_language or "zh",
                     chunk_index=0,
                     raw_response_reference=subtitle_path,
                     segments=tuple(imported.segments),
@@ -800,8 +857,7 @@ async def run_real_pipeline(task_id: int) -> None:
             ],
         )
 
-        ocr_config = snapshot.get("ocr")
-        if not isinstance(ocr_config, dict):
+        if not ocr_config:
             raise PipelineError("OCR_CONFIG_INVALID", "任务快照中没有 OCR Gateway 配置")
         tracker.start(
             "OCR_RECOGNIZE",
@@ -810,6 +866,10 @@ async def run_real_pipeline(task_id: int) -> None:
                 item.normalized_image_path for item in frame_result.kept
             ],
         )
+        if isinstance(ocr_gateway, dict):
+            started = await ensure_managed_gateway(ocr_gateway, log_dir=paths.logs)
+            if started:
+                tracker.progress(None, "本地 OCR Gateway 已按需启动，正在识别画面")
         ocr_run = await recognize_retained_frames(
             frame_result,
             ocr_config=ocr_config,
@@ -1039,19 +1099,33 @@ async def _run_document_pipeline(
     if edit_enabled:
         base_url = str(text_config.get("base_url") or "").strip()
         model = str(text_config.get("model") or "").strip()
-        secret_env_name = str(
-            text_config.get("secret_env_name") or "ONEAPI_API_KEY"
-        )
-        api_key = os.getenv(secret_env_name, "").strip()
+        secret_env_name = str(text_config.get("secret_env_name") or "")
+        model_config_id = text_config.get("model_config_id")
+        try:
+            api_key = (
+                resolve_model_credential(int(model_config_id))
+                if model_config_id is not None
+                else os.getenv(secret_env_name or "ONEAPI_API_KEY", "").strip()
+            )
+        except (SecretStorageError, TypeError, ValueError) as exc:
+            raise PipelineError(
+                "TEXT_GATEWAY_SECRET_MISSING",
+                "无法读取 LLM 密钥",
+                technical_detail=str(exc),
+            ) from exc
         if not base_url or not model:
             raise PipelineError(
                 "TEXT_CONFIG_INVALID",
                 "任务快照启用了文本整理，但缺少 Gateway Base URL 或模型",
             )
-        if not api_key:
+        if text_config.get("secret_source") != "NONE" and not api_key:
             raise PipelineError(
                 "TEXT_GATEWAY_SECRET_MISSING",
-                f"缺少文本整理 Gateway 密钥环境变量 {secret_env_name}",
+                (
+                    f"缺少 LLM 密钥环境变量 {secret_env_name}"
+                    if secret_env_name
+                    else "LLM 密钥未配置"
+                ),
             )
         edit_raw_path = (
             paths.output

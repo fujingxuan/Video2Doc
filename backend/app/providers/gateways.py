@@ -10,6 +10,8 @@ import httpx
 import websockets
 
 from app.models import GatewayConfig
+from app.core.credentials import resolve_credential
+from app.core.secrets import SecretStorageError
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,9 +43,17 @@ async def probe_gateway(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> GatewayProbeResult:
     checked_at = datetime.now(timezone.utc)
-    secret = os.getenv(gateway.secret_env_name, "") if gateway.secret_env_name else ""
-    if gateway.secret_env_name and not secret:
-        return GatewayProbeResult("MISSING_SECRET", f"缺少环境变量 {gateway.secret_env_name}", checked_at)
+    try:
+        secret = resolve_credential(gateway)
+    except SecretStorageError as exc:
+        return GatewayProbeResult("MISSING_SECRET", str(exc), checked_at)
+    if (gateway.secret_env_name or gateway.secret_ciphertext) and not secret:
+        detail = (
+            f"缺少环境变量 {gateway.secret_env_name}"
+            if gateway.secret_env_name
+            else "无法读取已保存密钥"
+        )
+        return GatewayProbeResult("MISSING_SECRET", detail, checked_at)
     try:
         if gateway.protocol == "dashscope-fun-asr-websocket":
             parsed = urlparse(gateway.base_url)
@@ -111,7 +121,10 @@ async def discover_gateway_models(
             }
         ]
     endpoint = gateway_endpoint(gateway.base_url, "/v1/models")
-    secret = os.getenv(gateway.secret_env_name, "") if gateway.secret_env_name else ""
+    try:
+        secret = resolve_credential(gateway)
+    except SecretStorageError as exc:
+        raise ValueError(str(exc)) from exc
     headers = {"Authorization": f"Bearer {secret}"} if secret else {}
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(timeout_seconds),

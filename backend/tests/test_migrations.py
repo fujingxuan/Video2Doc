@@ -36,6 +36,14 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
                 "PRAGMA table_info(task_stage_runs)"
             ).fetchall()
         }
+        model_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(model_configs)").fetchall()
+        }
+        gateway_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(gateway_configs)").fetchall()
+        }
         tables = {
             row[0]
             for row in connection.execute(
@@ -43,7 +51,7 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
             ).fetchall()
         }
 
-    assert revision == ("0008_v2_traceable_inputs",)
+    assert revision == ("0009_three_model_credentials",)
     assert {
         "frames_manifest_path",
         "ocr_timeline_path",
@@ -54,6 +62,10 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
     }.issubset(task_columns)
     assert {"document_artifacts", "text_edit_runs", "markdown_exports"}.issubset(tables)
     assert "model_usage" in stage_columns
+    assert {"provider", "base_url", "secret_env_name", "secret_ciphertext"}.issubset(
+        model_columns
+    )
+    assert "secret_ciphertext" in gateway_columns
 
     downgrade = subprocess.run(
         [sys.executable, "-m", "alembic", "downgrade", "0006_ocr_fusion_artifacts"],

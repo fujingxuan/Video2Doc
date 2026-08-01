@@ -107,7 +107,9 @@ def create_workspace(data_root: Path, *, task_id: int, title: str, snapshot: dic
     paths.create()
     ocr_dir = workspace / "03_ocr"
     ocr_dir.mkdir(parents=True, exist_ok=True)
-    if not snapshot["processing"]["ocr_enabled"]:
+    if not snapshot["processing"]["ocr_enabled"] and not snapshot["processing"].get(
+        "embedded_subtitle_ocr_fallback"
+    ):
         (ocr_dir / "DISABLED.txt").write_text(
             "OCR is disabled for this task snapshot. No OCR processing was performed.\n",
             encoding="utf-8",

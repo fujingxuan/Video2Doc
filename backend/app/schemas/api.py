@@ -18,6 +18,7 @@ class Capability(StrEnum):
 
 
 class GatewayType(StrEnum):
+    LLM = "LLM"
     ASR = "ASR"
     OCR = "OCR"
 
@@ -28,6 +29,7 @@ class GatewayCreate(BaseModel):
     protocol: str = Field(min_length=1, max_length=64)
     base_url: str = Field(min_length=1)
     secret_env_name: str | None = Field(default=None, max_length=200)
+    secret_value: str | None = Field(default=None, max_length=20_000, repr=False)
     enabled: bool = True
     settings: dict[str, Any] = Field(default_factory=dict)
 
@@ -47,6 +49,12 @@ class GatewayCreate(BaseModel):
         _reject_sensitive_metadata(value, "settings")
         return value
 
+    @model_validator(mode="after")
+    def one_secret_source(self) -> GatewayCreate:
+        if self.secret_env_name and self.secret_value:
+            raise ValueError("Choose an environment variable or a direct credential, not both")
+        return self
+
 
 class GatewayUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
@@ -54,6 +62,8 @@ class GatewayUpdate(BaseModel):
     protocol: str | None = Field(default=None, min_length=1, max_length=64)
     base_url: str | None = Field(default=None, min_length=1)
     secret_env_name: str | None = Field(default=None, max_length=200)
+    secret_value: str | None = Field(default=None, max_length=20_000, repr=False)
+    clear_secret: bool = False
     enabled: bool | None = None
     settings: dict[str, Any] | None = None
 
@@ -76,6 +86,12 @@ class GatewayUpdate(BaseModel):
             _reject_sensitive_metadata(value, "settings")
         return value
 
+    @model_validator(mode="after")
+    def one_secret_source(self) -> GatewayUpdate:
+        if self.secret_env_name and self.secret_value:
+            raise ValueError("Choose an environment variable or a direct credential, not both")
+        return self
+
 
 class GatewayRead(BaseModel):
     id: int
@@ -84,6 +100,7 @@ class GatewayRead(BaseModel):
     protocol: str
     base_url: str
     secret_env_name: str | None
+    secret_source: Literal["NONE", "ENVIRONMENT", "DIRECT"]
     secret_configured: bool
     enabled: bool
     health_status: str
@@ -225,11 +242,31 @@ class ModelCreate(BaseModel):
     capabilities: list[Capability] = Field(min_length=1)
     notes: str | None = None
     enabled: bool = True
+    provider: str | None = Field(default=None, max_length=100)
+    base_url: str | None = None
+    secret_env_name: str | None = Field(default=None, max_length=200)
+    secret_value: str | None = Field(default=None, max_length=20_000, repr=False)
 
     @field_validator("capabilities")
     @classmethod
     def unique_capabilities(cls, value: list[Capability]) -> list[Capability]:
         return list(dict.fromkeys(value))
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_base_url(cls, value: str | None) -> str | None:
+        return _validate_gateway_base_url(value) if value else None
+
+    @field_validator("secret_env_name")
+    @classmethod
+    def valid_secret_env_name(cls, value: str | None) -> str | None:
+        return _validate_secret_env_name(value)
+
+    @model_validator(mode="after")
+    def one_secret_source(self) -> ModelCreate:
+        if self.secret_env_name and self.secret_value:
+            raise ValueError("Choose an environment variable or a direct credential, not both")
+        return self
 
 
 class ModelUpdate(BaseModel):
@@ -237,6 +274,27 @@ class ModelUpdate(BaseModel):
     capabilities: list[Capability] | None = None
     notes: str | None = None
     enabled: bool | None = None
+    provider: str | None = Field(default=None, max_length=100)
+    base_url: str | None = None
+    secret_env_name: str | None = Field(default=None, max_length=200)
+    secret_value: str | None = Field(default=None, max_length=20_000, repr=False)
+    clear_secret: bool = False
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_base_url(cls, value: str | None) -> str | None:
+        return _validate_gateway_base_url(value) if value else None
+
+    @field_validator("secret_env_name")
+    @classmethod
+    def valid_secret_env_name(cls, value: str | None) -> str | None:
+        return _validate_secret_env_name(value)
+
+    @model_validator(mode="after")
+    def one_secret_source(self) -> ModelUpdate:
+        if self.secret_env_name and self.secret_value:
+            raise ValueError("Choose an environment variable or a direct credential, not both")
+        return self
 
 
 class ModelRead(BaseModel):
@@ -245,6 +303,11 @@ class ModelRead(BaseModel):
     capabilities: list[Capability]
     notes: str | None
     enabled: bool
+    provider: str | None
+    base_url: str | None
+    secret_env_name: str | None
+    secret_source: Literal["NONE", "ENVIRONMENT", "DIRECT"]
+    secret_configured: bool
     created_at: datetime
     updated_at: datetime
 

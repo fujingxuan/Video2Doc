@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [string]$DistRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,7 +11,15 @@ $backend = Join-Path $repoRoot "backend"
 $frontend = Join-Path $repoRoot "frontend"
 $python = Join-Path $backend ".venv\Scripts\python.exe"
 $pyinstaller = Join-Path $backend ".venv\Scripts\pyinstaller.exe"
-$distRoot = Join-Path $repoRoot "dist"
+$distRoot = if ([string]::IsNullOrWhiteSpace($DistRoot)) {
+    Join-Path $repoRoot "dist"
+}
+elseif ([IO.Path]::IsPathRooted($DistRoot)) {
+    [IO.Path]::GetFullPath($DistRoot)
+}
+else {
+    [IO.Path]::GetFullPath((Join-Path $repoRoot $DistRoot))
+}
 $portable = Join-Path $distRoot "Video2Doc-Portable"
 $pyinstallerOutput = Join-Path $distRoot "Video2Doc"
 $work = Join-Path $repoRoot "build\pyinstaller"
@@ -78,6 +87,7 @@ $separator = [IO.Path]::PathSeparator
 $addFrontend = "$frontend\dist${separator}frontend_dist"
 $addMigrations = "$backend\migrations${separator}migrations"
 $addAlembic = "$backend\alembic.ini${separator}."
+$addModelRuntime = "$repoRoot\scripts\model_runtime${separator}model_runtime"
 
 Push-Location $repoRoot
 try {
@@ -94,6 +104,7 @@ try {
         --add-data $addFrontend `
         --add-data $addMigrations `
         --add-data $addAlembic `
+        --add-data $addModelRuntime `
         --hidden-import uvicorn.logging `
         --hidden-import uvicorn.loops.auto `
         --hidden-import uvicorn.protocols.http.auto `

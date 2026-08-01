@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from app.core.errors import PipelineError
+from app.core.credentials import resolve_gateway_credential
+from app.core.secrets import SecretStorageError
 from app.providers.frames import (
     FrameExtractionResult,
     FrameRecord,
@@ -60,8 +62,20 @@ async def recognize_retained_frames(
     if not model or not base_url:
         raise PipelineError("OCR_CONFIG_INVALID", "任务快照中的 OCR Gateway 配置不完整")
     secret_env_name = str(ocr_config.get("secret_env_name") or "").strip()
-    api_key = os.getenv(secret_env_name, "").strip() if secret_env_name else ""
-    if secret_env_name and not api_key:
+    gateway_id = ocr_config.get("gateway_id")
+    try:
+        api_key = (
+            resolve_gateway_credential(int(gateway_id))
+            if gateway_id is not None
+            else (os.getenv(secret_env_name, "").strip() if secret_env_name else "")
+        )
+    except (SecretStorageError, TypeError, ValueError) as exc:
+        raise PipelineError(
+            "OCR_GATEWAY_SECRET_MISSING",
+            "无法读取 OCR Gateway 密钥",
+            technical_detail=str(exc),
+        ) from exc
+    if (secret_env_name or ocr_config.get("secret_source") == "DIRECT") and not api_key:
         raise PipelineError(
             "OCR_GATEWAY_SECRET_MISSING",
             f"缺少 OCR Gateway 密钥环境变量 {secret_env_name}",
