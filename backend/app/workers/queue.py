@@ -8,9 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import SessionLocal
-from app.models import Task
+from app.models import AppSetting, Task
 from app.pipeline.runner import run_pipeline
 from app.providers.process import process_registry
+from app.services.cache import TaskCacheService
 
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,7 @@ class SerialQueueWorker:
                     await run_pipeline(task_id)
                 except Exception:
                     logger.exception("Unexpected failure escaped Pipeline for task %s", task_id)
+                self._auto_clear_completed_task_cache(task_id)
                 continue
             self._wake_event.clear()
             try:
@@ -113,6 +115,25 @@ class SerialQueueWorker:
                 logger.info("Another worker claimed a task before this worker committed")
                 return None
             return item.id
+
+    def _auto_clear_completed_task_cache(self, task_id: int) -> None:
+        with SessionLocal() as session:
+            task = session.get(Task, task_id)
+            settings = session.get(AppSetting, 1)
+            if (
+                task is None
+                or task.status != "COMPLETED"
+                or settings is None
+                or not settings.auto_clear_task_cache
+            ):
+                return
+            result = TaskCacheService(session).clear([task_id])
+            logger.info(
+                "Automatically cleared task %s cache: %s files, %s bytes",
+                task_id,
+                result["files_removed"],
+                result["bytes_freed"],
+            )
 
 
 queue_worker = SerialQueueWorker()

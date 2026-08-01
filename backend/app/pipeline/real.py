@@ -54,7 +54,7 @@ from app.providers.media import (
     MediaStream,
     classify_input,
 )
-from app.providers.managed_runtime import ensure_managed_gateway
+from app.providers.managed_runtime import ensure_managed_gateway, release_managed_gateway
 from app.providers.process import process_registry
 from app.providers.subtitles import (
     EmbeddedCaptionOcrSource,
@@ -236,6 +236,13 @@ async def run_real_pipeline(task_id: int) -> None:
     paths = WorkspacePaths.from_root(workspace)
     paths.create()
     tracker = StageTracker(task_id, workspace, snapshot)
+    runtime_gateways = snapshot.get("gateways")
+    cleanup_asr_gateway = (
+        runtime_gateways.get("asr") if isinstance(runtime_gateways, dict) else None
+    )
+    cleanup_ocr_gateway = (
+        runtime_gateways.get("ocr") if isinstance(runtime_gateways, dict) else None
+    )
 
     def cancelled() -> bool:
         with SessionLocal() as session:
@@ -382,6 +389,11 @@ async def run_real_pipeline(task_id: int) -> None:
                         interval_seconds=float(
                             subtitle_config.get("embedded_ocr_interval_seconds", 1.0)
                         ),
+                    )
+                    await _release_gateway_safely(
+                        ocr_gateway,
+                        paths=paths,
+                        workspace=workspace,
                     )
                 subtitle_path = subtitle.path
                 subtitle_language = subtitle.language
@@ -678,6 +690,11 @@ async def run_real_pipeline(task_id: int) -> None:
             ),
             output_artifacts=[result.raw_response_reference for result in results],
         )
+        await _release_gateway_safely(
+            asr_gateway,
+            paths=paths,
+            workspace=workspace,
+        )
 
         tracker.start(
             "SUBTITLE_NORMALIZE" if subtitle_mode else "ASR_COMBINE",
@@ -873,6 +890,11 @@ async def run_real_pipeline(task_id: int) -> None:
             cancel_check=cancelled,
             progress=tracker.progress,
         )
+        await _release_gateway_safely(
+            ocr_gateway,
+            paths=paths,
+            workspace=workspace,
+        )
         tracker.complete(
             message=f"OCR 完成 {ocr_run.processed_count} 帧，复用 {ocr_run.reused_count} 帧",
             output_artifacts=[
@@ -1004,6 +1026,36 @@ async def run_real_pipeline(task_id: int) -> None:
         )
         tracker.fail(failure, "FAILED")
         _finish_task(task_id, "FAILED", failure)
+    finally:
+        await _release_gateway_safely(
+            cleanup_asr_gateway,
+            paths=paths,
+            workspace=workspace,
+        )
+        await _release_gateway_safely(
+            cleanup_ocr_gateway,
+            paths=paths,
+            workspace=workspace,
+        )
+
+
+async def _release_gateway_safely(
+    gateway: dict | None,
+    *,
+    paths: WorkspacePaths,
+    workspace: Path,
+) -> None:
+    try:
+        released = await release_managed_gateway(gateway, log_dir=paths.logs)
+    except PipelineError as exc:
+        append_task_log(
+            workspace,
+            f"Managed Gateway cleanup warning [{exc.code}]: {exc.user_message}; "
+            f"technical={exc.technical_detail or '-'}",
+        )
+        return
+    if released:
+        append_task_log(workspace, "Managed Gateway process stopped; model memory released")
 
 
 async def _run_document_pipeline(
@@ -1113,6 +1165,7 @@ async def _run_document_pipeline(
             base_url=base_url,
             api_key=api_key,
             model=model,
+            timeout_seconds=float(text_config.get("timeout_seconds") or 600.0),
         ).edit(
             document,
             raw_path=edit_raw_path,

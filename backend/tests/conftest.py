@@ -24,6 +24,7 @@ os.environ["VIDEO2DOC_LOG_LEVEL"] = "WARNING"
 from app.db.base import Base  # noqa: E402
 from app.db.session import engine  # noqa: E402
 from app.main import app  # noqa: E402
+from app.providers.process import process_registry  # noqa: E402
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -70,3 +71,8 @@ def clean_database() -> None:
 def client(clean_database: None) -> TestClient:
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(autouse=True)
+def reset_process_lifecycle() -> None:
+    process_registry.begin_lifecycle()

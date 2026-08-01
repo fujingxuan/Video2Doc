@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  CacheClearResult,
   Capability,
   GatewayConfig,
   GatewayModel,
@@ -133,5 +134,10 @@ export const api = {
     request<{ path: string | null }>("/system/select-subtitle", { method: "POST" }),
   selectOutputDirectory: () =>
     request<{ path: string | null }>("/system/select-output-directory", { method: "POST" }),
+  clearTaskCache: (payload: { task_ids?: number[]; all_tasks?: boolean }) =>
+    request<CacheClearResult>("/system/cache/clear", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   shutdownApp: () => request<{ status: string }>("/system/shutdown", { method: "POST" }),
 };

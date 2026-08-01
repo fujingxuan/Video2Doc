@@ -419,6 +419,7 @@ class SettingsUpdate(BaseModel):
     export_keep_json_sidecar: bool | None = None
     export_copy_transcript: bool | None = None
     export_copy_subtitles: bool | None = None
+    auto_clear_task_cache: bool | None = None
 
 
 class SettingsRead(BaseModel):
@@ -454,7 +455,21 @@ class SettingsRead(BaseModel):
     export_keep_json_sidecar: bool
     export_copy_transcript: bool
     export_copy_subtitles: bool
+    auto_clear_task_cache: bool
     updated_at: datetime
+
+
+class CacheClearRequest(BaseModel):
+    task_ids: list[int] = Field(default_factory=list, max_length=500)
+    all_tasks: bool = False
+
+    @model_validator(mode="after")
+    def require_scope(self) -> CacheClearRequest:
+        if not self.all_tasks and not self.task_ids:
+            raise ValueError("请选择任务，或指定清除全部任务缓存")
+        if any(task_id <= 0 for task_id in self.task_ids):
+            raise ValueError("任务 ID 必须为正整数")
+        return self
 
 
 class TaskInput(BaseModel):

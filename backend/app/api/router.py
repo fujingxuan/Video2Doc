@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal, get_db
 from app.schemas.api import (
     Capability,
+    CacheClearRequest,
     GatewayCreate,
     GatewayHealthRead,
     GatewayModelCreate,
@@ -35,6 +36,7 @@ from app.schemas.api import (
     TaskRead,
 )
 from app.services.catalog import CatalogService
+from app.services.cache import TaskCacheService
 from app.services.gateways import GatewayService
 from app.services.settings import SettingsService
 from app.services.system import (
@@ -142,7 +144,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="2.3.1",
+        version="2.3.2",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -244,6 +246,14 @@ def select_subtitle() -> dict[str, str | None]:
 @router.post("/system/select-output-directory", response_model=dict, tags=["system"])
 def select_export_directory() -> dict[str, str | None]:
     return {"path": select_output_directory()}
+
+
+@router.post("/system/cache/clear", response_model=dict, tags=["system"])
+def clear_task_cache(
+    payload: CacheClearRequest,
+    session: Session = Depends(get_db),
+) -> dict:
+    return TaskCacheService(session).clear(None if payload.all_tasks else payload.task_ids)
 
 
 @router.post("/system/shutdown", response_model=dict, tags=["system"])

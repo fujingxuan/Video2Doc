@@ -280,6 +280,17 @@ export function SettingsPage() {
       <div className="notice">
         Gateway 生命周期以各 Gateway 的 managed_lifecycle 标记为准；应用不会停止用户独立管理的 Docker OCR 容器。
       </div>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={settings.auto_clear_task_cache}
+          onChange={event => update("auto_clear_task_cache", event.target.checked)}
+        />
+        每个任务成功完成后，自动清除可重新生成的媒体、音频、分块和临时日志缓存
+      </label>
+      <div className="notice">
+        自动清理不会删除最终 Markdown、导出附件、标准化转写、OCR/融合时间线或任务记录。
+      </div>
       {message && <p className="form-message">{message}</p>}
       <div className="actions">
         <button className="primary" onClick={() => void save()}>保存设置</button>

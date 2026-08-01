@@ -250,6 +250,28 @@ async def test_text_editor_reports_missing_packaged_prompt_as_resource_error(
     assert "提示词资源缺失" in missing.value.user_message
 
 
+@pytest.mark.asyncio
+async def test_text_editor_timeout_falls_back_to_original_document(tmp_path: Path) -> None:
+    document = sample_document(tmp_path)
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("controlled timeout")
+
+    editor = FaithfulTextEditor(
+        base_url="http://127.0.0.1:8800",
+        api_key="secret",
+        model="slow-model",
+        transport=httpx.MockTransport(handler),
+    )
+    edited, run = await editor.edit(document, raw_path=tmp_path / "timeout.json")
+
+    assert edited is document
+    assert run["accepted"] is False
+    assert run["fallback_used"] is True
+    assert run["error_code"] == "TEXT_GATEWAY_TIMEOUT"
+    assert run["raw_response_reference"] is None
+
+
 def test_obsidian_export_is_atomic_relative_and_renames_conflicts(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()

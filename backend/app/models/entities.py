@@ -201,6 +201,7 @@ class AppSetting(TimestampMixin, Base):
     export_keep_json_sidecar: Mapped[bool] = mapped_column(Boolean, default=True)
     export_copy_transcript: Mapped[bool] = mapped_column(Boolean, default=False)
     export_copy_subtitles: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_clear_task_cache: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Task(TimestampMixin, Base):

@@ -284,7 +284,16 @@ export interface AppSettings {
   export_keep_json_sidecar: boolean;
   export_copy_transcript: boolean;
   export_copy_subtitles: boolean;
+  auto_clear_task_cache: boolean;
   updated_at: string;
+}
+
+export interface CacheClearResult {
+  tasks_cleared: number;
+  files_removed: number;
+  bytes_freed: number;
+  cleared: Array<{ task_id: number; files_removed: number; bytes_freed: number }>;
+  skipped: Array<{ task_id: number; reason: string }>;
 }
 
 export interface SystemStatus {

@@ -147,6 +147,88 @@ async def ensure_managed_gateway(
         return True
 
 
+async def release_managed_gateway(
+    gateway: dict[str, Any] | None,
+    *,
+    log_dir: Path,
+) -> bool:
+    """Stop a local Gateway started by this app and release its model memory."""
+    if not isinstance(gateway, dict):
+        return False
+    settings = gateway.get("gateway_settings")
+    if not isinstance(settings, dict) or not settings.get("managed_lifecycle"):
+        return False
+    base_url = str(gateway.get("base_url") or "").strip()
+    parsed = urlparse(base_url)
+    port = parsed.port
+    runtime_kind = str(settings.get("runtime_kind") or "").strip()
+    runtime_provider = str(settings.get("runtime_provider") or "").strip()
+    if port is None or runtime_kind not in {"asr", "ocr"} or not runtime_provider:
+        return False
+    runtime_key = (runtime_kind, port)
+    if runtime_key not in _started_by_app:
+        return False
+
+    async with _runtime_lock:
+        if runtime_key not in _started_by_app:
+            return False
+        script = _runtime_script(f"stop_{runtime_kind}_gateway.ps1")
+        powershell = _powershell_executable()
+        if script is None or powershell is None:
+            raise PipelineError(
+                "GATEWAY_RUNTIME_STOP_FAILED",
+                f"无法停止 {runtime_provider} 本地 Gateway",
+                technical_detail="停止脚本或 Windows PowerShell 不可用",
+            )
+        model_root = str(
+            settings.get("model_root")
+            or os.getenv("VIDEO2DOC_MODEL_ROOT")
+            or r"D:\Models\Video2Doc"
+        )
+        arguments = [
+            powershell,
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+        ]
+        if runtime_kind == "asr":
+            arguments.extend(["-Provider", runtime_provider, "-Port", str(port)])
+        else:
+            arguments.extend(["-Port", str(port)])
+        arguments.extend(["-ModelRoot", model_root])
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stdout_path = log_dir / f"release_{runtime_kind}_{runtime_provider}.stdout.log"
+        stderr_path = log_dir / f"release_{runtime_kind}_{runtime_provider}.stderr.log"
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        try:
+            with stdout_path.open("ab") as stdout, stderr_path.open("ab") as stderr:
+                process = await asyncio.create_subprocess_exec(
+                    *arguments,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout,
+                    stderr=stderr,
+                    creationflags=creationflags,
+                )
+                return_code = await asyncio.wait_for(process.wait(), timeout=30.0)
+        except (OSError, asyncio.TimeoutError) as exc:
+            raise PipelineError(
+                "GATEWAY_RUNTIME_STOP_FAILED",
+                f"停止 {runtime_provider} 本地 Gateway 失败",
+                technical_detail=str(exc),
+            ) from exc
+        if return_code != 0:
+            raise PipelineError(
+                "GATEWAY_RUNTIME_STOP_FAILED",
+                f"停止 {runtime_provider} 本地 Gateway 失败",
+                technical_detail=_tail(stderr_path) or _tail(stdout_path),
+            )
+        _started_by_app.discard(runtime_key)
+        return True
+
+
 async def _healthy(base_url: str) -> bool:
     try:
         endpoint = gateway_endpoint(base_url, "/health")

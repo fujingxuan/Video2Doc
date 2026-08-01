@@ -44,6 +44,12 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
             row[1]
             for row in connection.execute("PRAGMA table_info(gateway_configs)").fetchall()
         }
+        setting_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(app_settings)"
+            ).fetchall()
+        }
         tables = {
             row[0]
             for row in connection.execute(
@@ -51,7 +57,7 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
             ).fetchall()
         }
 
-    assert revision == ("0009_three_model_credentials",)
+    assert revision == ("0010_task_cache_cleanup",)
     assert {
         "frames_manifest_path",
         "ocr_timeline_path",
@@ -66,6 +72,7 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
         model_columns
     )
     assert "secret_ciphertext" in gateway_columns
+    assert "auto_clear_task_cache" in setting_columns
 
     downgrade = subprocess.run(
         [sys.executable, "-m", "alembic", "downgrade", "0006_ocr_fusion_artifacts"],

@@ -91,30 +91,26 @@ def select_output_directory() -> str | None:
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName System.Windows.Forms
-Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-using System.Windows.Forms;
-
-public sealed class Video2DocForegroundWindow : IWin32Window
-{
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
-
-    public IntPtr Handle { get; private set; }
-
-    public Video2DocForegroundWindow()
-    {
-        Handle = GetForegroundWindow();
-    }
-}
-'@
 $dialog = [System.Windows.Forms.FolderBrowserDialog]::new()
 $dialog.Description = '选择 Markdown 与附件导出目录'
 $dialog.ShowNewFolderButton = $true
-$owner = [Video2DocForegroundWindow]::new()
-if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
-    $dialog.SelectedPath | ConvertTo-Json -Compress
+$owner = [System.Windows.Forms.Form]::new()
+$owner.ShowInTaskbar = $false
+$owner.TopMost = $true
+$owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+$owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedToolWindow
+$owner.Opacity = 0
+try {
+    $owner.Show()
+    $owner.Activate()
+    if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+        $dialog.SelectedPath | ConvertTo-Json -Compress
+    }
+}
+finally {
+    $owner.Close()
+    $owner.Dispose()
+    $dialog.Dispose()
 }
 """
     payload = _run_native_dialog(script, "Windows 文件夹选择器")

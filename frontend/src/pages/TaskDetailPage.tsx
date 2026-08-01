@@ -4,13 +4,7 @@ import { api } from "../api/client";
 import { StateView } from "../components/StateView";
 import { StatusBadge } from "../components/StatusBadge";
 import type { TaskDetail } from "../types";
-import { formatDate } from "../utils/status";
-
-function duration(start: string | null, end: string | null): string {
-  if (!start) return "—";
-  const seconds = ((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 1000;
-  return Number.isFinite(seconds) ? `${Math.max(0, seconds).toFixed(1)} 秒` : "—";
-}
+import { formatDate, formatDuration } from "../utils/status";
 
 export function TaskDetailPage({ taskId }: { taskId: number }) {
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -209,7 +203,7 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
             <span className={`dot ${stage.status.toLowerCase()}`} />
             <div>
               <strong>{stage.stage}</strong>
-              <small>{stage.status} · 阶段进度 {stage.progress}% · 耗时 {duration(stage.started_at, stage.finished_at)}</small>
+              <small>{stage.status} · 阶段进度 {stage.progress}% · 耗时 {formatDuration(stage.started_at, stage.finished_at)}</small>
               {stage.model_usage.length > 0
                 ? <div className="tags">{stage.model_usage.map((usage, index) => (
                   <span key={`${usage.capability}-${index}`}>

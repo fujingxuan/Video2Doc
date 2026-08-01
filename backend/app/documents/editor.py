@@ -23,6 +23,13 @@ from app.storage.workspace import write_json
 
 EditCancelCheck = Callable[[], bool | Awaitable[bool]]
 PROMPT_VERSION = "faithful-edit-v1"
+FALLBACK_GATEWAY_ERRORS = {
+    "TEXT_GATEWAY_TIMEOUT",
+    "TEXT_GATEWAY_UNAVAILABLE",
+    "TEXT_GATEWAY_AUTH_FAILED",
+    "TEXT_GATEWAY_RETRYABLE",
+    "TEXT_GATEWAY_FAILED",
+}
 
 
 class FaithfulTextEditor:
@@ -102,7 +109,20 @@ class FaithfulTextEditor:
                 },
             ],
         }
-        response_payload = await self._request(request_payload, cancel_check)
+        try:
+            response_payload = await self._request(request_payload, cancel_check)
+        except PipelineError as exc:
+            if exc.code not in FALLBACK_GATEWAY_ERRORS:
+                raise
+            run = _rejected_run(
+                self.model,
+                raw_path,
+                f"{exc.code}: {exc.user_message}",
+                started,
+            )
+            run["error_code"] = exc.code
+            run["raw_response_reference"] = None
+            return document, run
         write_json(
             raw_path,
             {

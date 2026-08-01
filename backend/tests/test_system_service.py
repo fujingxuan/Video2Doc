@@ -19,6 +19,8 @@ def test_output_directory_picker_is_owned_by_foreground_app_window(monkeypatch) 
 
     monkeypatch.setattr(system, "_run_native_dialog", fake_run)
     assert system.select_output_directory() is None
-    assert "GetForegroundWindow" in captured["script"]
+    assert "Add-Type @'" not in captured["script"]
+    assert "$owner.TopMost = $true" in captured["script"]
+    assert "$owner.Opacity = 0" in captured["script"]
     assert "ShowDialog($owner)" in captured["script"]
     assert captured["display_name"] == "Windows 文件夹选择器"

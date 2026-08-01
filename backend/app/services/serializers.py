@@ -115,6 +115,7 @@ def settings_read(item: AppSetting) -> SettingsRead:
         export_keep_json_sidecar=item.export_keep_json_sidecar,
         export_copy_transcript=item.export_copy_transcript,
         export_copy_subtitles=item.export_copy_subtitles,
+        auto_clear_task_cache=item.auto_clear_task_cache,
         updated_at=item.updated_at,
     )
 
