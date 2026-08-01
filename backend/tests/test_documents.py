@@ -234,6 +234,22 @@ async def test_text_editor_rejects_shortened_response_and_falls_back(tmp_path: P
     assert all(block.edited_text is None for block in edited.all_blocks())
 
 
+@pytest.mark.asyncio
+async def test_text_editor_reports_missing_packaged_prompt_as_resource_error(
+    tmp_path: Path,
+) -> None:
+    editor = FaithfulTextEditor(
+        base_url="http://127.0.0.1:8800",
+        api_key="secret",
+        model="faithful-model",
+        prompt_path=tmp_path / "missing-prompt.txt",
+    )
+    with pytest.raises(PipelineError) as missing:
+        await editor.edit(sample_document(tmp_path), raw_path=tmp_path / "unused.json")
+    assert missing.value.code == "TEXT_PROMPT_MISSING"
+    assert "提示词资源缺失" in missing.value.user_message
+
+
 def test_obsidian_export_is_atomic_relative_and_renames_conflicts(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     vault.mkdir()

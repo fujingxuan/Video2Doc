@@ -286,7 +286,11 @@ async def run_real_pipeline(task_id: int) -> None:
                     session.commit()
         tracker.complete(
             message="媒体获取完成",
-            output_artifacts=[acquisition.local_media_path, acquisition.metadata_path, str(acquisition_path)],
+            output_artifacts=[
+                acquisition.local_media_path,
+                acquisition.metadata_path,
+                str(acquisition_path),
+            ],
         )
 
         ffprobe = FfprobeProvider(ffprobe_executable)
@@ -318,6 +322,88 @@ async def run_real_pipeline(task_id: int) -> None:
 
         processing = snapshot.get("processing", {})
         subtitle_mode = str(processing.get("text_source") or "ASR") == "SUBTITLE"
+        asr_config = snapshot.get("asr") if isinstance(snapshot.get("asr"), dict) else {}
+        ocr_config = snapshot.get("ocr") if isinstance(snapshot.get("ocr"), dict) else {}
+        gateway_collection = snapshot.get("gateways")
+        asr_gateway = (
+            gateway_collection.get("asr") if isinstance(gateway_collection, dict) else None
+        )
+        ocr_gateway = (
+            gateway_collection.get("ocr") if isinstance(gateway_collection, dict) else None
+        )
+        subtitle_config = (
+            snapshot.get("subtitle") if isinstance(snapshot.get("subtitle"), dict) else {}
+        )
+        subtitle_path = str(subtitle_config.get("workspace_path") or "")
+        subtitle_language = str(subtitle_config.get("language") or "").strip() or None
+        subtitle_provider_name = "imported-subtitle"
+        subtitle_model = "not-applicable"
+        subtitle_fallback_message: str | None = None
+
+        if subtitle_mode and not subtitle_path:
+            if kind != "URL":
+                raise PipelineError(
+                    "SUBTITLE_CONFIG_INVALID",
+                    "从视频链接抓取字幕仅支持 URL 输入",
+                )
+
+            def subtitle_probe_progress(_fraction: float | None, message: str) -> None:
+                append_task_log(workspace, message)
+
+            try:
+                try:
+                    subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
+                        normalized_source,
+                        paths,
+                        cancel_check=cancelled,
+                        progress=subtitle_probe_progress,
+                    )
+                except PipelineError as exc:
+                    embedded_fallback = bool(subtitle_config.get("embedded_ocr_fallback"))
+                    if exc.code != "SUBTITLE_NOT_FOUND" or not embedded_fallback:
+                        raise
+                    if not ocr_config:
+                        raise PipelineError(
+                            "EMBEDDED_SUBTITLE_OCR_REQUIRED",
+                            "视频没有平台字幕；识别画面下方内嵌字幕需要选择 OCR 模型",
+                        ) from exc
+                    if isinstance(ocr_gateway, dict):
+                        await ensure_managed_gateway(ocr_gateway, log_dir=paths.logs)
+                    subtitle = await EmbeddedCaptionOcrSource().acquire(
+                        Path(acquisition.local_media_path),
+                        source=normalized_source,
+                        duration=float(media_info.duration or 0.0),
+                        ffmpeg_executable=ffmpeg_executable,
+                        ocr_config=ocr_config,
+                        attempt=attempt,
+                        paths=paths,
+                        cancel_check=cancelled,
+                        progress=subtitle_probe_progress,
+                        interval_seconds=float(
+                            subtitle_config.get("embedded_ocr_interval_seconds", 1.0)
+                        ),
+                    )
+                subtitle_path = subtitle.path
+                subtitle_language = subtitle.language
+                subtitle_provider_name = subtitle.provider
+                if subtitle.provider == "embedded-caption-ocr":
+                    subtitle_model = str(ocr_config.get("model") or subtitle_model)
+            except PipelineError as exc:
+                if exc.code not in {
+                    "SUBTITLE_NOT_FOUND",
+                    "EMBEDDED_SUBTITLE_NOT_FOUND",
+                }:
+                    raise
+                if not asr_config:
+                    raise PipelineError(
+                        "ASR_FALLBACK_UNAVAILABLE",
+                        "视频没有可用字幕，且处理方案未配置 ASR 模型",
+                        technical_detail=exc.technical_detail or exc.user_message,
+                    ) from exc
+                subtitle_mode = False
+                subtitle_fallback_message = "未发现可用字幕，已自动切换到处理方案中的 ASR 模型"
+                append_task_log(workspace, subtitle_fallback_message)
+
         if subtitle_mode:
             audio_path = Path(acquisition.local_media_path)
             audio_info = media_info
@@ -365,27 +451,11 @@ async def run_real_pipeline(task_id: int) -> None:
                 raise PipelineError("AUDIO_EXTRACTION_FAILED", "标准化音频完整性检查失败")
             tracker.complete(message="标准化音频有效", output_artifacts=[str(audio_path)])
 
-        asr_config = snapshot.get("asr") if isinstance(snapshot.get("asr"), dict) else {}
-        ocr_config = snapshot.get("ocr") if isinstance(snapshot.get("ocr"), dict) else {}
-        gateway_collection = snapshot.get("gateways")
-        asr_gateway = (
-            gateway_collection.get("asr")
-            if isinstance(gateway_collection, dict)
-            else None
-        )
-        ocr_gateway = (
-            gateway_collection.get("ocr")
-            if isinstance(gateway_collection, dict)
-            else None
-        )
-        subtitle_config = (
-            snapshot.get("subtitle") if isinstance(snapshot.get("subtitle"), dict) else {}
-        )
         if subtitle_mode:
-            protocol = str(subtitle_config.get("provider") or "yt-dlp-subtitle")
+            protocol = subtitle_provider_name
             base_url = ""
             api_key = ""
-            model = "not-applicable"
+            model = subtitle_model
         else:
             protocol = str(asr_config.get("provider") or "oneapi-openai-compatible")
             if protocol == "oneapi-openai-compatible":
@@ -401,7 +471,9 @@ async def run_real_pipeline(task_id: int) -> None:
             "audio_chunk_seconds", get_settings().audio_chunk_seconds
         )
         chunk_seconds = None if continuous_stream else float(raw_chunk_seconds)
-        overlap_seconds = 0.0 if continuous_stream else float(asr_config.get("overlap_seconds", 5.0))
+        overlap_seconds = (
+            0.0 if continuous_stream else float(asr_config.get("overlap_seconds", 5.0))
+        )
         if subtitle_mode:
             chunks = [
                 AudioChunk(
@@ -481,10 +553,7 @@ async def run_real_pipeline(task_id: int) -> None:
         attempt_paths = replace(paths, asr_raw=attempt_raw)
         attempt_paths.asr_raw.mkdir(parents=True, exist_ok=True)
         provider: (
-            OpenAICompatibleAsrProvider
-            | UnifiedAsrGatewayProvider
-            | DashScopeFunAsrProvider
-            | None
+            OpenAICompatibleAsrProvider | UnifiedAsrGatewayProvider | DashScopeFunAsrProvider | None
         ) = None
         provider_options = {
             "base_url": base_url,
@@ -509,14 +578,12 @@ async def run_real_pipeline(task_id: int) -> None:
             raise PipelineError("ASR_CONFIG_INVALID", f"不支持的 ASR Gateway 协议：{protocol}")
         if provider is not None:
             provider_name = provider.name
-        subtitle_path = str(subtitle_config.get("workspace_path") or "")
-        subtitle_language = str(subtitle_config.get("language") or "").strip() or None
         tracker.start(
             "SUBTITLE_IMPORT" if subtitle_mode else "ASR_TRANSCRIBE",
             message=(
                 "正在从视频链接抓取字幕并跳过 ASR"
                 if subtitle_mode
-                else "正在提交 ASR 分块"
+                else subtitle_fallback_message or "正在提交 ASR 分块"
             ),
             input_artifacts=(
                 (
@@ -535,66 +602,10 @@ async def run_real_pipeline(task_id: int) -> None:
         results: list[AsrResult] = []
         language = asr_config.get("language")
         timestamp_granularity = (
-            asr_gateway.get("timestamp_strategy")
-            if isinstance(asr_gateway, dict)
-            else None
+            asr_gateway.get("timestamp_strategy") if isinstance(asr_gateway, dict) else None
         ) or "segment"
         if subtitle_mode:
-            if not subtitle_path:
-                if kind != "URL":
-                    raise PipelineError(
-                        "SUBTITLE_CONFIG_INVALID",
-                        "从视频链接抓取字幕仅支持 URL 输入",
-                    )
-                try:
-                    subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
-                        normalized_source,
-                        paths,
-                        cancel_check=cancelled,
-                        progress=tracker.progress,
-                    )
-                except PipelineError as exc:
-                    embedded_fallback = bool(
-                        subtitle_config.get("embedded_ocr_fallback")
-                    )
-                    if exc.code != "SUBTITLE_NOT_FOUND" or not embedded_fallback:
-                        raise
-                    if not ocr_config:
-                        raise PipelineError(
-                            "EMBEDDED_SUBTITLE_OCR_REQUIRED",
-                            "视频没有平台字幕；识别画面下方内嵌字幕需要选择 OCR 模型",
-                        ) from exc
-                    if isinstance(ocr_gateway, dict):
-                        started = await ensure_managed_gateway(
-                            ocr_gateway, log_dir=paths.logs
-                        )
-                        if started:
-                            tracker.progress(
-                                None,
-                                "未找到平台字幕；本地 OCR Gateway 已启动，"
-                                "正在识别视频下方内嵌字幕",
-                            )
-                    subtitle = await EmbeddedCaptionOcrSource().acquire(
-                        Path(acquisition.local_media_path),
-                        source=normalized_source,
-                        duration=float(media_info.duration or 0.0),
-                        ffmpeg_executable=ffmpeg_executable,
-                        ocr_config=ocr_config,
-                        attempt=attempt,
-                        paths=paths,
-                        cancel_check=cancelled,
-                        progress=tracker.progress,
-                        interval_seconds=float(
-                            subtitle_config.get(
-                                "embedded_ocr_interval_seconds", 1.0
-                            )
-                        ),
-                    )
-                subtitle_path = subtitle.path
-                subtitle_language = subtitle.language
-                provider_name = subtitle.provider
-                if subtitle.provider == "embedded-caption-ocr":
-                    model = str(ocr_config.get("model") or model)
+            provider_name = subtitle_provider_name
             imported = import_subtitle(
                 Path(subtitle_path),
                 language=subtitle_language or "zh",
@@ -695,9 +706,7 @@ async def run_real_pipeline(task_id: int) -> None:
         tracker.start(
             "SUBTITLE_VALIDATE" if subtitle_mode else "ASR_VALIDATE",
             message=(
-                "正在验证导入字幕的正文与时间顺序"
-                if subtitle_mode
-                else "正在验证标准化转写结果"
+                "正在验证导入字幕的正文与时间顺序" if subtitle_mode else "正在验证标准化转写结果"
             ),
             input_artifacts=[artifacts["normalized"]],
         )
@@ -736,9 +745,7 @@ async def run_real_pipeline(task_id: int) -> None:
                 {"events": []},
                 {"frames": []},
                 media_duration=media_info.duration,
-                association_window_seconds=float(
-                    processing.get("fusion_window_seconds", 8.0)
-                ),
+                association_window_seconds=float(processing.get("fusion_window_seconds", 8.0)),
             )
             fusion_artifacts = save_fusion_artifacts(
                 paths,
@@ -790,26 +797,18 @@ async def run_real_pipeline(task_id: int) -> None:
             )
         frame_config = FrameExtractionConfig(
             strategy=str(processing.get("frame_sampling_strategy") or "hybrid"),
-            interval_seconds=float(
-                processing.get("ocr_frame_interval_seconds", 15.0)
-            ),
-            scene_change_threshold=float(
-                processing.get("scene_change_threshold", 0.35)
-            ),
+            interval_seconds=float(processing.get("ocr_frame_interval_seconds", 15.0)),
+            scene_change_threshold=float(processing.get("scene_change_threshold", 0.35)),
             scene_min_gap_seconds=float(processing.get("scene_min_gap_seconds", 1.5)),
             max_candidate_frames=int(processing.get("max_candidate_frames", 240)),
-            normalized_max_width=int(
-                processing.get("frame_normalized_max_width", 1600)
-            ),
+            normalized_max_width=int(processing.get("frame_normalized_max_width", 1600)),
             perceptual_hamming_threshold=int(
                 processing.get("frame_similarity_hamming_threshold", 4)
             ),
             visual_difference_threshold=float(
                 processing.get("frame_similarity_difference_threshold", 0.025)
             ),
-            transition_burst_seconds=float(
-                processing.get("frame_transition_burst_seconds", 3.0)
-            ),
+            transition_burst_seconds=float(processing.get("frame_transition_burst_seconds", 3.0)),
         )
         tracker.start(
             "FRAME_EXTRACT",
@@ -852,9 +851,7 @@ async def run_real_pipeline(task_id: int) -> None:
         tracker.complete(
             message=f"画面去重完成：保留 {len(frame_result.kept)}，"
             f"丢弃 {frame_result.dropped_count}",
-            output_artifacts=[
-                item.normalized_image_path for item in frame_result.kept
-            ],
+            output_artifacts=[item.normalized_image_path for item in frame_result.kept],
         )
 
         if not ocr_config:
@@ -862,9 +859,7 @@ async def run_real_pipeline(task_id: int) -> None:
         tracker.start(
             "OCR_RECOGNIZE",
             message="正在通过独立 OCR Gateway 识别保留帧",
-            input_artifacts=[
-                item.normalized_image_path for item in frame_result.kept
-            ],
+            input_artifacts=[item.normalized_image_path for item in frame_result.kept],
         )
         if isinstance(ocr_gateway, dict):
             started = await ensure_managed_gateway(ocr_gateway, log_dir=paths.logs)
@@ -879,8 +874,7 @@ async def run_real_pipeline(task_id: int) -> None:
             progress=tracker.progress,
         )
         tracker.complete(
-            message=f"OCR 完成 {ocr_run.processed_count} 帧，"
-            f"复用 {ocr_run.reused_count} 帧",
+            message=f"OCR 完成 {ocr_run.processed_count} 帧，复用 {ocr_run.reused_count} 帧",
             output_artifacts=[
                 ocr_run.raw_index_path,
                 ocr_run.normalized_path,
@@ -896,15 +890,11 @@ async def run_real_pipeline(task_id: int) -> None:
         ocr_timeline = build_ocr_timeline(
             ocr_run.results,
             frame_result,
-            text_similarity_threshold=float(
-                processing.get("ocr_text_similarity_threshold", 0.88)
-            ),
+            text_similarity_threshold=float(processing.get("ocr_text_similarity_threshold", 0.88)),
             incremental_similarity_threshold=float(
                 processing.get("ocr_incremental_similarity_threshold", 0.55)
             ),
-            max_event_gap_seconds=float(
-                processing.get("ocr_event_gap_seconds", 20.0)
-            ),
+            max_event_gap_seconds=float(processing.get("ocr_event_gap_seconds", 20.0)),
         )
         ocr_timeline_path = save_ocr_timeline(paths, ocr_timeline)
         with SessionLocal() as session:
@@ -937,9 +927,7 @@ async def run_real_pipeline(task_id: int) -> None:
             ocr_timeline,
             frame_payload,
             media_duration=media_info.duration,
-            association_window_seconds=float(
-                processing.get("fusion_window_seconds", 8.0)
-            ),
+            association_window_seconds=float(processing.get("fusion_window_seconds", 8.0)),
         )
         fusion_artifacts = save_fusion_artifacts(
             paths,
@@ -989,8 +977,10 @@ async def run_real_pipeline(task_id: int) -> None:
     except PipelineError as exc:
         if not exc.stage:
             exc.stage = tracker.stage
-        status = "CANCELLED" if exc.code == "PROCESS_CANCELLED" else (
-            "INTERRUPTED" if exc.code == "backend_shutdown" else "FAILED"
+        status = (
+            "CANCELLED"
+            if exc.code == "PROCESS_CANCELLED"
+            else ("INTERRUPTED" if exc.code == "backend_shutdown" else "FAILED")
         )
         tracker.fail(exc, status)
         _finish_task(task_id, status, exc)
@@ -1061,16 +1051,8 @@ async def _run_document_pipeline(
         artifact_references={
             "transcript": transcript_artifacts["normalized"],
             "fusion_timeline": fusion_artifacts["timeline"],
-            **(
-                {"frames_manifest": frames_manifest_path}
-                if frames_manifest_path
-                else {}
-            ),
-            **(
-                {"ocr_timeline": ocr_timeline_path}
-                if ocr_timeline_path
-                else {}
-            ),
+            **({"frames_manifest": frames_manifest_path} if frames_manifest_path else {}),
+            **({"ocr_timeline": ocr_timeline_path} if ocr_timeline_path else {}),
         },
         document_id=f"task-{task_id:06d}-attempt-{attempt:04d}",
         image_min_gap_seconds=float(processing.get("image_min_gap_seconds", 8.0)),
@@ -1078,8 +1060,7 @@ async def _run_document_pipeline(
     write_json(original_document_path, document.model_dump(mode="json"))
     tracker.progress(
         1.0,
-        f"结构化文档包含 {len(document.sections)} 节、"
-        f"{len(document.all_blocks())} 个块",
+        f"结构化文档包含 {len(document.sections)} 节、{len(document.all_blocks())} 个块",
     )
     tracker.complete(
         message="结构化文档原始版本已生成，所有块均保留来源引用",
@@ -1127,11 +1108,7 @@ async def _run_document_pipeline(
                     else "LLM 密钥未配置"
                 ),
             )
-        edit_raw_path = (
-            paths.output
-            / "text_edit"
-            / f"attempt_{attempt:04d}_provider_raw.json"
-        )
+        edit_raw_path = paths.output / "text_edit" / f"attempt_{attempt:04d}_provider_raw.json"
         document, edit_run = await FaithfulTextEditor(
             base_url=base_url,
             api_key=api_key,
@@ -1139,17 +1116,11 @@ async def _run_document_pipeline(
         ).edit(
             document,
             raw_path=edit_raw_path,
-            minimum_length_ratio=float(
-                text_config.get("minimum_length_ratio", 0.72)
-            ),
-            formula_symbol_ratio=float(
-                text_config.get("formula_symbol_ratio", 0.8)
-            ),
+            minimum_length_ratio=float(text_config.get("minimum_length_ratio", 0.72)),
+            formula_symbol_ratio=float(text_config.get("formula_symbol_ratio", 0.8)),
             cancel_check=cancelled,
         )
-        edit_run["provider"] = str(
-            text_config.get("provider") or "oneapi-openai-compatible"
-        )
+        edit_run["provider"] = str(text_config.get("provider") or "oneapi-openai-compatible")
     else:
         edit_run = {
             "schema_version": 1,
@@ -1170,12 +1141,8 @@ async def _run_document_pipeline(
     document.edit_metadata = edit_run
     report = validate_document_faithfulness(
         document,
-        minimum_length_ratio=float(
-            text_config.get("minimum_length_ratio", 0.72)
-        ),
-        formula_symbol_ratio=float(
-            text_config.get("formula_symbol_ratio", 0.8)
-        ),
+        minimum_length_ratio=float(text_config.get("minimum_length_ratio", 0.72)),
+        formula_symbol_ratio=float(text_config.get("formula_symbol_ratio", 0.8)),
     )
     if not report.accepted:
         raise PipelineError(
@@ -1186,9 +1153,7 @@ async def _run_document_pipeline(
             ),
         )
     document_path = paths.output / "document.json"
-    validation_path = paths.output / "text_edit" / (
-        f"attempt_{attempt:04d}_validation.json"
-    )
+    validation_path = paths.output / "text_edit" / (f"attempt_{attempt:04d}_validation.json")
     write_json(document_path, document.model_dump(mode="json"))
     write_json(
         validation_path,
@@ -1251,9 +1216,7 @@ async def _run_document_pipeline(
     additional_files: dict[str, Path] = {}
     export_snapshot = _export_snapshot(snapshot)
     if export_snapshot.copy_transcript:
-        additional_files["transcript.normalized.json"] = Path(
-            transcript_artifacts["normalized"]
-        )
+        additional_files["transcript.normalized.json"] = Path(transcript_artifacts["normalized"])
 
     tracker.start(
         "MARKDOWN_RENDER",
@@ -1298,11 +1261,7 @@ async def _run_document_pipeline(
                 if workspace_result.attachment_directory
                 else []
             ),
-            *(
-                [workspace_result.data_directory]
-                if workspace_result.data_directory
-                else []
-            ),
+            *([workspace_result.data_directory] if workspace_result.data_directory else []),
         ],
     )
 
@@ -1349,16 +1308,8 @@ async def _run_document_pipeline(
         ),
         output_artifacts=[
             export_result.markdown_path,
-            *(
-                [export_result.attachment_directory]
-                if export_result.attachment_directory
-                else []
-            ),
-            *(
-                [export_result.data_directory]
-                if export_result.data_directory
-                else []
-            ),
+            *([export_result.attachment_directory] if export_result.attachment_directory else []),
+            *([export_result.data_directory] if export_result.data_directory else []),
         ],
     )
 
@@ -1429,11 +1380,7 @@ def _record_document_and_edit(
                 task_id=task_id,
                 attempt=attempt,
                 provider=str(edit_run.get("provider") or "none"),
-                model=(
-                    str(edit_run["model"])
-                    if edit_run.get("model") is not None
-                    else None
-                ),
+                model=(str(edit_run["model"]) if edit_run.get("model") is not None else None),
                 prompt_version=str(edit_run.get("prompt_version") or PROMPT_VERSION),
                 accepted=bool(edit_run.get("accepted")),
                 fallback_used=bool(edit_run.get("fallback_used")),
@@ -1466,9 +1413,7 @@ def _record_export(
                 target_type=target_type,
                 status=status,
                 markdown_path=result.markdown_path if result else None,
-                attachment_directory=(
-                    result.attachment_directory if result else None
-                ),
+                attachment_directory=(result.attachment_directory if result else None),
                 data_directory=result.data_directory if result else None,
                 config_json=config.model_dump(mode="json"),
                 image_count=result.image_count if result else 0,
@@ -1491,9 +1436,7 @@ def _validate_rendered_markdown(path: Path, document: Document) -> None:
     if not markdown.startswith("---\n") or "\n---\n" not in markdown[4:]:
         raise PipelineError("MARKDOWN_INVALID", "Markdown YAML frontmatter 不完整")
     transcript_text = [
-        block.display_text
-        for block in document.all_blocks()
-        if block.block_type == "transcript"
+        block.display_text for block in document.all_blocks() if block.block_type == "transcript"
     ]
     if not transcript_text or not all(text in markdown for text in transcript_text):
         raise PipelineError("MARKDOWN_TRANSCRIPT_LOST", "Markdown 未完整保留转写正文")
@@ -1529,7 +1472,9 @@ def _complete_task(
     with SessionLocal() as session:
         result = session.execute(
             update(Task)
-            .where(Task.id == task_id, Task.status == "PROCESSING", Task.cancel_requested.is_(False))
+            .where(
+                Task.id == task_id, Task.status == "PROCESSING", Task.cancel_requested.is_(False)
+            )
             .values(
                 status="COMPLETED",
                 current_stage="COMPLETED",
@@ -1624,13 +1569,15 @@ def _load_chunks(
     payload = read_json(path)
     if not payload or not isinstance(payload.get("chunks"), list):
         return []
-    if expected_chunk_seconds is not None and abs(
-        float(payload.get("chunk_seconds", -1)) - expected_chunk_seconds
-    ) > 0.001:
+    if (
+        expected_chunk_seconds is not None
+        and abs(float(payload.get("chunk_seconds", -1)) - expected_chunk_seconds) > 0.001
+    ):
         return []
-    if expected_overlap_seconds is not None and abs(
-        float(payload.get("overlap_seconds", -1)) - expected_overlap_seconds
-    ) > 0.001:
+    if (
+        expected_overlap_seconds is not None
+        and abs(float(payload.get("overlap_seconds", -1)) - expected_overlap_seconds) > 0.001
+    ):
         return []
     try:
         chunks: list[AudioChunk] = []

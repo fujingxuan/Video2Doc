@@ -26,12 +26,9 @@ def media_tool_status(settings: AppSetting) -> dict[str, Any]:
     return {
         "platform": os.name,
         "tools": tools,
-        "data_directory": str(
-            Path(settings.data_path) if settings.data_path else runtime.data_dir
-        ),
+        "data_directory": str(Path(settings.data_path) if settings.data_path else runtime.data_dir),
         "log_directory": str(
-            (Path(settings.data_path) if settings.data_path else runtime.data_dir)
-            / "logs"
+            (Path(settings.data_path) if settings.data_path else runtime.data_dir) / "logs"
         ),
         "api_prefix": runtime.api_prefix,
         "port": int(os.getenv("VIDEO2DOC_PORT", "8000")),
@@ -60,11 +57,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
     selected = [payload] if isinstance(payload, str) else payload
     if not isinstance(selected, list):
         raise PipelineError("FILE_PICKER_INVALID_RESPONSE", "Windows 文件选择结果格式错误")
-    return [
-        str(Path(item).resolve(strict=True))
-        for item in selected
-        if isinstance(item, str)
-    ]
+    return [str(Path(item).resolve(strict=True)) for item in selected if isinstance(item, str)]
 
 
 def select_subtitle_file() -> str | None:
@@ -98,10 +91,29 @@ def select_output_directory() -> str | None:
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+public sealed class Video2DocForegroundWindow : IWin32Window
+{
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    public IntPtr Handle { get; private set; }
+
+    public Video2DocForegroundWindow()
+    {
+        Handle = GetForegroundWindow();
+    }
+}
+'@
 $dialog = [System.Windows.Forms.FolderBrowserDialog]::new()
 $dialog.Description = '选择 Markdown 与附件导出目录'
 $dialog.ShowNewFolderButton = $true
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+$owner = [Video2DocForegroundWindow]::new()
+if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
     $dialog.SelectedPath | ConvertTo-Json -Compress
 }
 """
@@ -178,9 +190,7 @@ def _probe_tool(executable: str, version_argument: str) -> dict[str, Any]:
             errors="replace",
             timeout=10,
             check=False,
-            creationflags=(
-                subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-            ),
+            creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return {

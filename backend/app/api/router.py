@@ -82,9 +82,7 @@ def delete_gateway(gateway_id: int, session: Session = Depends(get_db)) -> Respo
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post(
-    "/gateways/{gateway_id}/health", response_model=GatewayHealthRead, tags=["gateways"]
-)
+@router.post("/gateways/{gateway_id}/health", response_model=GatewayHealthRead, tags=["gateways"])
 async def check_gateway_health(
     gateway_id: int, session: Session = Depends(get_db)
 ) -> GatewayHealthRead:
@@ -144,7 +142,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="2.3.0",
+        version="2.3.1",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -162,7 +160,9 @@ def list_models(
     return CatalogService(session).list_models(capability.value if capability else None)
 
 
-@router.post("/models", response_model=ModelRead, status_code=status.HTTP_201_CREATED, tags=["models"])
+@router.post(
+    "/models", response_model=ModelRead, status_code=status.HTTP_201_CREATED, tags=["models"]
+)
 def create_model(payload: ModelCreate, session: Session = Depends(get_db)) -> ModelRead:
     return CatalogService(session).create_model(payload)
 
@@ -173,7 +173,9 @@ def get_model(model_id: int, session: Session = Depends(get_db)) -> ModelRead:
 
 
 @router.put("/models/{model_id}", response_model=ModelRead, tags=["models"])
-def update_model(model_id: int, payload: ModelUpdate, session: Session = Depends(get_db)) -> ModelRead:
+def update_model(
+    model_id: int, payload: ModelUpdate, session: Session = Depends(get_db)
+) -> ModelRead:
     return CatalogService(session).update_model(model_id, payload)
 
 
@@ -255,13 +257,18 @@ def shutdown_application(request: Request) -> dict[str, str]:
     return {"status": "shutting_down"}
 
 
-@router.post("/tasks", response_model=list[TaskRead], status_code=status.HTTP_201_CREATED, tags=["tasks"])
+@router.post(
+    "/tasks", response_model=list[TaskRead], status_code=status.HTTP_201_CREATED, tags=["tasks"]
+)
 def create_tasks(payload: TaskBatchCreate, session: Session = Depends(get_db)) -> list[TaskRead]:
     return TaskService(session, queue_worker).create_batch(payload)
 
 
 @router.get("/tasks", response_model=list[TaskRead], tags=["tasks"])
-def list_tasks(status_filter: str | None = Query(default=None, alias="status"), session: Session = Depends(get_db)) -> list[TaskRead]:
+def list_tasks(
+    status_filter: str | None = Query(default=None, alias="status"),
+    session: Session = Depends(get_db),
+) -> list[TaskRead]:
     return TaskService(session).list(status_filter)
 
 

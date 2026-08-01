@@ -285,12 +285,12 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
               }
             }}
           >
-            从链接抓取字幕（跳过 ASR）
+            优先抓取字幕（缺失时 ASR）
           </button>
         </div>
         {textSource === "SUBTITLE" && <div className="notice">
           先检查 yt-dlp 与 B 站播放器字幕接口，优先人工中文字幕，再回退到自动字幕。
-          启用下方选项后，平台没有字幕轨道时会密集抽帧并 OCR 视频下方的硬字幕；此模式不会调用 ASR。
+          启用下方选项后会继续 OCR 视频下方的硬字幕；仍未发现字幕时，自动调用当前处理方案中的 ASR 模型识别音频。
         </div>}
         {textSource === "SUBTITLE" && <label className="check">
           <input type="checkbox" checked={embeddedCaptionFallback} onChange={event => setEmbeddedCaptionFallback(event.target.checked)} />
@@ -317,7 +317,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
             ))}
           </select>
         </label>
-        {textSource === "ASR" && <label>ASR Gateway
+        <label>{textSource === "SUBTITLE" ? "ASR 回退 Gateway" : "ASR Gateway"}
           <select
             value={asrGatewayId}
             onChange={event => {
@@ -328,8 +328,8 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
             <option value="">使用处理方案中的 Gateway</option>
             {asrGateways.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
           </select>
-        </label>}
-        {textSource === "ASR" && <label>ASR 模型
+        </label>
+        <label>{textSource === "SUBTITLE" ? "ASR 回退模型" : "ASR 模型"}
           <select
             value={asrGatewayModelId}
             disabled={!asrGatewayId}
@@ -340,7 +340,7 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
               <option key={item.id} value={item.id}>{item.display_name}</option>
             ))}
           </select>
-        </label>}
+        </label>
       </div>
       {selectedProfile && <div className="notice">
         <strong>当前方案模型：</strong>{" "}

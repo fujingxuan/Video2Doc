@@ -56,7 +56,7 @@ class TaskService:
             payload.export_directory,
             payload.export_vault_path,
             payload.export_inbox_relative_path,
-            require_asr=any(item.text_source == "ASR" for item in payload.inputs),
+            require_asr=any(item.text_source in {"ASR", "SUBTITLE"} for item in payload.inputs),
         )
         tasks: list[Task] = []
         for task_input in payload.inputs:
@@ -70,9 +70,6 @@ class TaskService:
                 "text_source": task_input.text_source,
             }
             if task_input.text_source == "SUBTITLE":
-                snapshot["models"]["asr"] = None
-                snapshot["gateways"]["asr"] = None
-                snapshot["asr"] = None
                 snapshot["subtitle"] = {
                     "mode": "URL_SUBTITLE_FETCH",
                     "provider": "yt-dlp-subtitle",
@@ -91,9 +88,7 @@ class TaskService:
                         snapshot["processing"].get("embedded_subtitle_ocr_fallback")
                     ),
                     "embedded_ocr_interval_seconds": float(
-                        snapshot["processing"].get(
-                            "embedded_subtitle_interval_seconds", 1.0
-                        )
+                        snapshot["processing"].get("embedded_subtitle_interval_seconds", 1.0)
                     ),
                 }
                 snapshot["input"]["subtitle"] = copy.deepcopy(snapshot["subtitle"])
@@ -111,9 +106,7 @@ class TaskService:
             self.session.add(item)
             self.session.flush()
             data_root = Path(settings.data_path) if settings.data_path else get_settings().data_dir
-            workspace = create_workspace(
-                data_root, task_id=item.id, title=title, snapshot=snapshot
-            )
+            workspace = create_workspace(data_root, task_id=item.id, title=title, snapshot=snapshot)
             item.workspace_path = str(workspace)
             item.snapshot = TaskConfigSnapshot(schema_version=6, snapshot_json=snapshot)
             tasks.append(item)
@@ -228,9 +221,7 @@ class TaskService:
             raise NotFoundError("Task artifact", relative_path)
         return candidate
 
-    def _artifact_json(
-        self, task_id: int, field: str, resource_name: str
-    ) -> dict[str, Any]:
+    def _artifact_json(self, task_id: int, field: str, resource_name: str) -> dict[str, Any]:
         item = self.repo.get(task_id)
         if not item:
             raise NotFoundError("Task", task_id)
@@ -395,16 +386,12 @@ class TaskService:
             "embedded_subtitle_interval_seconds": 1.0,
             "prompt_version": settings.text_prompt_version,
             "faithfulness_min_length_ratio": settings.faithfulness_min_length_ratio,
-            "faithfulness_formula_symbol_ratio": (
-                settings.faithfulness_formula_symbol_ratio
-            ),
+            "faithfulness_formula_symbol_ratio": (settings.faithfulness_formula_symbol_ratio),
             "markdown_template_version": settings.markdown_template_version,
             "image_insertion_policy": settings.image_insertion_policy,
             "image_min_gap_seconds": settings.image_min_gap_seconds,
             "export_filename_template": settings.export_filename_template,
-            "export_attachment_directory_template": (
-                settings.export_attachment_directory_template
-            ),
+            "export_attachment_directory_template": (settings.export_attachment_directory_template),
             "export_data_directory_template": settings.export_data_directory_template,
             "export_conflict_policy": settings.export_conflict_policy,
             "export_keep_json_sidecar": settings.export_keep_json_sidecar,
@@ -443,14 +430,9 @@ class TaskService:
             if (
                 text_model is None
                 or not text_model.enabled
-                or not any(
-                    item.capability == "TEXT_PROCESSING"
-                    for item in text_model.capabilities
-                )
+                or not any(item.capability == "TEXT_PROCESSING" for item in text_model.capabilities)
             ):
-                raise ConflictError(
-                    "Selected text model is unavailable or lacks TEXT_PROCESSING"
-                )
+                raise ConflictError("Selected text model is unavailable or lacks TEXT_PROCESSING")
             models["text_processing"] = text_model.name
             text_model_config = text_model
         elif settings.default_text_model_name and not models["text_processing"]:
@@ -481,8 +463,7 @@ class TaskService:
         if pipeline_mode == "REAL" and require_asr and asr_gateway_model is None:
             raise ConflictError("A real task must select an independent ASR gateway model")
         if (
-            processing.get("ocr_enabled")
-            or processing.get("embedded_subtitle_ocr_fallback")
+            processing.get("ocr_enabled") or processing.get("embedded_subtitle_ocr_fallback")
         ) and ocr_gateway_model is None:
             raise ConflictError("An OCR-enabled task must select an independent OCR gateway model")
         if processing.get("text_edit_enabled"):
@@ -547,13 +528,9 @@ class TaskService:
                 "attachment_directory_template": (
                     processing["export_attachment_directory_template"]
                 ),
-                "data_directory_template": processing[
-                    "export_data_directory_template"
-                ],
+                "data_directory_template": processing["export_data_directory_template"],
                 "conflict_policy": processing["export_conflict_policy"],
-                "keep_json_sidecar": bool(
-                    processing["export_keep_json_sidecar"]
-                ),
+                "keep_json_sidecar": bool(processing["export_keep_json_sidecar"]),
                 "copy_transcript": bool(processing["export_copy_transcript"]),
                 "copy_subtitles": bool(processing["export_copy_subtitles"]),
             },
@@ -612,24 +589,16 @@ class TaskService:
                 ),
                 "model_config_id": text_model_config.id if text_model_config else None,
                 "secret_env_name": (
-                    text_model_config.secret_env_name
-                    if text_model_config
-                    else "ONEAPI_API_KEY"
+                    text_model_config.secret_env_name if text_model_config else "ONEAPI_API_KEY"
                 ),
                 "secret_source": (
-                    credential_source(text_model_config)
-                    if text_model_config
-                    else "ENVIRONMENT"
+                    credential_source(text_model_config) if text_model_config else "ENVIRONMENT"
                 ),
                 "model": models["text_processing"],
                 "enabled": bool(processing["text_edit_enabled"]),
                 "prompt_version": processing["prompt_version"],
-                "minimum_length_ratio": processing[
-                    "faithfulness_min_length_ratio"
-                ],
-                "formula_symbol_ratio": processing[
-                    "faithfulness_formula_symbol_ratio"
-                ],
+                "minimum_length_ratio": processing["faithfulness_min_length_ratio"],
+                "formula_symbol_ratio": processing["faithfulness_formula_symbol_ratio"],
             },
         }
 
@@ -687,15 +656,9 @@ def _export_target(settings: AppSetting) -> tuple[str, str]:
         if relative.is_absolute() or ".." in relative.parts:
             raise ConflictError("Inbox path must be relative to the configured Vault")
         return str(vault), relative.as_posix()
-    inbox = (
-        Path(configured_inbox)
-        if configured_inbox
-        else get_settings().inbox_dir
-    )
+    inbox = Path(configured_inbox) if configured_inbox else get_settings().inbox_dir
     if not inbox.is_absolute():
-        raise ConflictError(
-            "A relative Inbox path requires a configured Obsidian Vault"
-        )
+        raise ConflictError("A relative Inbox path requires a configured Obsidian Vault")
     return str(inbox.parent), inbox.name
 
 

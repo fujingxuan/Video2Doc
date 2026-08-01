@@ -48,6 +48,7 @@ class PlatformProcessTreeTerminator:
                 "/F",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
+                creationflags=_windows_creation_flags(),
             )
             await killer.wait()
         else:
@@ -120,7 +121,7 @@ class ExternalProcessRunner:
         log_dir.mkdir(parents=True, exist_ok=True)
         stdout_log = log_dir / f"{log_name}.stdout.log"
         stderr_log = log_dir / f"{log_name}.stderr.log"
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        creationflags = _windows_creation_flags(new_process_group=True)
         start = time.monotonic()
         try:
             process = await asyncio.create_subprocess_exec(
@@ -256,3 +257,12 @@ def redact_text(value: str) -> str:
     value = re.sub(r"(https?://)[^/@\s]+@", r"\1***@", value, flags=re.IGNORECASE)
     value = re.sub(r"(https?://[^\s?]+)\?[^\s]+", r"\1?***", value, flags=re.IGNORECASE)
     return value
+
+
+def _windows_creation_flags(*, new_process_group: bool = False) -> int:
+    if os.name != "nt":
+        return 0
+    flags = subprocess.CREATE_NO_WINDOW
+    if new_process_group:
+        flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+    return flags

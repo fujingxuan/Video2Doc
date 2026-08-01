@@ -4,6 +4,7 @@ import asyncio
 import difflib
 import inspect
 import json
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,9 +41,7 @@ class FaithfulTextEditor:
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.transport = transport
-        self.prompt_path = prompt_path or Path(__file__).resolve().parents[1] / (
-            "prompts/faithful_edit_v1.txt"
-        )
+        self.prompt_path = prompt_path or _default_prompt_path()
 
     async def edit(
         self,
@@ -69,7 +68,14 @@ class FaithfulTextEditor:
             }
         await _ensure_active(cancel_check)
         started = time.monotonic()
-        prompt = self.prompt_path.read_text(encoding="utf-8")
+        try:
+            prompt = self.prompt_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise PipelineError(
+                "TEXT_PROMPT_MISSING",
+                "文本整理提示词资源缺失，请重新安装完整便携包",
+                technical_detail=str(exc),
+            ) from exc
         request_blocks = [
             {
                 "block_id": block.block_id,
@@ -204,9 +210,7 @@ class FaithfulTextEditor:
                     return await client.post(
                         self.endpoint,
                         headers=(
-                            {"Authorization": f"Bearer {self.api_key}"}
-                            if self.api_key
-                            else {}
+                            {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
                         ),
                         json=payload,
                     )
@@ -254,7 +258,9 @@ class FaithfulTextEditor:
         try:
             data = response.json()
         except json.JSONDecodeError as exc:
-            raise PipelineError("TEXT_GATEWAY_INVALID_RESPONSE", "文本整理服务返回无效 JSON") from exc
+            raise PipelineError(
+                "TEXT_GATEWAY_INVALID_RESPONSE", "文本整理服务返回无效 JSON"
+            ) from exc
         if not isinstance(data, dict):
             raise PipelineError("TEXT_GATEWAY_INVALID_RESPONSE", "文本整理服务返回格式错误")
         return data
@@ -342,3 +348,16 @@ def _chat_completions_endpoint(base_url: str) -> str:
     compatible_roots = ("/v1", "/v3", "/v4", "/v1beta/openai")
     suffix = "/chat/completions" if path.endswith(compatible_roots) else "/v1/chat/completions"
     return f"{base}{suffix}"
+
+
+def _default_prompt_path() -> Path:
+    candidates = [
+        Path(__file__).resolve().parents[1] / "prompts" / "faithful_edit_v1.txt",
+    ]
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.insert(
+            0,
+            Path(bundle_root) / "app" / "prompts" / "faithful_edit_v1.txt",
+        )
+    return next((path for path in candidates if path.is_file()), candidates[0])

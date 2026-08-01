@@ -88,6 +88,7 @@ $addFrontend = "$frontend\dist${separator}frontend_dist"
 $addMigrations = "$backend\migrations${separator}migrations"
 $addAlembic = "$backend\alembic.ini${separator}."
 $addModelRuntime = "$repoRoot\scripts\model_runtime${separator}model_runtime"
+$addPrompts = "$backend\app\prompts${separator}app\prompts"
 
 Push-Location $repoRoot
 try {
@@ -105,6 +106,7 @@ try {
         --add-data $addMigrations `
         --add-data $addAlembic `
         --add-data $addModelRuntime `
+        --add-data $addPrompts `
         --hidden-import uvicorn.logging `
         --hidden-import uvicorn.loops.auto `
         --hidden-import uvicorn.protocols.http.auto `
@@ -119,6 +121,11 @@ if (-not (Test-Path -LiteralPath $pyinstallerOutput)) {
     throw "PyInstaller did not create the expected Video2Doc directory."
 }
 Move-Item -LiteralPath $pyinstallerOutput -Destination $portable
+
+$packagedPrompt = Join-Path $portable "_internal\app\prompts\faithful_edit_v1.txt"
+if (-not (Test-Path -LiteralPath $packagedPrompt -PathType Leaf)) {
+    throw "Portable package is missing the faithful text-edit prompt."
+}
 
 $readme = @"
 Video2Doc Portable

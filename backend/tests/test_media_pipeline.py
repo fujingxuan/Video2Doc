@@ -20,6 +20,7 @@ from app.providers.media import (
 from app.providers.process import (
     ExternalProcessRunner,
     ProcessResult,
+    _windows_creation_flags,
     process_registry,
     redact_command,
 )
@@ -164,7 +165,9 @@ async def test_ytdlp_and_ffmpeg_providers_create_traceable_artifacts(tmp_path: P
         raw_probe_path=str(paths.metadata / "ffprobe.json"),
     )
     audio_path, normalized = await FfmpegProvider(
-        "fake-ffmpeg", StubProbe(), fake  # type: ignore[arg-type]
+        "fake-ffmpeg",
+        StubProbe(),
+        fake,  # type: ignore[arg-type]
     ).normalize_audio(
         Path(acquired.local_media_path),
         media_info,
@@ -196,7 +199,11 @@ async def test_external_process_streams_output_and_checks_return_code(tmp_path: 
 
     with pytest.raises(PipelineError) as failed:
         await runner.run(
-            [sys.executable, "-c", "import sys; print('safe detail', file=sys.stderr); sys.exit(7)"],
+            [
+                sys.executable,
+                "-c",
+                "import sys; print('safe detail', file=sys.stderr); sys.exit(7)",
+            ],
             cwd=tmp_path,
             log_dir=tmp_path / "logs",
             log_name="failure",
@@ -241,3 +248,15 @@ def test_sensitive_command_values_are_redacted() -> None:
     assert "user:pass" not in rendered
     assert "token" not in rendered
     assert "***" in rendered
+
+
+def test_windows_external_processes_are_created_without_console_windows() -> None:
+    if sys.platform != "win32":
+        pytest.skip("Windows creation flags are only available on Windows")
+    import subprocess
+
+    regular = _windows_creation_flags()
+    grouped = _windows_creation_flags(new_process_group=True)
+    assert regular & subprocess.CREATE_NO_WINDOW
+    assert grouped & subprocess.CREATE_NO_WINDOW
+    assert grouped & subprocess.CREATE_NEW_PROCESS_GROUP
