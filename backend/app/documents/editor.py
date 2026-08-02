@@ -15,14 +15,22 @@ import httpx
 
 from app.core.errors import PipelineCancelled, PipelineError
 from app.documents.faithfulness import validate_block_edit
-from app.documents.ir import Document
+from app.documents.ir import (
+    Document,
+    DocumentBlock,
+    DocumentSection,
+    SourceReference,
+    TimestampAnchor,
+)
 from app.providers.asr import redact_sensitive
 from app.providers.gateways import trust_environment_proxy
 from app.storage.workspace import write_json
 
 
 EditCancelCheck = Callable[[], bool | Awaitable[bool]]
-PROMPT_VERSION = "faithful-edit-v1"
+PROMPT_VERSION = "faithful-article-v1"
+ARTICLE_MODE = "full_article"
+DEFAULT_TEXT_TIMEOUT_SECONDS = 3600.0
 FALLBACK_GATEWAY_ERRORS = {
     "TEXT_GATEWAY_TIMEOUT",
     "TEXT_GATEWAY_UNAVAILABLE",
@@ -40,7 +48,7 @@ class FaithfulTextEditor:
         api_key: str,
         model: str,
         prompt_path: Path | None = None,
-        timeout_seconds: float = 180.0,
+        timeout_seconds: float = DEFAULT_TEXT_TIMEOUT_SECONDS,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.endpoint = _chat_completions_endpoint(base_url)
@@ -71,10 +79,13 @@ class FaithfulTextEditor:
                 "model": self.model,
                 "accepted": True,
                 "reason": "no_editable_blocks",
+                "mode": ARTICLE_MODE,
                 "block_runs": [],
             }
         await _ensure_active(cancel_check)
         started = time.monotonic()
+        source_text = _full_article_source(editable)
+        fallback_document = build_full_article_document(document)
         try:
             prompt = self.prompt_path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -83,17 +94,6 @@ class FaithfulTextEditor:
                 "文本整理提示词资源缺失，请重新安装完整便携包",
                 technical_detail=str(exc),
             ) from exc
-        request_blocks = [
-            {
-                "block_id": block.block_id,
-                "source_ids": [item.source_id for item in block.source_references],
-                "start_time": block.timestamp.start_seconds,
-                "end_time": block.timestamp.end_seconds,
-                "block_type": block.block_type,
-                "text": block.original_text,
-            }
-            for block in editable
-        ]
         request_payload = {
             "model": self.model,
             "temperature": 0,
@@ -103,7 +103,11 @@ class FaithfulTextEditor:
                 {
                     "role": "user",
                     "content": json.dumps(
-                        {"prompt_version": PROMPT_VERSION, "blocks": request_blocks},
+                        {
+                            "prompt_version": PROMPT_VERSION,
+                            "title": document.title,
+                            "source_text": source_text,
+                        },
                         ensure_ascii=False,
                     ),
                 },
@@ -122,7 +126,9 @@ class FaithfulTextEditor:
             )
             run["error_code"] = exc.code
             run["raw_response_reference"] = None
-            return document, run
+            run["mode"] = ARTICLE_MODE
+            run["source_block_count"] = len(editable)
+            return fallback_document, run
         write_json(
             raw_path,
             {
@@ -135,82 +141,74 @@ class FaithfulTextEditor:
         try:
             parsed = _response_json(response_payload)
         except PipelineError as exc:
-            return document, _rejected_run(
+            run = _rejected_run(
                 self.model,
                 raw_path,
                 exc.user_message,
                 started,
             )
-        returned = parsed.get("blocks")
-        if not isinstance(returned, list):
-            return document, _rejected_run(
+            run["mode"] = ARTICLE_MODE
+            run["source_block_count"] = len(editable)
+            return fallback_document, run
+        article_markdown = parsed.get("article_markdown")
+        if not isinstance(article_markdown, str) or not article_markdown.strip():
+            run = _rejected_run(
                 self.model,
                 raw_path,
-                "响应缺少 blocks 数组",
+                "响应缺少非空 article_markdown 字段",
                 started,
             )
-        by_id = {
-            str(item.get("block_id")): item
-            for item in returned
-            if isinstance(item, dict) and item.get("block_id")
-        }
-        if set(by_id) != {block.block_id for block in editable}:
-            return document, _rejected_run(
+            run["mode"] = ARTICLE_MODE
+            run["source_block_count"] = len(editable)
+            return fallback_document, run
+        article_markdown = article_markdown.strip()
+        edited_document = build_full_article_document(
+            document,
+            article_markdown=article_markdown,
+        )
+        article_block = next(
+            block for block in edited_document.all_blocks() if block.block_type != "image"
+        )
+        source_ids = [item.source_id for item in article_block.source_references]
+        report = validate_block_edit(
+            article_block,
+            returned_source_ids=source_ids,
+            minimum_length_ratio=minimum_length_ratio,
+            formula_symbol_ratio=formula_symbol_ratio,
+        )
+        if not report.accepted:
+            reason = "; ".join(issue.code for issue in report.issues)
+            run = _rejected_run(
                 self.model,
                 raw_path,
-                "响应块 ID 不完整或包含额外块",
+                f"忠实性校验拒绝整篇文章: {reason}",
                 started,
             )
-        replacements: dict[str, str] = {}
-        block_runs: list[dict[str, Any]] = []
-        for block in editable:
-            item = by_id[block.block_id]
-            edited_text = item.get("edited_text")
-            source_ids = item.get("source_ids")
-            if not isinstance(edited_text, str) or not isinstance(source_ids, list):
-                return document, _rejected_run(
-                    self.model,
-                    raw_path,
-                    f"块 {block.block_id} 的字段格式无效",
-                    started,
-                )
-            candidate = block.model_copy(update={"edited_text": edited_text})
-            report = validate_block_edit(
-                candidate,
-                returned_source_ids=[str(value) for value in source_ids],
-                minimum_length_ratio=minimum_length_ratio,
-                formula_symbol_ratio=formula_symbol_ratio,
-            )
-            if not report.accepted:
-                reason = "; ".join(issue.code for issue in report.issues)
-                return document, _rejected_run(
-                    self.model,
-                    raw_path,
-                    f"忠实性校验拒绝块 {block.block_id}: {reason}",
-                    started,
-                )
-            replacements[block.block_id] = edited_text
-            block_runs.append(
-                {
-                    "block_id": block.block_id,
-                    "source_ids": source_ids,
-                    "original_text": block.original_text,
-                    "edited_text": edited_text,
-                    "change_diff": _change_diff(block.original_text, edited_text),
-                    "validation_metrics": report.metrics,
-                }
-            )
-        edited_document = _replace_text(document, replacements)
+            run["mode"] = ARTICLE_MODE
+            run["source_block_count"] = len(editable)
+            return fallback_document, run
         run = {
             "schema_version": 1,
             "prompt_version": PROMPT_VERSION,
+            "mode": ARTICLE_MODE,
             "model": self.model,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "accepted": True,
             "fallback_used": False,
             "raw_response_reference": str(raw_path),
             "elapsed_seconds": round(time.monotonic() - started, 6),
-            "block_runs": block_runs,
+            "source_block_count": len(editable),
+            "article_source_count": len(source_ids),
+            "block_runs": [
+                {
+                    "block_id": article_block.block_id,
+                    "source_ids": source_ids,
+                    "original_text": source_text,
+                    "edited_text": article_markdown,
+                    "change_diff": _change_diff(source_text, article_markdown),
+                    "validation_metrics": report.metrics,
+                }
+            ],
         }
         edited_document.edit_metadata = run
         return edited_document, run
@@ -286,17 +284,82 @@ class FaithfulTextEditor:
         return data
 
 
-def _replace_text(document: Document, replacements: dict[str, str]) -> Document:
-    sections = []
-    for section in document.sections:
-        blocks = [
-            block.model_copy(
-                update={"edited_text": replacements.get(block.block_id, block.edited_text)}
-            )
-            for block in section.blocks
-        ]
-        sections.append(section.model_copy(update={"blocks": blocks}))
-    return document.model_copy(update={"sections": sections})
+def build_full_article_document(
+    document: Document,
+    *,
+    article_markdown: str | None = None,
+) -> Document:
+    editable = [
+        block
+        for block in document.all_blocks()
+        if block.block_type in {"transcript", "visual_text", "code", "quote"}
+        and block.original_text.strip()
+    ]
+    if not editable:
+        return document.model_copy(deep=True)
+    source_text = _full_article_source(editable)
+    source_references = _unique_source_references(editable)
+    all_blocks = document.all_blocks()
+    starts = [
+        block.timestamp.start_seconds
+        for block in all_blocks
+        if block.timestamp.start_seconds is not None
+    ]
+    ends = [
+        block.timestamp.end_seconds
+        for block in all_blocks
+        if block.timestamp.end_seconds is not None
+    ]
+    timestamp = TimestampAnchor(
+        start_seconds=min(starts) if starts else None,
+        end_seconds=max(ends or starts) if (ends or starts) else None,
+    )
+    article_block = DocumentBlock(
+        block_id="article-000001",
+        block_type="transcript",
+        timestamp=timestamp,
+        original_text=source_text,
+        edited_text=article_markdown.strip() if article_markdown else None,
+        source_references=source_references,
+        uncertain=any(block.uncertain for block in editable),
+        metadata={
+            "article_mode": ARTICLE_MODE,
+            "original_block_ids": [block.block_id for block in editable],
+            "source_block_count": len(editable),
+        },
+    )
+    images = [
+        block.model_copy(deep=True)
+        for block in all_blocks
+        if block.block_type == "image"
+    ]
+    article_section = DocumentSection(
+        section_id="article-section-0001",
+        title="完整正文",
+        timestamp=timestamp,
+        blocks=[article_block, *images],
+    )
+    processing = {**document.processing, "article_mode": ARTICLE_MODE}
+    return document.model_copy(
+        deep=True,
+        update={"sections": [article_section], "processing": processing},
+    )
+
+
+def _full_article_source(blocks: list[DocumentBlock]) -> str:
+    return "\n".join(block.original_text.strip() for block in blocks).strip()
+
+
+def _unique_source_references(blocks: list[DocumentBlock]) -> list[SourceReference]:
+    references: list[SourceReference] = []
+    seen: set[str] = set()
+    for block in blocks:
+        for reference in block.source_references:
+            if reference.source_id in seen:
+                continue
+            seen.add(reference.source_id)
+            references.append(reference.model_copy(deep=True))
+    return references
 
 
 def _response_json(payload: dict[str, Any]) -> dict[str, Any]:
@@ -372,12 +435,12 @@ def _chat_completions_endpoint(base_url: str) -> str:
 
 def _default_prompt_path() -> Path:
     candidates = [
-        Path(__file__).resolve().parents[1] / "prompts" / "faithful_edit_v1.txt",
+        Path(__file__).resolve().parents[1] / "prompts" / "faithful_article_v1.txt",
     ]
     bundle_root = getattr(sys, "_MEIPASS", None)
     if bundle_root:
         candidates.insert(
             0,
-            Path(bundle_root) / "app" / "prompts" / "faithful_edit_v1.txt",
+            Path(bundle_root) / "app" / "prompts" / "faithful_article_v1.txt",
         )
     return next((path for path in candidates if path.is_file()), candidates[0])

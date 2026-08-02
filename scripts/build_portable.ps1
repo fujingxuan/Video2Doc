@@ -122,7 +122,7 @@ if (-not (Test-Path -LiteralPath $pyinstallerOutput)) {
 }
 Move-Item -LiteralPath $pyinstallerOutput -Destination $portable
 
-$packagedPrompt = Join-Path $portable "_internal\app\prompts\faithful_edit_v1.txt"
+$packagedPrompt = Join-Path $portable "_internal\app\prompts\faithful_article_v1.txt"
 if (-not (Test-Path -LiteralPath $packagedPrompt -PathType Leaf)) {
     throw "Portable package is missing the faithful text-edit prompt."
 }

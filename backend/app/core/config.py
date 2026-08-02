@@ -33,6 +33,7 @@ class Settings:
     process_poll_seconds: float
     media_process_timeout_seconds: float
     asr_request_timeout_seconds: float
+    text_request_timeout_seconds: float
     asr_max_retries: int
     audio_chunk_seconds: float
     asr_overlap_seconds: float
@@ -66,6 +67,9 @@ def get_settings() -> Settings:
         ),
         asr_request_timeout_seconds=max(
             1.0, float(os.getenv("VIDEO2DOC_ASR_TIMEOUT_SECONDS", "300"))
+        ),
+        text_request_timeout_seconds=max(
+            60.0, float(os.getenv("VIDEO2DOC_TEXT_TIMEOUT_SECONDS", "3600"))
         ),
         asr_max_retries=max(0, int(os.getenv("VIDEO2DOC_ASR_MAX_RETRIES", "2"))),
         audio_chunk_seconds=max(

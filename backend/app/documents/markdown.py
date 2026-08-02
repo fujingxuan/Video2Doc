@@ -34,13 +34,29 @@ def render_obsidian_markdown(document: Document) -> str:
         lines.append(f"- 时长：{document.media_duration_seconds:.2f} 秒")
     lines.extend(["", "## 正文", ""])
 
-    for section in document.sections:
-        title = section.title
-        if not bool(document.processing.get("keep_timestamps", False)):
-            title = re.sub(r"^(?:\d{2}:\d{2}:\d{2}|未定时)\s+", "", title)
-        lines.extend([f"### {title}", ""])
-        for block in section.blocks:
-            lines.extend(_render_block(document, block))
+    if document.processing.get("article_mode") == "full_article":
+        article_blocks = [
+            block for block in document.all_blocks() if block.block_type != "image"
+        ]
+        for block in article_blocks:
+            text = block.display_text.strip()
+            if text:
+                lines.extend([text, ""])
+        image_blocks = [
+            block for block in document.all_blocks() if block.block_type == "image"
+        ]
+        if image_blocks:
+            lines.extend(["## 相关画面", ""])
+            for block in image_blocks:
+                lines.extend(_render_block(document, block))
+    else:
+        for section in document.sections:
+            title = section.title
+            if not bool(document.processing.get("keep_timestamps", False)):
+                title = re.sub(r"^(?:\d{2}:\d{2}:\d{2}|未定时)\s+", "", title)
+            lines.extend([f"### {title}", ""])
+            for block in section.blocks:
+                lines.extend(_render_block(document, block))
     lines.extend(_traceability_appendix(document))
     return "\n".join(lines).rstrip() + "\n"
 

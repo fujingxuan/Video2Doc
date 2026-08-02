@@ -177,7 +177,7 @@ class AppSetting(TimestampMixin, Base):
     default_text_edit_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     default_text_model_name: Mapped[str | None] = mapped_column(String(300))
     text_prompt_version: Mapped[str] = mapped_column(
-        String(100), default="faithful-edit-v1"
+        String(100), default="faithful-article-v1"
     )
     faithfulness_min_length_ratio: Mapped[float] = mapped_column(Float, default=0.72)
     faithfulness_formula_symbol_ratio: Mapped[float] = mapped_column(Float, default=0.8)

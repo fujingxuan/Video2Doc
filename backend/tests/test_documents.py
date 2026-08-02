@@ -9,7 +9,7 @@ import yaml
 
 from app.core.errors import PipelineCancelled, PipelineError
 from app.documents.builder import build_document
-from app.documents.editor import FaithfulTextEditor
+from app.documents.editor import FaithfulTextEditor, build_full_article_document
 from app.documents.exporter import ExportConfig, export_document_bundle
 from app.documents.faithfulness import validate_block_edit, validate_document_faithfulness
 from app.documents.markdown import render_obsidian_markdown
@@ -175,17 +175,22 @@ async def test_text_editor_accepts_structured_faithful_response(tmp_path: Path) 
     async def handler(request: httpx.Request) -> httpx.Response:
         request_json = json.loads(request.content)
         input_json = json.loads(request_json["messages"][1]["content"])
-        blocks = [
-            {
-                "block_id": item["block_id"],
-                "edited_text": item["text"].replace("，", "，\n"),
-                "source_ids": item["source_ids"],
-            }
-            for item in input_json["blocks"]
-        ]
+        assert "blocks" not in input_json
+        assert input_json["prompt_version"] == "faithful-article-v1"
+        assert "第一段完整论述" in input_json["source_text"]
+        assert "第二段继续原始论证" in input_json["source_text"]
+        article = f"### 课程正文\n\n{input_json['source_text'].replace(chr(10), ' ')}"
         return httpx.Response(
             200,
-            json={"choices": [{"message": {"content": json.dumps({"blocks": blocks})}}]},
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({"article_markdown": article})
+                        }
+                    }
+                ]
+            },
         )
 
     editor = FaithfulTextEditor(
@@ -197,10 +202,21 @@ async def test_text_editor_accepts_structured_faithful_response(tmp_path: Path) 
     raw_path = tmp_path / "edit_raw.json"
     edited, run = await editor.edit(document, raw_path=raw_path)
     assert run["accepted"] is True
-    assert edited.edit_metadata["prompt_version"] == "faithful-edit-v1"
+    assert edited.edit_metadata["prompt_version"] == "faithful-article-v1"
+    assert edited.processing["article_mode"] == "full_article"
+    assert len([block for block in edited.all_blocks() if block.block_type != "image"]) == 1
+    assert len([block for block in edited.all_blocks() if block.block_type == "image"]) == 1
+    assert run["source_block_count"] == 3
+    assert run["article_source_count"] == 3
+    assert set(edited.source_ids()) == set(document.source_ids())
     assert raw_path.is_file()
     assert "not-recorded" not in raw_path.read_text(encoding="utf-8")
     assert validate_document_faithfulness(edited).accepted
+    markdown = render_obsidian_markdown(edited)
+    assert "### 课程正文" in markdown
+    assert "**讲者内容**" not in markdown
+    assert "<!-- video2doc-sources:" not in markdown
+    assert markdown.count("第一段完整论述") == 1
 
 
 @pytest.mark.asyncio
@@ -209,17 +225,14 @@ async def test_text_editor_rejects_shortened_response_and_falls_back(tmp_path: P
 
     async def handler(request: httpx.Request) -> httpx.Response:
         input_json = json.loads(json.loads(request.content)["messages"][1]["content"])
-        blocks = [
-            {
-                "block_id": item["block_id"],
-                "edited_text": "摘要",
-                "source_ids": item["source_ids"],
-            }
-            for item in input_json["blocks"]
-        ]
+        assert "source_text" in input_json
         return httpx.Response(
             200,
-            json={"choices": [{"message": {"content": json.dumps({"blocks": blocks})}}]},
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps({"article_markdown": "摘要"})}}
+                ]
+            },
         )
 
     editor = FaithfulTextEditor(
@@ -231,7 +244,12 @@ async def test_text_editor_rejects_shortened_response_and_falls_back(tmp_path: P
     edited, run = await editor.edit(document, raw_path=tmp_path / "rejected.json")
     assert run["accepted"] is False
     assert run["fallback_used"] is True
-    assert all(block.edited_text is None for block in edited.all_blocks())
+    assert edited.processing["article_mode"] == "full_article"
+    text_blocks = [block for block in edited.all_blocks() if block.block_type != "image"]
+    assert len(text_blocks) == 1
+    assert text_blocks[0].edited_text is None
+    assert "第一段完整论述" in text_blocks[0].display_text
+    assert "第二段继续原始论证" in text_blocks[0].display_text
 
 
 @pytest.mark.asyncio
@@ -265,11 +283,27 @@ async def test_text_editor_timeout_falls_back_to_original_document(tmp_path: Pat
     )
     edited, run = await editor.edit(document, raw_path=tmp_path / "timeout.json")
 
-    assert edited is document
+    assert edited is not document
+    assert edited.processing["article_mode"] == "full_article"
     assert run["accepted"] is False
     assert run["fallback_used"] is True
     assert run["error_code"] == "TEXT_GATEWAY_TIMEOUT"
     assert run["raw_response_reference"] is None
+
+
+def test_deterministic_full_article_preserves_all_sources_without_fragment_labels(
+    tmp_path: Path,
+) -> None:
+    document = sample_document(tmp_path)
+    article = build_full_article_document(document)
+
+    assert set(article.source_ids()) == set(document.source_ids())
+    assert len([block for block in article.all_blocks() if block.block_type != "image"]) == 1
+    markdown = render_obsidian_markdown(article)
+    assert "第一段完整论述包含数字 42 和 APIName。" in markdown
+    assert "第二段继续原始论证，不生成总结。" in markdown
+    assert "**讲者内容**" not in markdown
+    assert "<!-- video2doc-sources:" not in markdown
 
 
 def test_obsidian_export_is_atomic_relative_and_renames_conflicts(tmp_path: Path) -> None:

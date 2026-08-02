@@ -64,7 +64,7 @@
 
 ## 6. 结果检查
 
-最终 Markdown 应有 YAML frontmatter、媒体来源、时长、模型/配置、正文、语音或字幕、画面文字、相对图片和追溯信息。成品默认不显示媒体时间戳，也不写入生成时间字段；原始 JSON/SRT 仍保留时间信息。附件和 `.data` sidecar 应与 Markdown 同名成组存在。
+最终 Markdown 应有 YAML frontmatter、媒体来源、时长、模型/配置、一篇连续完整正文、相对图片和追溯信息。启用文本整理时，完整正文一次性提交给模型，不会按 ASR segment 分批生成；成品正文不应重复出现“讲者内容”标签或逐段来源注释。成品默认不显示媒体时间戳，也不写入生成时间字段；原始 JSON/SRT、Document 原始块和 source_id 仍保留时间与来源信息。附件和 `.data` sidecar 应与 Markdown 同名成组存在。
 
 如结果不符合预期，优先在任务详情检查：
 

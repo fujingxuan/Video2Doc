@@ -687,7 +687,9 @@ def test_database_worker_runs_ocr_fusion_stages_and_serves_traceable_artifacts(
     assert completed["document_path"] and Path(completed["document_path"]).is_file()
     assert completed["export_path"] and Path(completed["export_path"]).is_file()
     markdown = Path(completed["export_path"]).read_text(encoding="utf-8")
-    assert "画面文字（OCR）" in markdown
+    assert "画面标题" in markdown
+    assert "画面文字（OCR）" not in markdown
+    assert "**讲者内容**" not in markdown
     assert "frame_000000" in markdown
     assert client.get(f"/api/v1/tasks/{task_id}/document").status_code == 200
     assert client.get(f"/api/v1/tasks/{task_id}/markdown").status_code == 200

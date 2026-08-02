@@ -222,7 +222,8 @@ def test_health_models_profiles_settings_and_immutable_snapshot(
     task_id = created.json()[0]["id"]
     snapshot_before = client.get(f"/api/v1/tasks/{task_id}/snapshot").json()
     assert snapshot_before["schema_version"] == 6
-    assert snapshot_before["processing"]["prompt_version"] == "faithful-edit-v1"
+    assert snapshot_before["processing"]["prompt_version"] == "faithful-article-v1"
+    assert snapshot_before["text_processing"]["timeout_seconds"] == 3600.0
     assert snapshot_before["processing"]["markdown_template_version"] == "obsidian-v1"
     assert snapshot_before["export"]["conflict_policy"] == "rename"
     assert snapshot_before["export"]["keep_json_sidecar"] is True

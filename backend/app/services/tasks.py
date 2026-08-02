@@ -596,7 +596,7 @@ class TaskService:
                 ),
                 "model": models["text_processing"],
                 "enabled": bool(processing["text_edit_enabled"]),
-                "timeout_seconds": 600.0,
+                "timeout_seconds": get_settings().text_request_timeout_seconds,
                 "prompt_version": processing["prompt_version"],
                 "minimum_length_ratio": processing["faithfulness_min_length_ratio"],
                 "formula_symbol_ratio": processing["faithfulness_formula_symbol_ratio"],

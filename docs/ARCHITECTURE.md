@@ -198,13 +198,13 @@ OCR/帧事件按可配置时间窗口关联附近 ASR segment，所有事件按�
 
 `Document`、`DocumentSection`、`DocumentBlock`、`TimestampAnchor` 和 `SourceReference` 构成版本化中间表示。块类型包括 transcript、visual_text、image、code 和 quote。每个块至少有一个来源引用，来源可定位到 ASR segment、OCR event、frame、原始响应和媒体时间。
 
-无文本模型时，Builder 仍按时间构建自然段和描述性分节，并列保留语音、画面文字与关联图片。可选 `FaithfulTextEditor` 按块发送严格 JSON，请求温度为 0，要求返回完整 block_id、source_ids 和 edited_text，不允许自由生成整篇文章。
+Builder 先按时间构建带完整来源引用的原始块，并把这一版本保存为 `document.original.json`。可选 `FaithfulTextEditor` 随后把全部可编辑文本按原始顺序合并为一个 `source_text`，在单次、非分批请求中交给文本模型；模型只返回一个 `article_markdown`，形成可直接阅读的连续完整文章。无文本模型或模型回退时，也会把完整原文聚合为连续文章，而不是逐 ASR segment 渲染。
 
-验证器检查来源集合、数字、专有词形、代码标记、公式符号、文本长度和块顺序。响应缺块、增块、来源丢失、结构错误或明显压缩时，整个编辑响应被拒绝，Document 保留原文；原文、候选文本、模型、提示词版本、diff、验证指标、原始响应引用和回退原因写入 `text_edit.json`。
+最终文章块由应用确定性继承所有原始文本块的来源引用；模型无需回显成千上万个 block/source ID。验证器对完整原文与完整候选文章检查数字、专有词形、代码标记、公式符号和文本长度。响应结构错误或明显压缩时，整个编辑响应被拒绝，Document 使用连续原文文章；原文、候选文章、原始 block/source 映射、模型、提示词版本、diff、验证指标、原始响应引用和回退原因写入文本整理产物。
 
 ## 11. Markdown 与 Obsidian 导出
 
-Renderer 从 Document IR 生成 YAML frontmatter、媒体来源、模型/配置、按时间正文、说话内容、画面文字、相对图片、来源引用和可折叠追溯附录。URL 时间戳仅在来源平台支持时生成跳转；本地文件只显示时间戳和结构化来源，不伪造协议链接。
+Renderer 从 Document IR 生成 YAML frontmatter、媒体来源、模型/配置、连续完整正文、相对图片和可折叠追溯附录。正文不再插入逐 segment 的“讲者内容”标签或来源注释；原始分块、时间戳和 source_id 保留在 `document.original.json`、最终 Document 聚合来源以及 sidecar 中。URL 时间戳仅在追溯信息需要且来源平台支持时生成跳转；本地文件不伪造协议链接。
 
 Exporter 先在 Inbox 内创建隐藏临时目录，复制并重命名图片，生成 Markdown、document/timeline/sources sidecar 和可选字幕/转写；全部成功后才把同一 bundle 提交到最终路径。取消或失败删除 stage，并在 overwrite 模式下恢复备份。冲突策略为 rename、fail 或 overwrite，默认 rename。最终 Markdown 不引用任务临时绝对路径。
 

@@ -14,7 +14,11 @@ from app.core.credentials import resolve_model_credential
 from app.core.secrets import SecretStorageError
 from app.db.session import SessionLocal
 from app.documents.builder import build_document
-from app.documents.editor import FaithfulTextEditor, PROMPT_VERSION
+from app.documents.editor import (
+    FaithfulTextEditor,
+    PROMPT_VERSION,
+    build_full_article_document,
+)
 from app.documents.exporter import ExportConfig, ExportResult, export_document_bundle
 from app.documents.faithfulness import validate_document_faithfulness
 from app.documents.ir import Document
@@ -1121,7 +1125,7 @@ async def _run_document_pipeline(
 
     tracker.start(
         "TEXT_EDIT",
-        message="正在执行受约束的忠实文本整理或无模型回退",
+        message="正在把完整正文作为单次请求执行忠实文章整理",
         input_artifacts=[str(original_document_path)],
     )
     text_config = snapshot.get("text_processing")
@@ -1161,11 +1165,15 @@ async def _run_document_pipeline(
                 ),
             )
         edit_raw_path = paths.output / "text_edit" / f"attempt_{attempt:04d}_provider_raw.json"
+        text_timeout_seconds = max(
+            get_settings().text_request_timeout_seconds,
+            float(text_config.get("timeout_seconds") or 0.0),
+        )
         document, edit_run = await FaithfulTextEditor(
             base_url=base_url,
             api_key=api_key,
             model=model,
-            timeout_seconds=float(text_config.get("timeout_seconds") or 600.0),
+            timeout_seconds=text_timeout_seconds,
         ).edit(
             document,
             raw_path=edit_raw_path,
@@ -1174,7 +1182,9 @@ async def _run_document_pipeline(
             cancel_check=cancelled,
         )
         edit_run["provider"] = str(text_config.get("provider") or "oneapi-openai-compatible")
+        edit_run["timeout_seconds"] = text_timeout_seconds
     else:
+        document = build_full_article_document(document)
         edit_run = {
             "schema_version": 1,
             "provider": "none",
@@ -1188,6 +1198,7 @@ async def _run_document_pipeline(
             "accepted": True,
             "fallback_used": False,
             "reason": "no_model_mode",
+            "mode": "full_article",
             "elapsed_seconds": 0.0,
             "block_runs": [],
         }
@@ -1238,12 +1249,12 @@ async def _run_document_pipeline(
     )
     tracker.complete(
         message=(
-            "文本整理已通过忠实性校验"
+            "完整文章整理已通过忠实性校验"
             if edit_enabled and edit_run.get("accepted")
             else (
-                "文本模型响应被拒绝，已忠实回退到未整理文本"
+                "完整文章整理未被接受，已回退到连续原文文章"
                 if edit_enabled
-                else "未启用文本模型，已使用确定性忠实整理"
+                else "未启用文本模型，已生成连续原文文章"
             )
         ),
         output_artifacts=[

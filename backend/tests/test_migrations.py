@@ -57,7 +57,7 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
             ).fetchall()
         }
 
-    assert revision == ("0010_task_cache_cleanup",)
+    assert revision == ("0011_full_article_text_edit",)
     assert {
         "frames_manifest_path",
         "ocr_timeline_path",
