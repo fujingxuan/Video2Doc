@@ -380,24 +380,29 @@ def _transcribe_whisper(audio_path: Path, model_name: str, language: str | None,
                 },
             }
         )
+    text = "".join(item["text"] for item in segments).strip()
     return {
         "model": model_name,
         "provider": "faster-whisper",
         "language": info.language,
-        "text": "".join(item["text"] for item in segments).strip(),
+        "text": text,
         "segments": segments,
         "words": words,
         "duration": info.duration,
+        "no_speech": not bool(text),
     }
 
 
 def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) -> dict[str, Any]:
     model = runtime.load(model_name)
-    result = model.transcribe(
+    results = model.transcribe(
         audio=str(audio_path),
         language=_qwen_language(language),
         return_time_stamps=True,
-    )[0]
+    )
+    if not results:
+        raise RuntimeError("Qwen3-ASR returned no result")
+    result = results[0]
     # qwen-asr returns ForcedAlignItem objects directly in ``time_stamps`` for one
     # transcription result.  Indexing once more would keep only the first item and
     # then attempt to iterate that dataclass.
@@ -406,10 +411,11 @@ def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) ->
         {"start": item.start_time, "end": item.end_time, "text": item.text, "confidence": None}
         for item in raw_timestamps
     ]
+    text = str(result.text or "").strip()
     segment = {
         "start": words[0]["start"] if words else None,
         "end": words[-1]["end"] if words else None,
-        "text": result.text,
+        "text": text,
         "confidence": None,
         "words": words,
     }
@@ -417,10 +423,11 @@ def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) ->
         "model": model_name,
         "provider": "qwen-asr-transformers",
         "language": result.language,
-        "text": result.text,
-        "segments": [segment],
-        "words": words,
+        "text": text,
+        "segments": [segment] if text else [],
+        "words": words if text else [],
         "duration": segment["end"],
+        "no_speech": not bool(text),
     }
 
 
@@ -437,8 +444,6 @@ def _transcribe_firered(audio_path: Path, model_name: str) -> dict[str, Any]:
         raise RuntimeError("FireRedASR2-AED returned no result")
     record = records[0]
     text = str(record.get("text") or "").strip()
-    if not text:
-        raise RuntimeError("FireRedASR2-AED returned no text")
     words = [
         {
             "start": float(item[1]),
@@ -462,10 +467,11 @@ def _transcribe_firered(audio_path: Path, model_name: str) -> dict[str, Any]:
         "provider": "fireredasr2s-official-python",
         "language": None,
         "text": text,
-        "segments": [segment],
-        "words": words,
+        "segments": [segment] if text else [],
+        "words": words if text else [],
         "duration": record.get("dur_s"),
         "raw_records": records,
+        "no_speech": not bool(text),
     }
 
 
@@ -479,6 +485,7 @@ def _transcribe_mock(audio_path: Path, model_name: str, language: str | None) ->
         "segments": [{"start": 0.0, "end": 1.0, "text": "mock transcription", "confidence": None, "words": []}],
         "words": [],
         "duration": 1.0,
+        "no_speech": False,
     }
 
 

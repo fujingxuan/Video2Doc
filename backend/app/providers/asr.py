@@ -770,7 +770,12 @@ def normalize_asr_response(
                 words=tuple(_normalize_words(payload.get("words"))),
             )
         )
-    if not segments:
+    explicit_no_speech = (
+        payload.get("no_speech") is True
+        and not optional_text(payload.get("text"))
+        and raw_segments == []
+    )
+    if not segments and not explicit_no_speech:
         raise PipelineError("ASR_PROVIDER_FAILED", "ASR 未返回任何可用转写文本")
     return AsrResult(
         provider=provider,
@@ -815,6 +820,16 @@ def combine_asr_results(
     combined: list[AsrSegment] = []
     for result in sorted(results, key=lambda item: item.chunk_index):
         chunk = chunk_map[result.chunk_index]
+        if not result.segments:
+            diagnostics.append(
+                {
+                    "type": "no_speech_chunk",
+                    "chunk_index": result.chunk_index,
+                    "source_start_seconds": chunk.start_time,
+                    "source_end_seconds": chunk.end_time,
+                }
+            )
+            continue
         for segment_index, segment in enumerate(result.segments):
             candidate = _map_segment_to_global(segment, chunk.start_time)
             candidate = _deduplicate_boundary_segment(
@@ -1212,6 +1227,7 @@ def save_transcript_artifacts(
     language: str | None,
     chunk_count: int,
     merge_diagnostics: list[dict[str, Any]] | None = None,
+    provider_responses: list[str] | None = None,
 ) -> dict[str, str]:
     normalized_path = paths.asr / "normalized.json"
     raw_index_path = paths.asr / "raw.json"
@@ -1233,7 +1249,9 @@ def save_transcript_artifacts(
         {
             **payload,
             "provider_responses": sorted(
-                {segment.raw_response_reference for segment in segments}
+                provider_responses
+                if provider_responses is not None
+                else {segment.raw_response_reference for segment in segments}
             ),
         },
     )

@@ -768,13 +768,17 @@ async def run_real_pipeline(task_id: int) -> None:
                 paths.chunks / "manifest.json", chunk.index, "COMPLETED", attempt
             )
             tracker.progress(
-                (index + 1) / len(chunks), f"ASR 已完成 {index + 1}/{len(chunks)} 个分块"
+                (index + 1) / len(chunks),
+                f"ASR 已完成 {index + 1}/{len(chunks)} 个分块"
+                + ("（未检测到语音）" if not result.segments else ""),
             )
+        no_speech_chunks = sum(not item.segments for item in results)
         tracker.complete(
             message=(
                 f"链接字幕导入完成，共 {len(results[0].segments)} 条"
                 if subtitle_mode
                 else f"ASR 分块识别完成，共 {len(results)} 块"
+                + (f"，其中 {no_speech_chunks} 块未检测到语音" if no_speech_chunks else "")
             ),
             output_artifacts=[result.raw_response_reference for result in results],
         )
@@ -802,6 +806,7 @@ async def run_real_pipeline(task_id: int) -> None:
             language=next((item.language for item in results if item.language), None),
             chunk_count=len(chunks),
             merge_diagnostics=merge_diagnostics,
+            provider_responses=[item.raw_response_reference for item in results],
         )
         tracker.complete(
             message=f"已按原媒体时间轴合并 {len(segments)} 个分段",
