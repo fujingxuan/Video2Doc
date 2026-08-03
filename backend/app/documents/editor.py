@@ -9,7 +9,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
-from urllib.parse import urlparse
 
 import httpx
 
@@ -23,7 +22,10 @@ from app.documents.ir import (
     TimestampAnchor,
 )
 from app.providers.asr import redact_sensitive
-from app.providers.gateways import trust_environment_proxy
+from app.providers.gateways import (
+    openai_chat_completions_endpoint,
+    trust_environment_proxy,
+)
 from app.storage.workspace import write_json
 
 
@@ -37,6 +39,7 @@ FALLBACK_GATEWAY_ERRORS = {
     "TEXT_GATEWAY_AUTH_FAILED",
     "TEXT_GATEWAY_RETRYABLE",
     "TEXT_GATEWAY_FAILED",
+    "TEXT_GATEWAY_INVALID_RESPONSE",
 }
 
 
@@ -51,7 +54,7 @@ class FaithfulTextEditor:
         timeout_seconds: float = DEFAULT_TEXT_TIMEOUT_SECONDS,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        self.endpoint = _chat_completions_endpoint(base_url)
+        self.endpoint = openai_chat_completions_endpoint(base_url)
         self.api_key = api_key
         self.model = model
         self.timeout_seconds = timeout_seconds
@@ -218,20 +221,35 @@ class FaithfulTextEditor:
         payload: dict[str, Any],
         cancel_check: EditCancelCheck | None,
     ) -> dict[str, Any]:
-        async def send() -> httpx.Response:
+        async def send() -> dict[str, Any]:
             try:
                 async with httpx.AsyncClient(
                     timeout=httpx.Timeout(self.timeout_seconds),
                     transport=self.transport,
                     trust_env=trust_environment_proxy(self.endpoint),
                 ) as client:
-                    return await client.post(
+                    result = await _send_chat_completion(
+                        client,
                         self.endpoint,
-                        headers=(
-                            {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-                        ),
-                        json=payload,
+                        payload,
+                        api_key=self.api_key,
+                        streaming=True,
                     )
+                    if result is not None:
+                        return result
+                    fallback = await _send_chat_completion(
+                        client,
+                        self.endpoint,
+                        payload,
+                        api_key=self.api_key,
+                        streaming=False,
+                    )
+                    if fallback is None:  # pragma: no cover - non-stream requests never retry.
+                        raise PipelineError(
+                            "TEXT_GATEWAY_FAILED",
+                            "文本整理服务不支持当前请求模式",
+                        )
+                    return fallback
             except httpx.TimeoutException as exc:
                 raise PipelineError(
                     "TEXT_GATEWAY_TIMEOUT",
@@ -260,28 +278,7 @@ class FaithfulTextEditor:
                 except (asyncio.CancelledError, PipelineError):
                     pass
             raise
-        if response.status_code in {401, 403}:
-            raise PipelineError("TEXT_GATEWAY_AUTH_FAILED", "文本整理服务认证失败")
-        if response.status_code == 429 or response.status_code >= 500:
-            raise PipelineError(
-                "TEXT_GATEWAY_RETRYABLE",
-                f"文本整理服务暂时不可用（HTTP {response.status_code}）",
-                retryable=True,
-            )
-        if response.status_code >= 400:
-            raise PipelineError(
-                "TEXT_GATEWAY_FAILED",
-                f"文本整理服务请求失败（HTTP {response.status_code}）",
-            )
-        try:
-            data = response.json()
-        except json.JSONDecodeError as exc:
-            raise PipelineError(
-                "TEXT_GATEWAY_INVALID_RESPONSE", "文本整理服务返回无效 JSON"
-            ) from exc
-        if not isinstance(data, dict):
-            raise PipelineError("TEXT_GATEWAY_INVALID_RESPONSE", "文本整理服务返回格式错误")
-        return data
+        return response
 
 
 def build_full_article_document(
@@ -328,11 +325,7 @@ def build_full_article_document(
             "source_block_count": len(editable),
         },
     )
-    images = [
-        block.model_copy(deep=True)
-        for block in all_blocks
-        if block.block_type == "image"
-    ]
+    images = [block.model_copy(deep=True) for block in all_blocks if block.block_type == "image"]
     article_section = DocumentSection(
         section_id="article-section-0001",
         title="完整正文",
@@ -418,19 +411,110 @@ async def _ensure_active(cancel_check: EditCancelCheck | None) -> None:
         raise PipelineCancelled(stage="EDIT_TEXT_OPTIONAL")
 
 
-def _chat_completions_endpoint(base_url: str) -> str:
-    base = base_url.strip().rstrip("/")
-    parsed = urlparse(base)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError("Text Gateway Base URL must be an absolute HTTP(S) URL")
-    if parsed.username or parsed.password:
-        raise ValueError("Text Gateway Base URL cannot contain credentials")
-    path = parsed.path.rstrip("/")
-    if path.endswith("/chat/completions"):
-        return base
-    compatible_roots = ("/v1", "/v3", "/v4", "/v1beta/openai")
-    suffix = "/chat/completions" if path.endswith(compatible_roots) else "/v1/chat/completions"
-    return f"{base}{suffix}"
+def _raise_gateway_status(response: httpx.Response) -> None:
+    if response.status_code in {401, 403}:
+        raise PipelineError("TEXT_GATEWAY_AUTH_FAILED", "文本整理服务认证失败")
+    if response.status_code == 429 or response.status_code >= 500:
+        raise PipelineError(
+            "TEXT_GATEWAY_RETRYABLE",
+            f"文本整理服务暂时不可用（HTTP {response.status_code}）",
+            retryable=True,
+        )
+    if response.status_code >= 400:
+        raise PipelineError(
+            "TEXT_GATEWAY_FAILED",
+            f"文本整理服务请求失败（HTTP {response.status_code}）",
+        )
+
+
+async def _send_chat_completion(
+    client: httpx.AsyncClient,
+    endpoint: str,
+    payload: dict[str, Any],
+    *,
+    api_key: str,
+    streaming: bool,
+) -> dict[str, Any] | None:
+    request_payload = {**payload, "stream": True} if streaming else payload
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    async with client.stream(
+        "POST",
+        endpoint,
+        headers=headers,
+        json=request_payload,
+    ) as response:
+        if streaming and response.status_code in {400, 422}:
+            await response.aread()
+            if _streaming_not_supported(response):
+                return None
+        _raise_gateway_status(response)
+        content_type = response.headers.get("content-type", "").casefold()
+        if "text/event-stream" in content_type:
+            return await _consume_chat_completion_stream(response)
+        await response.aread()
+        return _json_response_payload(response)
+
+
+def _streaming_not_supported(response: httpx.Response) -> bool:
+    detail = response.text.casefold()
+    return "stream" in detail and any(
+        marker in detail for marker in ("unsupported", "not support", "not allowed", "不支持")
+    )
+
+
+def _json_response_payload(response: httpx.Response) -> dict[str, Any]:
+    try:
+        data = response.json()
+    except json.JSONDecodeError as exc:
+        raise PipelineError("TEXT_GATEWAY_INVALID_RESPONSE", "文本整理服务返回无效 JSON") from exc
+    if not isinstance(data, dict):
+        raise PipelineError("TEXT_GATEWAY_INVALID_RESPONSE", "文本整理服务返回格式错误")
+    return data
+
+
+async def _consume_chat_completion_stream(response: httpx.Response) -> dict[str, Any]:
+    content_parts: list[str] = []
+    event_count = 0
+    async for line in response.aiter_lines():
+        if not line.startswith("data:"):
+            continue
+        event_data = line.removeprefix("data:").strip()
+        if not event_data or event_data == "[DONE]":
+            continue
+        event_count += 1
+        try:
+            event = json.loads(event_data)
+        except json.JSONDecodeError as exc:
+            raise PipelineError(
+                "TEXT_GATEWAY_INVALID_RESPONSE",
+                "文本整理服务返回了无效的流式 JSON",
+            ) from exc
+        if not isinstance(event, dict):
+            continue
+        if event.get("error"):
+            raise PipelineError("TEXT_GATEWAY_FAILED", "文本整理服务流式响应报告错误")
+        choices = event.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            continue
+        choice = choices[0]
+        message = choice.get("delta") or choice.get("message") or {}
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            content_parts.append(content)
+        elif isinstance(content, list):
+            content_parts.extend(
+                str(part.get("text"))
+                for part in content
+                if isinstance(part, dict) and isinstance(part.get("text"), str)
+            )
+    if event_count == 0 or not content_parts:
+        raise PipelineError(
+            "TEXT_GATEWAY_INVALID_RESPONSE",
+            "文本整理服务未返回有效的流式内容",
+        )
+    return {"choices": [{"message": {"content": "".join(content_parts)}}]}
 
 
 def _default_prompt_path() -> Path:

@@ -32,6 +32,21 @@ def gateway_endpoint(base_url: str, suffix: str) -> str:
     return f"{base}{suffix}"
 
 
+def openai_chat_completions_endpoint(base_url: str) -> str:
+    base = base_url.strip().rstrip("/")
+    parsed = urlparse(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Text Gateway Base URL must be an absolute HTTP(S) URL")
+    if parsed.username or parsed.password:
+        raise ValueError("Text Gateway Base URL cannot contain credentials")
+    path = parsed.path.rstrip("/")
+    if path.endswith("/chat/completions"):
+        return base
+    compatible_roots = ("/v1", "/v3", "/v4", "/v1beta/openai")
+    suffix = "/chat/completions" if path.endswith(compatible_roots) else "/v1/chat/completions"
+    return f"{base}{suffix}"
+
+
 def trust_environment_proxy(url: str) -> bool:
     hostname = (urlparse(url).hostname or "").casefold()
     return hostname not in {"127.0.0.1", "localhost", "::1"}
@@ -59,7 +74,9 @@ async def probe_gateway(
         if gateway.protocol == "dashscope-fun-asr-websocket":
             parsed = urlparse(gateway.base_url)
             if parsed.scheme != "wss" or not parsed.netloc:
-                return GatewayProbeResult("INVALID_CONFIG", "DashScope 地址必须使用 wss://", checked_at)
+                return GatewayProbeResult(
+                    "INVALID_CONFIG", "DashScope 地址必须使用 wss://", checked_at
+                )
             headers = {"Authorization": f"Bearer {secret}", "user-agent": "Video2Doc/0.3"}
             workspace_id = os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip()
             if workspace_id:
@@ -115,9 +132,7 @@ async def discover_gateway_models(
     if gateway.protocol == "dashscope-fun-asr-websocket":
         return []
     if gateway.protocol == "paddlex-layout-parsing-v1":
-        model_name = str(
-            (gateway.settings or {}).get("model_name") or "PaddleOCR-VL-1.6-0.9B"
-        )
+        model_name = str((gateway.settings or {}).get("model_name") or "PaddleOCR-VL-1.6-0.9B")
         return [
             {
                 "model_name": model_name,
@@ -131,9 +146,7 @@ async def discover_gateway_models(
                     "reading_order": True,
                     "markdown": True,
                     "confidence": False,
-                    "managed_lifecycle": bool(
-                        (gateway.settings or {}).get("managed_lifecycle")
-                    ),
+                    "managed_lifecycle": bool((gateway.settings or {}).get("managed_lifecycle")),
                 },
             }
         ]
@@ -151,7 +164,11 @@ async def discover_gateway_models(
         response = await client.get(endpoint, headers=headers)
     response.raise_for_status()
     payload = response.json()
-    raw_models = payload.get("data", payload.get("models", payload)) if isinstance(payload, dict) else payload
+    raw_models = (
+        payload.get("data", payload.get("models", payload))
+        if isinstance(payload, dict)
+        else payload
+    )
     if not isinstance(raw_models, list):
         raise ValueError("Gateway model discovery response must contain a list")
     normalized: list[dict[str, Any]] = []
@@ -159,12 +176,16 @@ async def discover_gateway_models(
         if isinstance(item, str):
             normalized.append({"model_name": item, "display_name": item})
         elif isinstance(item, dict):
-            model_name = str(item.get("id") or item.get("model_name") or item.get("name") or "").strip()
+            model_name = str(
+                item.get("id") or item.get("model_name") or item.get("name") or ""
+            ).strip()
             if model_name:
                 normalized.append(
                     {
                         "model_name": model_name,
-                        "display_name": str(item.get("display_name") or item.get("name") or model_name),
+                        "display_name": str(
+                            item.get("display_name") or item.get("name") or model_name
+                        ),
                         "capabilities": item.get("capabilities") or {},
                     }
                 )

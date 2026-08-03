@@ -182,15 +182,7 @@ async def test_text_editor_accepts_structured_faithful_response(tmp_path: Path) 
         article = f"### 课程正文\n\n{input_json['source_text'].replace(chr(10), ' ')}"
         return httpx.Response(
             200,
-            json={
-                "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps({"article_markdown": article})
-                        }
-                    }
-                ]
-            },
+            json={"choices": [{"message": {"content": json.dumps({"article_markdown": article})}}]},
         )
 
     editor = FaithfulTextEditor(
@@ -220,6 +212,90 @@ async def test_text_editor_accepts_structured_faithful_response(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_text_editor_consumes_streaming_chat_completion(tmp_path: Path) -> None:
+    document = sample_document(tmp_path)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        request_json = json.loads(request.content)
+        assert request_json["stream"] is True
+        input_json = json.loads(request_json["messages"][1]["content"])
+        article = f"### 流式正文\n\n{input_json['source_text'].replace(chr(10), ' ')}"
+        content = json.dumps({"article_markdown": article}, ensure_ascii=False)
+        midpoint = len(content) // 2
+        events = [
+            {"choices": [{"delta": {"content": content[:midpoint]}}]},
+            {"choices": [{"delta": {"content": content[midpoint:]}}]},
+        ]
+        body = "".join(f"data: {json.dumps(event, ensure_ascii=False)}\n\n" for event in events)
+        body += "data: [DONE]\n\n"
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+            content=body.encode("utf-8"),
+        )
+
+    editor = FaithfulTextEditor(
+        base_url="http://127.0.0.1:8800/v1",
+        api_key="secret",
+        model="streaming-model",
+        transport=httpx.MockTransport(handler),
+    )
+    edited, run = await editor.edit(document, raw_path=tmp_path / "stream.json")
+
+    assert run["accepted"] is True
+    assert "### 流式正文" in next(
+        block.display_text for block in edited.all_blocks() if block.block_type != "image"
+    )
+
+
+@pytest.mark.asyncio
+async def test_text_editor_retries_non_stream_when_gateway_rejects_streaming(
+    tmp_path: Path,
+) -> None:
+    document = sample_document(tmp_path)
+    requests: list[dict] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        request_json = json.loads(request.content)
+        requests.append(request_json)
+        if request_json.get("stream") is True:
+            return httpx.Response(
+                400,
+                json={"error": {"message": "stream is not supported"}},
+            )
+        input_json = json.loads(request_json["messages"][1]["content"])
+        article = f"### 非流式正文\n\n{input_json['source_text'].replace(chr(10), ' ')}"
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps({"article_markdown": article}, ensure_ascii=False)
+                        }
+                    }
+                ]
+            },
+        )
+
+    editor = FaithfulTextEditor(
+        base_url="http://127.0.0.1:8800/v1",
+        api_key="secret",
+        model="non-streaming-model",
+        transport=httpx.MockTransport(handler),
+    )
+    edited, run = await editor.edit(document, raw_path=tmp_path / "non-stream.json")
+
+    assert run["accepted"] is True
+    assert len(requests) == 2
+    assert requests[0]["stream"] is True
+    assert "stream" not in requests[1]
+    assert "### 非流式正文" in next(
+        block.display_text for block in edited.all_blocks() if block.block_type != "image"
+    )
+
+
+@pytest.mark.asyncio
 async def test_text_editor_rejects_shortened_response_and_falls_back(tmp_path: Path) -> None:
     document = sample_document(tmp_path)
 
@@ -228,11 +304,7 @@ async def test_text_editor_rejects_shortened_response_and_falls_back(tmp_path: P
         assert "source_text" in input_json
         return httpx.Response(
             200,
-            json={
-                "choices": [
-                    {"message": {"content": json.dumps({"article_markdown": "摘要"})}}
-                ]
-            },
+            json={"choices": [{"message": {"content": json.dumps({"article_markdown": "摘要"})}}]},
         )
 
     editor = FaithfulTextEditor(

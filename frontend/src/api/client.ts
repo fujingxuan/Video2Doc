@@ -5,6 +5,7 @@ import type {
   GatewayConfig,
   GatewayModel,
   GatewayType,
+  ModelHealth,
   ModelConfig,
   ProcessingProfile,
   QueueState,
@@ -68,6 +69,8 @@ export const api = {
     request<ModelConfig>("/models", { method: "POST", body: JSON.stringify(payload) }),
   updateModel: (id: number, payload: Record<string, unknown>) =>
     request<ModelConfig>(`/models/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  checkModel: (id: number) =>
+    request<ModelHealth>(`/models/${id}/health`, { method: "POST" }),
   deleteModel: (id: number) => request<void>(`/models/${id}`, { method: "DELETE" }),
   gateways: (gatewayType?: GatewayType) =>
     request<GatewayConfig[]>(`/gateways${gatewayType ? `?gateway_type=${gatewayType}` : ""}`),
@@ -94,6 +97,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
+  checkGatewayModel: (id: number) =>
+    request<ModelHealth>(`/gateway-models/${id}/health`, { method: "POST" }),
   deleteGatewayModel: (id: number) =>
     request<void>(`/gateway-models/${id}`, { method: "DELETE" }),
   profiles: () => request<ProcessingProfile[]>("/profiles"),

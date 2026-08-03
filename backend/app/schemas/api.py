@@ -79,9 +79,7 @@ class GatewayUpdate(BaseModel):
 
     @field_validator("settings")
     @classmethod
-    def settings_do_not_contain_secrets(
-        cls, value: dict[str, Any] | None
-    ) -> dict[str, Any] | None:
+    def settings_do_not_contain_secrets(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
         if value is not None:
             _reject_sensitive_metadata(value, "settings")
         return value
@@ -183,6 +181,14 @@ class GatewayHealthRead(BaseModel):
     status: str
     detail: str | None = None
     checked_at: datetime
+
+
+class ModelHealthRead(BaseModel):
+    model_id: int
+    status: str
+    detail: str
+    checked_at: datetime
+    latency_ms: int
 
 
 def _validate_gateway_base_url(value: str) -> str:
@@ -404,16 +410,12 @@ class SettingsUpdate(BaseModel):
     default_text_model_name: str | None = Field(default=None, max_length=300)
     text_prompt_version: str | None = Field(default=None, max_length=100)
     faithfulness_min_length_ratio: float | None = Field(default=None, ge=0.5, le=1.0)
-    faithfulness_formula_symbol_ratio: float | None = Field(
-        default=None, ge=0.5, le=1.0
-    )
+    faithfulness_formula_symbol_ratio: float | None = Field(default=None, ge=0.5, le=1.0)
     markdown_template_version: str | None = Field(default=None, max_length=100)
     image_insertion_policy: str | None = Field(default=None, max_length=100)
     image_min_gap_seconds: float | None = Field(default=None, ge=0, le=3600)
     export_filename_template: str | None = Field(default=None, max_length=300)
-    export_attachment_directory_template: str | None = Field(
-        default=None, max_length=300
-    )
+    export_attachment_directory_template: str | None = Field(default=None, max_length=300)
     export_data_directory_template: str | None = Field(default=None, max_length=300)
     export_conflict_policy: Literal["rename", "fail", "overwrite"] | None = None
     export_keep_json_sidecar: bool | None = None

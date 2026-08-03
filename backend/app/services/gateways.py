@@ -12,6 +12,7 @@ from app.core.credentials import credential_is_configured, credential_source
 from app.core.secrets import SecretStorageError, protect_secret
 from app.models import GatewayConfig, GatewayModel
 from app.providers.gateways import discover_gateway_models, probe_gateway
+from app.providers.model_probe import probe_gateway_model
 from app.schemas.api import (
     GatewayCreate,
     GatewayHealthRead,
@@ -20,6 +21,7 @@ from app.schemas.api import (
     GatewayModelUpdate,
     GatewayRead,
     GatewayUpdate,
+    ModelHealthRead,
     is_sensitive_metadata_key,
 )
 
@@ -70,7 +72,12 @@ class GatewayService:
         elif "secret_env_name" in values and values["secret_env_name"]:
             item.secret_ciphertext = None
         for key, value in values.items():
-            if isinstance(value, str) and key in {"name", "protocol", "base_url", "secret_env_name"}:
+            if isinstance(value, str) and key in {
+                "name",
+                "protocol",
+                "base_url",
+                "secret_env_name",
+            }:
                 value = value.strip()
             setattr(item, key, value)
         self._commit_unique("A gateway with that name already exists")
@@ -83,7 +90,9 @@ class GatewayService:
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
-            raise ConflictError("Gateway or its models are referenced by a processing profile") from exc
+            raise ConflictError(
+                "Gateway or its models are referenced by a processing profile"
+            ) from exc
 
     async def health(self, gateway_id: int) -> GatewayHealthRead:
         item = self._gateway(gateway_id)
@@ -93,8 +102,6 @@ class GatewayService:
         )
         item.health_status = result.status
         item.last_checked_at = result.checked_at
-        for model in item.models:
-            model.health_status = result.status
         self.session.commit()
         return GatewayHealthRead(
             gateway_id=item.id,
@@ -107,9 +114,7 @@ class GatewayService:
         gateway = self._gateway(gateway_id)
         discovered = await discover_gateway_models(
             gateway,
-            timeout_seconds=_numeric_gateway_setting(
-                gateway, "timeout_seconds", 15.0, 1.0, 600.0
-            ),
+            timeout_seconds=_numeric_gateway_setting(gateway, "timeout_seconds", 15.0, 1.0, 600.0),
         )
         existing = {item.model_name: item for item in gateway.models}
         for raw in discovered:
@@ -147,6 +152,24 @@ class GatewayService:
 
     def get_model(self, model_id: int) -> GatewayModelRead:
         return _gateway_model_read(self._model(model_id))
+
+    async def health_model(self, model_id: int) -> ModelHealthRead:
+        item = self._model(model_id)
+        result = await probe_gateway_model(
+            item,
+            timeout_seconds=_numeric_gateway_setting(
+                item.gateway, "timeout_seconds", 30.0, 1.0, 30.0
+            ),
+        )
+        item.health_status = result.status
+        self.session.commit()
+        return ModelHealthRead(
+            model_id=item.id,
+            status=result.status,
+            detail=result.detail,
+            checked_at=result.checked_at,
+            latency_ms=result.latency_ms,
+        )
 
     def create_model(self, payload: GatewayModelCreate) -> GatewayModelRead:
         self._gateway(payload.gateway_id)
@@ -282,8 +305,10 @@ def _apply_discovered_capabilities(item: GatewayModel, capabilities: dict[str, A
             setattr(item, field, value)
         elif field in numeric_fields and isinstance(value, (int, float)) and value > 0:
             setattr(item, field, float(value))
-        elif field in list_fields and isinstance(value, list) and all(
-            isinstance(entry, str) for entry in value
+        elif (
+            field in list_fields
+            and isinstance(value, list)
+            and all(isinstance(entry, str) for entry in value)
         ):
             setattr(item, field, value)
 
@@ -553,8 +578,7 @@ def seed_default_gateways(session: Session) -> None:
         if gateway is None:
             gateway = GatewayConfig(**definition, created_at=now, updated_at=now)
             gateway.models = [
-                GatewayModel(**model, created_at=now, updated_at=now)
-                for model in model_definitions
+                GatewayModel(**model, created_at=now, updated_at=now) for model in model_definitions
             ]
             session.add(gateway)
             continue

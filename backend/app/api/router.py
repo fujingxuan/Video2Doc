@@ -23,6 +23,7 @@ from app.schemas.api import (
     GatewayUpdate,
     HealthRead,
     ModelCreate,
+    ModelHealthRead,
     ModelRead,
     ModelUpdate,
     ProfileCreate,
@@ -130,6 +131,17 @@ def update_gateway_model(
     return GatewayService(session).update_model(model_id, payload)
 
 
+@router.post(
+    "/gateway-models/{model_id}/health",
+    response_model=ModelHealthRead,
+    tags=["gateways"],
+)
+async def check_gateway_model_health(
+    model_id: int, session: Session = Depends(get_db)
+) -> ModelHealthRead:
+    return await GatewayService(session).health_model(model_id)
+
+
 @router.delete(
     "/gateway-models/{model_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["gateways"]
 )
@@ -172,6 +184,13 @@ def create_model(payload: ModelCreate, session: Session = Depends(get_db)) -> Mo
 @router.get("/models/{model_id}", response_model=ModelRead, tags=["models"])
 def get_model(model_id: int, session: Session = Depends(get_db)) -> ModelRead:
     return CatalogService(session).get_model(model_id)
+
+
+@router.post("/models/{model_id}/health", response_model=ModelHealthRead, tags=["models"])
+async def check_model_health(
+    model_id: int, session: Session = Depends(get_db)
+) -> ModelHealthRead:
+    return await CatalogService(session).health(model_id)
 
 
 @router.put("/models/{model_id}", response_model=ModelRead, tags=["models"])

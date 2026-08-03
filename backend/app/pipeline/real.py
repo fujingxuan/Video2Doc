@@ -340,9 +340,7 @@ async def run_real_pipeline(task_id: int) -> None:
                         technical_detail=exc.technical_detail or exc.user_message,
                     ) from exc
                 subtitle_mode = False
-                subtitle_fallback_message = (
-                    "未发现可用字幕，已自动切换到处理方案中的 ASR 模型"
-                )
+                subtitle_fallback_message = "未发现可用字幕，已自动切换到处理方案中的 ASR 模型"
                 tracker.progress(None, subtitle_fallback_message)
 
         acquisition = preflight_acquisition or _load_acquisition(acquisition_path)
@@ -392,9 +390,7 @@ async def run_real_pipeline(task_id: int) -> None:
         tracker.start(
             "MEDIA_PROBE",
             message=(
-                "正在探测音视频流"
-                if acquisition.media_available
-                else "正在读取平台媒体元数据"
+                "正在探测音视频流" if acquisition.media_available else "正在读取平台媒体元数据"
             ),
             input_artifacts=(
                 [acquisition.local_media_path]
@@ -1336,16 +1332,15 @@ async def _run_document_pipeline(
         edit_raw_path,
         edit_run,
     )
+    if edit_enabled and edit_run.get("accepted"):
+        edit_message = "完整文章整理已通过忠实性校验"
+    elif edit_enabled:
+        reason = str(edit_run.get("reason") or "未知原因").strip()
+        edit_message = f"完整文章整理未被接受，已回退到连续原文文章：{reason[:300]}"
+    else:
+        edit_message = "未启用文本模型，已生成连续原文文章"
     tracker.complete(
-        message=(
-            "完整文章整理已通过忠实性校验"
-            if edit_enabled and edit_run.get("accepted")
-            else (
-                "完整文章整理未被接受，已回退到连续原文文章"
-                if edit_enabled
-                else "未启用文本模型，已生成连续原文文章"
-            )
-        ),
+        message=edit_message,
         output_artifacts=[
             str(document_path),
             str(validation_path),

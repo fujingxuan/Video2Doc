@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
+from app.providers.gateways import GatewayProbeResult
+from app.providers.model_probe import ModelProbeResult
 from app.services.gateways import seed_default_gateways
 from tests.helpers import wait_for_status
 
@@ -42,6 +46,77 @@ def test_direct_credentials_are_encrypted_and_never_returned(client: TestClient)
     assert gateway["secret_configured"] is True
     assert secret not in gateway_response.text
     assert secret not in client.get("/api/v1/gateways").text
+
+
+def test_each_model_has_an_independent_connectivity_endpoint(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    checked_at = datetime.now(timezone.utc)
+
+    async def text_probe(model):
+        assert model.name == "connectivity-llm"
+        return ModelProbeResult("HEALTHY", "LLM probe ok", checked_at, 12)
+
+    monkeypatch.setattr("app.services.catalog.probe_text_model", text_probe)
+    llm = client.post(
+        "/api/v1/models",
+        json={
+            "name": "connectivity-llm",
+            "provider": "custom",
+            "base_url": "http://127.0.0.1:13001/v1",
+            "capabilities": ["TEXT_PROCESSING"],
+        },
+    ).json()
+    llm_health = client.post(f"/api/v1/models/{llm['id']}/health")
+    assert llm_health.status_code == 200, llm_health.text
+    assert llm_health.json() == {
+        "model_id": llm["id"],
+        "status": "HEALTHY",
+        "detail": "LLM probe ok",
+        "checked_at": checked_at.isoformat().replace("+00:00", "Z"),
+        "latency_ms": 12,
+    }
+
+    gateway = client.post(
+        "/api/v1/gateways",
+        json={
+            "name": "connectivity-asr-gateway",
+            "gateway_type": "ASR",
+            "protocol": "video2doc-asr-http-v1",
+            "base_url": "http://127.0.0.1:18131",
+        },
+    ).json()
+    model = client.post(
+        "/api/v1/gateway-models",
+        json={
+            "gateway_id": gateway["id"],
+            "model_name": "connectivity-asr",
+            "display_name": "Connectivity ASR",
+        },
+    ).json()
+
+    async def gateway_model_probe(item, **_kwargs):
+        assert item.model_name == "connectivity-asr"
+        return ModelProbeResult("MODEL_NOT_FOUND", "not in model directory", checked_at, 8)
+
+    monkeypatch.setattr("app.services.gateways.probe_gateway_model", gateway_model_probe)
+    model_health = client.post(f"/api/v1/gateway-models/{model['id']}/health")
+    assert model_health.status_code == 200, model_health.text
+    assert model_health.json()["status"] == "MODEL_NOT_FOUND"
+    persisted = client.get("/api/v1/gateway-models?gateway_type=ASR").json()
+    persisted_model = next(item for item in persisted if item["id"] == model["id"])
+    assert persisted_model["health_status"] == "MODEL_NOT_FOUND"
+
+    async def gateway_probe(_gateway, **_kwargs):
+        return GatewayProbeResult("HEALTHY", "gateway only", checked_at)
+
+    monkeypatch.setattr("app.services.gateways.probe_gateway", gateway_probe)
+    gateway_health = client.post(f"/api/v1/gateways/{gateway['id']}/health")
+    assert gateway_health.status_code == 200, gateway_health.text
+    persisted = client.get("/api/v1/gateway-models?gateway_type=ASR").json()
+    persisted_model = next(item for item in persisted if item["id"] == model["id"])
+    assert persisted_model["health_status"] == "MODEL_NOT_FOUND"
 
 
 def test_health_models_profiles_settings_and_immutable_snapshot(
@@ -261,9 +336,7 @@ def test_dashscope_task_snapshot_uses_one_continuous_stream_without_overlap(
     client: TestClient,
 ) -> None:
     models = client.get("/api/v1/gateway-models?gateway_type=ASR").json()
-    fun_asr = next(
-        item for item in models if item["model_name"] == "fun-asr-realtime-2026-02-28"
-    )
+    fun_asr = next(item for item in models if item["model_name"] == "fun-asr-realtime-2026-02-28")
     response = client.post(
         "/api/v1/tasks",
         json={

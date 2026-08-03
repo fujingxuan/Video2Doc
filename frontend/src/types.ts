@@ -99,6 +99,14 @@ export interface ProcessingProfile {
   updated_at: string;
 }
 
+export interface ModelHealth {
+  model_id: number;
+  status: string;
+  detail: string;
+  checked_at: string;
+  latency_ms: number;
+}
+
 export interface ProfileModelSelection {
   capability: "ASR" | "OCR" | "TEXT_PROCESSING";
   source: "GATEWAY" | "MODEL_CONFIG";

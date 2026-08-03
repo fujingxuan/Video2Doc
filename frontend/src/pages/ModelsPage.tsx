@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { api } from "../api/client";
-import type { ModelConfig } from "../types";
+import type { ModelConfig, ModelHealth } from "../types";
 
 type AuthMode = "environment" | "direct" | "none";
 
@@ -18,6 +18,23 @@ const providerPresets = [
   { id: "volcengine", label: "火山方舟", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", env: "ARK_API_KEY" },
   { id: "custom", label: "自定义 OpenAI 兼容入口", baseUrl: "", env: "" },
 ] as const;
+
+function modelHealthLabel(status: string) {
+  const labels: Record<string, string> = {
+    UNKNOWN: "尚未检测",
+    HEALTHY: "可用",
+    INVALID_CONFIG: "配置无效",
+    MISSING_SECRET: "缺少密钥",
+    AUTH_FAILED: "认证失败",
+    MODEL_NOT_FOUND: "模型或接口不存在",
+    RATE_LIMITED: "限流或额度不足",
+    TIMEOUT: "连接超时",
+    UNREACHABLE: "无法连接",
+    UNHEALTHY: "服务异常",
+    INVALID_RESPONSE: "响应格式无效",
+  };
+  return labels[status] ?? status;
+}
 
 export function ModelsPage({
   models,
@@ -36,6 +53,11 @@ export function ModelsPage({
   const [secretValue, setSecretValue] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [healthResults, setHealthResults] = useState<Record<number, ModelHealth>>({});
+  const [checkingIds, setCheckingIds] = useState<Set<number>>(new Set());
+  const [checkingAll, setCheckingAll] = useState(false);
+
+  const textModels = models.filter(item => item.capabilities.includes("TEXT_PROCESSING"));
 
   const chooseProvider = (next: string) => {
     const preset = providerPresets.find(item => item.id === next);
@@ -122,6 +144,50 @@ export function ModelsPage({
     }
   };
 
+  const runHealthCheck = async (model: ModelConfig) => {
+    setCheckingIds(current => new Set(current).add(model.id));
+    try {
+      const result = await api.checkModel(model.id);
+      setHealthResults(current => ({ ...current, [model.id]: result }));
+      return result;
+    } finally {
+      setCheckingIds(current => {
+        const next = new Set(current);
+        next.delete(model.id);
+        return next;
+      });
+    }
+  };
+
+  const checkModel = async (model: ModelConfig) => {
+    try {
+      const result = await runHealthCheck(model);
+      setMessage(
+        `${model.name}: ${modelHealthLabel(result.status)} · ${result.detail} · ${result.latency_ms} ms`,
+      );
+    } catch (reason) {
+      setMessage(reason instanceof Error ? reason.message : "模型连通性测试失败");
+    }
+  };
+
+  const checkAllModels = async () => {
+    setCheckingAll(true);
+    let healthy = 0;
+    try {
+      for (const model of textModels) {
+        try {
+          const result = await runHealthCheck(model);
+          if (result.status === "HEALTHY") healthy += 1;
+        } catch {
+          // Continue so one unavailable model does not hide the remaining results.
+        }
+      }
+      setMessage(`全部 LLM 测试完成：${healthy}/${textModels.length} 个模型可用。`);
+    } finally {
+      setCheckingAll(false);
+    }
+  };
+
   const directSecretMissing = authMode === "direct" && editingId === null && !secretValue.trim();
   return <>
     <header className="page-header">
@@ -170,17 +236,23 @@ export function ModelsPage({
       </div>
       <div className="panel">
         <h2>已配置 LLM</h2>
-        {models.filter(item => item.capabilities.includes("TEXT_PROCESSING")).length === 0
+        <p>连接测试会对每个模型发送一次只要求回复“OK”的最小实调用，并消耗极少量 Token。</p>
+        <div className="actions">
+          <button disabled={checkingAll || textModels.length === 0} onClick={() => void checkAllModels()}>{checkingAll ? "正在逐个测试…" : "逐个测试全部 LLM"}</button>
+        </div>
+        {textModels.length === 0
           ? <div className="state-card">尚未添加 LLM 模型。</div>
-          : <div className="card-list">{models.filter(item => item.capabilities.includes("TEXT_PROCESSING")).map(model => <article className={!model.enabled ? "disabled-card" : ""} key={model.id}>
+          : <div className="card-list">{textModels.map(model => <article className={!model.enabled ? "disabled-card" : ""} key={model.id}>
             <div>
               <strong>{model.name}</strong>
               <small>{providerPresets.find(item => item.id === model.provider)?.label ?? model.provider ?? "自定义"} · {model.base_url || "未配置 Base URL"}</small>
               <small>密钥：{model.secret_source === "ENVIRONMENT" ? `${model.secret_env_name} (${model.secret_configured ? "已读取" : "未检测到"})` : model.secret_source === "DIRECT" ? `直接保存 (${model.secret_configured ? "可读取" : "不可读取"})` : "不需要"}</small>
+              <small>连接：{modelHealthLabel(healthResults[model.id]?.status ?? "UNKNOWN")}{healthResults[model.id] ? ` · ${healthResults[model.id].detail} · ${healthResults[model.id].latency_ms} ms` : ""}</small>
               <small>{model.notes || "无备注"}</small>
               <div className="tags">{model.capabilities.map(tag => <span key={tag}>{tag}</span>)}</div>
             </div>
             <div className="actions">
+              <button disabled={checkingAll || checkingIds.has(model.id)} onClick={() => void checkModel(model)}>{checkingIds.has(model.id) ? "测试中…" : "测试连通性"}</button>
               <button onClick={() => edit(model)}>编辑</button>
               <button onClick={() => void toggleEnabled(model)}>{model.enabled ? "停用" : "启用"}</button>
               <button onClick={() => void remove(model.id)}>删除</button>

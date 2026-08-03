@@ -7,8 +7,17 @@ from sqlalchemy.orm import Session
 from app.core.errors import ConflictError, NotFoundError
 from app.core.secrets import SecretStorageError, protect_secret
 from app.models import GatewayModel, ModelCapability, ModelConfig, ProcessingProfile
+from app.providers.model_probe import probe_text_model
 from app.repositories.catalog import CatalogRepository
-from app.schemas.api import ModelCreate, ModelRead, ModelUpdate, ProfileCreate, ProfileRead, ProfileUpdate
+from app.schemas.api import (
+    ModelCreate,
+    ModelHealthRead,
+    ModelRead,
+    ModelUpdate,
+    ProfileCreate,
+    ProfileRead,
+    ProfileUpdate,
+)
 from app.services.serializers import model_read, profile_read
 
 
@@ -28,7 +37,11 @@ class CatalogService:
         items = self.repo.list_models()
         if capability:
             capability = capability.upper()
-            items = [item for item in items if capability in {cap.capability for cap in item.capabilities}]
+            items = [
+                item
+                for item in items
+                if capability in {cap.capability for cap in item.capabilities}
+            ]
         return [model_read(item) for item in items]
 
     def get_model(self, model_id: int) -> ModelRead:
@@ -36,6 +49,19 @@ class CatalogService:
         if not item:
             raise NotFoundError("Model", model_id)
         return model_read(item)
+
+    async def health(self, model_id: int) -> ModelHealthRead:
+        item = self.repo.get_model(model_id)
+        if not item:
+            raise NotFoundError("Model", model_id)
+        result = await probe_text_model(item)
+        return ModelHealthRead(
+            model_id=item.id,
+            status=result.status,
+            detail=result.detail,
+            checked_at=result.checked_at,
+            latency_ms=result.latency_ms,
+        )
 
     def create_model(self, payload: ModelCreate) -> ModelRead:
         values = payload.model_dump(exclude={"capabilities", "secret_value"})
@@ -50,7 +76,9 @@ class CatalogService:
             except SecretStorageError as exc:
                 raise ConflictError(str(exc)) from exc
             item.secret_env_name = None
-        item.capabilities = [ModelCapability(capability=value.value) for value in payload.capabilities]
+        item.capabilities = [
+            ModelCapability(capability=value.value) for value in payload.capabilities
+        ]
         self.session.add(item)
         self._commit_unique("A model with that name already exists")
         return model_read(self.repo.get_model(item.id) or item)
@@ -178,7 +206,9 @@ class CatalogService:
             raise ConflictError("An OCR-enabled profile must select an OCR gateway model")
 
     def _clear_default(self) -> None:
-        for item in self.session.scalars(select(ProcessingProfile).where(ProcessingProfile.is_default.is_(True))):
+        for item in self.session.scalars(
+            select(ProcessingProfile).where(ProcessingProfile.is_default.is_(True))
+        ):
             item.is_default = False
 
     def _commit_unique(self, message: str) -> None:
