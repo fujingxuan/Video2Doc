@@ -102,6 +102,28 @@ async def test_gateway_health_and_model_discovery_use_independent_protocol() -> 
     ]
 
 
+@pytest.mark.asyncio
+async def test_gateway_health_distinguishes_online_runtime_from_loaded_model() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/health"
+        return httpx.Response(
+            200,
+            json={
+                "status": "ok",
+                "device": "cuda:0",
+                "loaded_model": None,
+                "cuda_enabled": True,
+            },
+        )
+
+    result = await probe_gateway(gateway(), transport=httpx.MockTransport(handler))
+
+    assert result.status == "HEALTHY"
+    assert result.detail == "Gateway 在线；模型尚未加载；预定设备 cuda:0"
+    assert result.runtime is not None
+    assert result.runtime["loaded_model"] is None
+
+
 def test_discovered_capabilities_populate_standard_model_fields() -> None:
     model = GatewayModel(
         gateway_id=1,

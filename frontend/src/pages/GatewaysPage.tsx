@@ -19,6 +19,13 @@ function deploymentLocation(baseUrl: string) {
   }
 }
 
+function modelConnectionStatus(status: string) {
+  if (status === "HEALTHY") return "Gateway 可用（模型按需加载）";
+  if (status === "UNKNOWN") return "尚未检测";
+  if (status === "UNREACHABLE") return "Gateway 未运行";
+  return status;
+}
+
 export function GatewaysPage({
   gatewayType,
   gateways,
@@ -174,6 +181,6 @@ export function GatewaysPage({
       </div>
     </section>
     <section className="panel"><h2>{gatewayType} Gateway 状态</h2>{visibleGateways.length === 0 ? <div className="state-card">尚未配置 Gateway。</div> : <div className="card-list">{visibleGateways.map(gateway => <article key={gateway.id}><div><strong>{gateway.name}</strong><small>{gateway.protocol} · {gateway.base_url}</small><small>密钥：{gateway.secret_source === "ENVIRONMENT" ? `${gateway.secret_env_name} (${gateway.secret_configured ? "已读取" : "未检测到"})` : gateway.secret_source === "DIRECT" ? `直接保存 (${gateway.secret_configured ? "可读取" : "不可读取"})` : "不需要"} · 超时：{String(gateway.settings.timeout_seconds ?? "默认")} 秒 · 重试：{String(gateway.settings.max_retries ?? "默认")}</small><small>健康：{gateway.health_status}</small></div><div className="actions"><button onClick={() => editGateway(gateway)}>编辑</button><button onClick={() => void check(gateway)}>连接测试</button><button disabled={gateway.protocol.includes("dashscope")} onClick={() => void discover(gateway)}>模型发现</button><button onClick={() => void api.updateGateway(gateway.id, { enabled: !gateway.enabled }).then(refresh)}>{gateway.enabled ? "停用" : "启用"}</button></div></article>)}</div>}</section>
-    <section className="panel"><h2>{gatewayType} 模型</h2>{visibleModels.length === 0 ? <div className="state-card">尚未添加模型。</div> : <div className="card-list">{visibleModels.map(model => <article key={model.id}><div><strong>{model.display_name}</strong><small>{model.gateway_name} · {model.protocol}</small><small>部署：{deploymentLocation(model.gateway_base_url)} · 运行：{model.health_status === "HEALTHY" ? "已响应" : model.health_status} · 语言：{model.languages.length ? model.languages.join(" / ") : "Provider 未声明"}</small>{gatewayType === "ASR" && <small>分块：{model.supports_streaming ? "连续流" : `${model.max_chunk_seconds ?? "未限制"} 秒 + 5 秒重叠`} · 时间戳：{model.supports_word_timestamps ? "词级" : model.supports_segment_timestamps ? "句级" : "无"}</small>}</div><div className="actions"><button onClick={() => void api.updateGatewayModel(model.id, { enabled: !model.enabled }).then(refresh)}>{model.enabled ? "停用" : "启用"}</button></div></article>)}</div>}</section>
+    <section className="panel"><h2>{gatewayType} 模型</h2>{visibleModels.length === 0 ? <div className="state-card">尚未添加模型。</div> : <div className="card-list">{visibleModels.map(model => <article key={model.id}><div><strong>{model.display_name}</strong><small>{model.gateway_name} · {model.protocol}</small><small>部署：{deploymentLocation(model.gateway_base_url)} · 连接：{modelConnectionStatus(model.health_status)} · 语言：{model.languages.length ? model.languages.join(" / ") : "Provider 未声明"}</small>{gatewayType === "ASR" && <small>分块：{model.supports_streaming ? "连续流" : `${model.max_chunk_seconds ?? "未限制"} 秒 + 5 秒重叠`} · 时间戳：{model.supports_word_timestamps ? "词级" : model.supports_segment_timestamps ? "句级" : "无"}</small>}</div><div className="actions"><button onClick={() => void api.updateGatewayModel(model.id, { enabled: !model.enabled }).then(refresh)}>{model.enabled ? "停用" : "启用"}</button></div></article>)}</div>}</section>
   </>;
 }

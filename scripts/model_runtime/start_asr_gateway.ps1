@@ -13,6 +13,20 @@ $ports = @{ firered = 8101; qwen = 8102; whisper = 8103; mock = 8199 }
 if ($Port -eq 0) { $Port = $ports[$Provider] }
 $existing = Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($existing) { throw "Port $Port is already listening." }
+$activeLocalAsr = @(
+    foreach ($entry in $ports.GetEnumerator()) {
+        if ($entry.Key -eq "mock" -or $entry.Value -eq $Port) { continue }
+        $listener = Get-NetTCPConnection -LocalPort $entry.Value -State Listen -ErrorAction SilentlyContinue
+        if ($listener) { "{0}:{1}" -f $entry.Key, $entry.Value }
+    }
+)
+if ($activeLocalAsr.Count -gt 0) {
+    $conflictMessage = (
+        "Another local ASR Gateway is already running ({0}). " +
+        "Video2Doc permits one GPU ASR model at a time; stop it before switching."
+    ) -f ($activeLocalAsr -join ", ")
+    throw $conflictMessage
+}
 
 $runtimeRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $servicePath = (& wsl.exe -d $Distribution -- wslpath -a (($runtimeRoot + "\asr_gateway_service.py") -replace "\\", "/")).Trim()

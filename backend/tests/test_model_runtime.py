@@ -152,3 +152,27 @@ def test_firered_response_normalization_keeps_words_and_confidence(
     assert response["segments"][0]["confidence"] == 0.943
     assert response["segments"][0]["start"] == 0.34
     assert [item["text"] for item in response["words"]] == ["hello", "speech"]
+
+
+def test_firered_alignment_casts_bfloat16_logits_to_float32(monkeypatch) -> None:
+    module = load_runtime(monkeypatch)
+    bfloat16 = object()
+    float32_logits = object()
+
+    class FakeLogits:
+        dtype = bfloat16
+
+        def float(self):  # type: ignore[no-untyped-def]
+            return float32_logits
+
+    fake_torch = SimpleNamespace(bfloat16=bfloat16)
+
+    assert module._firered_alignment_log_probs(FakeLogits(), fake_torch) is float32_logits
+
+
+def test_firered_alignment_leaves_supported_logits_unchanged(monkeypatch) -> None:
+    module = load_runtime(monkeypatch)
+    logits = SimpleNamespace(dtype="float32")
+    fake_torch = SimpleNamespace(bfloat16="bfloat16")
+
+    assert module._firered_alignment_log_probs(logits, fake_torch) is logits

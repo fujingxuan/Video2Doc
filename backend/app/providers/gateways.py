@@ -19,6 +19,7 @@ class GatewayProbeResult:
     status: str
     detail: str | None
     checked_at: datetime
+    runtime: dict[str, Any] | None = None
 
 
 def gateway_endpoint(base_url: str, suffix: str) -> str:
@@ -82,7 +83,23 @@ async def probe_gateway(
             return GatewayProbeResult("AUTH_FAILED", f"HTTP {response.status_code}", checked_at)
         if response.status_code >= 400:
             return GatewayProbeResult("UNHEALTHY", f"HTTP {response.status_code}", checked_at)
-        return GatewayProbeResult("HEALTHY", "健康检查通过", checked_at)
+        runtime: dict[str, Any] | None = None
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                runtime = payload
+        except ValueError:
+            pass
+        detail = "健康检查通过"
+        if runtime is not None and "loaded_model" in runtime:
+            loaded_model = str(runtime.get("loaded_model") or "").strip()
+            device = str(runtime.get("device") or "未知设备")
+            detail = (
+                f"Gateway 在线；已加载 {loaded_model}；设备 {device}"
+                if loaded_model
+                else f"Gateway 在线；模型尚未加载；预定设备 {device}"
+            )
+        return GatewayProbeResult("HEALTHY", detail, checked_at, runtime)
     except (OSError, httpx.HTTPError, TimeoutError, ValueError) as exc:
         return GatewayProbeResult("UNREACHABLE", f"{type(exc).__name__}: {exc}", checked_at)
     except Exception as exc:  # WebSocket implementations expose several handshake exception types.

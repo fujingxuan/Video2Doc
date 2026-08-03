@@ -221,8 +221,7 @@ def test_url_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown(
         },
     ).json()
 
-    async def fake_probe(self, media_path, paths, *, cancel_check, artifact_name="ffprobe"):
-        return media_info(paths.metadata / f"{artifact_name}.json", video=True)
+    media_acquire_calls = 0
 
     async def fake_media_acquire(
         self,
@@ -233,6 +232,8 @@ def test_url_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown(
         cancel_check,
         progress,
     ):
+        nonlocal media_acquire_calls
+        media_acquire_calls += 1
         metadata_path = paths.metadata / "ytdlp.json"
         write_json(
             metadata_path,
@@ -260,6 +261,19 @@ def test_url_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown(
         cancel_check,
         progress,
     ):
+        write_json(
+            paths.metadata / "ytdlp.json",
+            {
+                "subtitles": {"zh-CN": [{"ext": "srt"}]},
+                "title": "字幕视频",
+                "duration": 4.0,
+                "ext": "mp4",
+                "requested_formats": [
+                    {"vcodec": "h264", "acodec": "none", "height": 1080},
+                    {"vcodec": "none", "acodec": "aac", "asr": 48000},
+                ],
+            },
+        )
         progress(1.0, "受控链接字幕抓取完成")
         return SubtitleAcquisition(
             path=str(subtitle),
@@ -282,7 +296,10 @@ def test_url_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown(
         "app.pipeline.real.YtDlpSubtitleSource.acquire",
         fake_subtitle_acquire,
     )
-    monkeypatch.setattr("app.pipeline.real.FfprobeProvider.probe", fake_probe)
+    async def forbidden_probe(*args, **kwargs):
+        raise AssertionError("subtitle preflight must not probe downloaded media")
+
+    monkeypatch.setattr("app.pipeline.real.FfprobeProvider.probe", forbidden_probe)
     monkeypatch.setattr(
         "app.pipeline.real.FfmpegProvider.normalize_audio",
         forbidden_audio,
@@ -309,6 +326,7 @@ def test_url_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown(
     )
     assert created.status_code == 201, created.text
     completed = wait_for_status(client, created.json()[0]["id"], {"COMPLETED"})
+    assert media_acquire_calls == 0
     stage_names = [stage["stage"] for stage in completed["stages"]]
     assert "SUBTITLE_IMPORT" in stage_names
     assert "SUBTITLE_NORMALIZE" in stage_names

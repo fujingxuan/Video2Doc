@@ -57,6 +57,8 @@ from app.providers.media import (
     MediaSourceResolver,
     MediaStream,
     classify_input,
+    media_acquisition_from_ytdlp_metadata,
+    media_info_from_ytdlp_metadata,
 )
 from app.providers.managed_runtime import ensure_managed_gateway, release_managed_gateway
 from app.providers.process import process_registry
@@ -271,66 +273,6 @@ async def run_real_pipeline(task_id: int) -> None:
         ffmpeg_executable = str(tools.get("ffmpeg") or "ffmpeg")
         ffprobe_executable = str(tools.get("ffprobe") or "ffprobe")
         ytdlp_executable = str(tools.get("ytdlp") or "yt-dlp")
-        acquisition_path = paths.metadata / "media_acquisition.json"
-        tracker.start(
-            "MEDIA_ACQUIRE",
-            message="正在获取媒体",
-            input_artifacts=[str(source_record)],
-        )
-        acquisition = _load_acquisition(acquisition_path)
-        if acquisition and Path(acquisition.local_media_path).is_file():
-            tracker.progress(1.0, "复用当前任务工作区中的已获取媒体")
-        else:
-            acquisition = await MediaSourceResolver(ytdlp_executable).acquire(
-                normalized_source,
-                kind,
-                paths,
-                cancel_check=cancelled,
-                progress=tracker.progress,
-            )
-            write_json(acquisition_path, acquisition.to_dict())
-        if acquisition.title:
-            with SessionLocal() as session:
-                db_task = session.get(Task, task_id)
-                if db_task and db_task.title in {source, Path(source).name, Path(source).stem}:
-                    db_task.title = acquisition.title[:300]
-                    session.commit()
-        tracker.complete(
-            message="媒体获取完成",
-            output_artifacts=[
-                acquisition.local_media_path,
-                acquisition.metadata_path,
-                str(acquisition_path),
-            ],
-        )
-
-        ffprobe = FfprobeProvider(ffprobe_executable)
-        media_info_path = paths.metadata / "media_info.json"
-        tracker.start(
-            "MEDIA_PROBE",
-            message="正在探测音视频流",
-            input_artifacts=[acquisition.local_media_path],
-            log_path=str(paths.logs / "ffprobe.stderr.log"),
-        )
-        media_info = _load_media_info(media_info_path)
-        if media_info is None:
-            media_info = await ffprobe.probe(
-                Path(acquisition.local_media_path), paths, cancel_check=cancelled
-            )
-            media_payload = {**acquisition.to_dict(), **media_info.to_dict()}
-            write_json(media_info_path, media_payload)
-        else:
-            tracker.progress(1.0, "复用已探测媒体信息")
-        with SessionLocal() as session:
-            db_task = session.get(Task, task_id)
-            if db_task:
-                db_task.media_info_path = str(media_info_path)
-                session.commit()
-        tracker.complete(
-            message=f"探测完成：音频流 {len(media_info.audio_streams)}，视频流 {len(media_info.video_streams)}",
-            output_artifacts=[media_info.raw_probe_path, str(media_info_path)],
-        )
-
         processing = snapshot.get("processing", {})
         subtitle_mode = str(processing.get("text_source") or "ASR") == "SUBTITLE"
         asr_config = snapshot.get("asr") if isinstance(snapshot.get("asr"), dict) else {}
@@ -350,6 +292,148 @@ async def run_real_pipeline(task_id: int) -> None:
         subtitle_provider_name = "imported-subtitle"
         subtitle_model = "not-applicable"
         subtitle_fallback_message: str | None = None
+
+        acquisition_path = paths.metadata / "media_acquisition.json"
+        tracker.start(
+            "MEDIA_ACQUIRE",
+            message="正在获取媒体",
+            input_artifacts=[str(source_record)],
+        )
+        preflight_acquisition: MediaAcquisitionResult | None = None
+        if (
+            subtitle_mode
+            and not subtitle_path
+            and kind == "URL"
+            and not bool(subtitle_config.get("embedded_ocr_fallback"))
+            and not bool(processing.get("ocr_enabled"))
+        ):
+            try:
+                subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
+                    normalized_source,
+                    paths,
+                    cancel_check=cancelled,
+                    progress=tracker.progress,
+                )
+                subtitle_path = subtitle.path
+                subtitle_language = subtitle.language
+                subtitle_provider_name = subtitle.provider
+                metadata_path = paths.metadata / "ytdlp.json"
+                metadata = read_json(metadata_path)
+                if not isinstance(metadata, dict):
+                    raise PipelineError(
+                        "SUBTITLE_FETCH_FAILED",
+                        "字幕已获取，但缺少可追溯的媒体元数据",
+                    )
+                preflight_acquisition = media_acquisition_from_ytdlp_metadata(
+                    normalized_source,
+                    metadata,
+                    metadata_path,
+                )
+                tracker.progress(1.0, "平台字幕获取完成；已跳过完整视频下载")
+            except PipelineError as exc:
+                if exc.code != "SUBTITLE_NOT_FOUND":
+                    raise
+                if not asr_config:
+                    raise PipelineError(
+                        "ASR_FALLBACK_UNAVAILABLE",
+                        "视频没有可用字幕，且处理方案未配置 ASR 模型",
+                        technical_detail=exc.technical_detail or exc.user_message,
+                    ) from exc
+                subtitle_mode = False
+                subtitle_fallback_message = (
+                    "未发现可用字幕，已自动切换到处理方案中的 ASR 模型"
+                )
+                tracker.progress(None, subtitle_fallback_message)
+
+        acquisition = preflight_acquisition or _load_acquisition(acquisition_path)
+        reusable_acquisition = bool(
+            acquisition
+            and (
+                (
+                    acquisition.media_available
+                    and acquisition.local_media_path
+                    and Path(acquisition.local_media_path).is_file()
+                )
+                or (not acquisition.media_available and subtitle_mode and subtitle_path)
+            )
+        )
+        if reusable_acquisition:
+            tracker.progress(
+                1.0,
+                (
+                    "复用已获取的平台字幕和媒体元数据"
+                    if acquisition and not acquisition.media_available
+                    else "复用当前任务工作区中的已获取媒体"
+                ),
+            )
+        else:
+            acquisition = await MediaSourceResolver(ytdlp_executable).acquire(
+                normalized_source,
+                kind,
+                paths,
+                cancel_check=cancelled,
+                progress=tracker.progress,
+            )
+        assert acquisition is not None
+        write_json(acquisition_path, acquisition.to_dict())
+        if acquisition.title:
+            with SessionLocal() as session:
+                db_task = session.get(Task, task_id)
+                if db_task and db_task.title in {source, Path(source).name, Path(source).stem}:
+                    db_task.title = acquisition.title[:300]
+                    session.commit()
+        acquisition_artifacts = [acquisition.metadata_path, str(acquisition_path)]
+        if acquisition.media_available and acquisition.local_media_path:
+            acquisition_artifacts.insert(0, acquisition.local_media_path)
+        tracker.complete(message="媒体获取完成", output_artifacts=acquisition_artifacts)
+
+        ffprobe = FfprobeProvider(ffprobe_executable)
+        media_info_path = paths.metadata / "media_info.json"
+        tracker.start(
+            "MEDIA_PROBE",
+            message=(
+                "正在探测音视频流"
+                if acquisition.media_available
+                else "正在读取平台媒体元数据"
+            ),
+            input_artifacts=(
+                [acquisition.local_media_path]
+                if acquisition.media_available and acquisition.local_media_path
+                else [acquisition.metadata_path]
+            ),
+            log_path=str(paths.logs / "ffprobe.stderr.log"),
+        )
+        media_info = _load_media_info(media_info_path)
+        if media_info is None:
+            if acquisition.media_available:
+                media_info = await ffprobe.probe(
+                    Path(acquisition.local_media_path), paths, cancel_check=cancelled
+                )
+            else:
+                metadata = read_json(Path(acquisition.metadata_path))
+                if not isinstance(metadata, dict):
+                    raise PipelineError(
+                        "MEDIA_PROBE_FAILED",
+                        "平台媒体元数据缺失或损坏",
+                    )
+                media_info = media_info_from_ytdlp_metadata(
+                    metadata,
+                    Path(acquisition.metadata_path),
+                )
+                tracker.progress(1.0, "已从平台元数据读取媒体时长与流信息")
+            media_payload = {**acquisition.to_dict(), **media_info.to_dict()}
+            write_json(media_info_path, media_payload)
+        else:
+            tracker.progress(1.0, "复用已探测媒体信息")
+        with SessionLocal() as session:
+            db_task = session.get(Task, task_id)
+            if db_task:
+                db_task.media_info_path = str(media_info_path)
+                session.commit()
+        tracker.complete(
+            message=f"探测完成：音频流 {len(media_info.audio_streams)}，视频流 {len(media_info.video_streams)}",
+            output_artifacts=[media_info.raw_probe_path, str(media_info_path)],
+        )
 
         if subtitle_mode and not subtitle_path:
             if kind != "URL":
@@ -421,7 +505,7 @@ async def run_real_pipeline(task_id: int) -> None:
                 append_task_log(workspace, subtitle_fallback_message)
 
         if subtitle_mode:
-            audio_path = Path(acquisition.local_media_path)
+            audio_path = Path(subtitle_path)
             audio_info = media_info
         else:
             tracker.start(
