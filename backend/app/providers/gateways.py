@@ -47,6 +47,17 @@ def openai_chat_completions_endpoint(base_url: str) -> str:
     return f"{base}{suffix}"
 
 
+def openai_text_generation_options(model: str) -> dict[str, Any]:
+    """Return conservative model-family overrides for ordinary text cleanup."""
+    model_name = model.strip().casefold().rsplit("/", 1)[-1]
+    if model_name.startswith(("glm-4.5", "glm-4.6", "glm-4.7", "glm-5")):
+        # GLM 4.7 enables lengthy reasoning by default. Article cleanup is a
+        # transformation task, so reasoning adds latency without improving the
+        # deterministic faithfulness checks performed after generation.
+        return {"thinking": {"type": "disabled"}}
+    return {}
+
+
 def trust_environment_proxy(url: str) -> bool:
     hostname = (urlparse(url).hostname or "").casefold()
     return hostname not in {"127.0.0.1", "localhost", "::1"}

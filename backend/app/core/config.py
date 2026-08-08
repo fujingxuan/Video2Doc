@@ -69,7 +69,7 @@ def get_settings() -> Settings:
             1.0, float(os.getenv("VIDEO2DOC_ASR_TIMEOUT_SECONDS", "300"))
         ),
         text_request_timeout_seconds=max(
-            60.0, float(os.getenv("VIDEO2DOC_TEXT_TIMEOUT_SECONDS", "3600"))
+            60.0, float(os.getenv("VIDEO2DOC_TEXT_TIMEOUT_SECONDS", "600"))
         ),
         asr_max_retries=max(0, int(os.getenv("VIDEO2DOC_ASR_MAX_RETRIES", "2"))),
         audio_chunk_seconds=max(

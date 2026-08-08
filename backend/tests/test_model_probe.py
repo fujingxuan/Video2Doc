@@ -26,6 +26,7 @@ async def test_text_model_probe_performs_minimal_chat_completion(monkeypatch) ->
         payload = json.loads(request.content)
         assert payload["model"] == "glm-4.7"
         assert payload["stream"] is False
+        assert payload["thinking"] == {"type": "disabled"}
         assert "source_text" not in request.content.decode("utf-8")
         return httpx.Response(
             200,

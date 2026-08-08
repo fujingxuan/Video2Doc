@@ -200,11 +200,15 @@ OCR/帧事件按可配置时间窗口关联附近 ASR segment，所有事件按�
 
 Builder 先按时间构建带完整来源引用的原始块，并把这一版本保存为 `document.original.json`。可选 `FaithfulTextEditor` 随后把全部可编辑文本按原始顺序合并为一个 `source_text`，在单次、非分批请求中交给文本模型；模型只返回一个 `article_markdown`，形成可直接阅读的连续完整文章。无文本模型或模型回退时，也会把完整原文聚合为连续文章，而不是逐 ASR segment 渲染。
 
-最终文章块由应用确定性继承所有原始文本块的来源引用；模型无需回显成千上万个 block/source ID。验证器对完整原文与完整候选文章检查数字、专有词形、代码标记、公式符号和文本长度。响应结构错误或明显压缩时，整个编辑响应被拒绝，Document 使用连续原文文章；原文、候选文章、原始 block/source 映射、模型、提示词版本、diff、验证指标、原始响应引用和回退原因写入文本整理产物。
+文章整理请求使用流式 Chat Completions，并用 600 秒默认墙钟上限避免兼容网关持续占用队列。GLM 4.5 及以上的默认 Thinking 会在该确定性转换任务中显式关闭；输出 token 上限按正文长度估算并限制在 4096 到 32768。流式接收器只保存最终正文以及事件数、思考字符数、完成原因和用量等诊断元数据，不保存模型思维链。JSON 对象、JSON 围栏和直接 Markdown 都可形成候选文章。
+
+最终文章块由应用确定性继承所有原始文本块的来源引用；模型无需回显成千上万个 block/source ID。验证器对完整原文与完整候选文章检查数字、专有词形、代码标记、公式符号和文本长度。响应为空、结构无法恢复或内容明显压缩时，整个编辑响应被拒绝，Document 使用连续原文文章；原文、候选文章、原始 block/source 映射、模型、提示词版本、diff、验证指标、原始响应引用和回退原因写入文本整理产物。
 
 ## 11. Markdown 与 Obsidian 导出
 
 Renderer 从 Document IR 生成 YAML frontmatter、媒体来源、模型/配置、连续完整正文、相对图片和可折叠追溯附录。正文不再插入逐 segment 的“讲者内容”标签或来源注释；原始分块、时间戳和 source_id 保留在 `document.original.json`、最终 Document 聚合来源以及 sidecar 中。URL 时间戳仅在追溯信息需要且来源平台支持时生成跳转；本地文件不伪造协议链接。
+
+任务详情使用经净化的 GFM 渲染器显示 Markdown。YAML frontmatter 不作为正文显示；相对图片只有在任务产物清单中存在时才会映射到受工作区边界保护的产物 API，外部链接保持普通浏览器链接，原始 HTML 在渲染前经过白名单净化。
 
 Exporter 先在 Inbox 内创建隐藏临时目录，复制并重命名图片，生成 Markdown、document/timeline/sources sidecar 和可选字幕/转写；全部成功后才把同一 bundle 提交到最终路径。取消或失败删除 stage，并在 overwrite 模式下恢复备份。冲突策略为 rename、fail 或 overwrite，默认 rename。最终 Markdown 不引用任务临时绝对路径。
 

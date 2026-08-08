@@ -24,6 +24,7 @@ from app.documents.ir import (
 from app.providers.asr import redact_sensitive
 from app.providers.gateways import (
     openai_chat_completions_endpoint,
+    openai_text_generation_options,
     trust_environment_proxy,
 )
 from app.storage.workspace import write_json
@@ -32,7 +33,7 @@ from app.storage.workspace import write_json
 EditCancelCheck = Callable[[], bool | Awaitable[bool]]
 PROMPT_VERSION = "faithful-article-v1"
 ARTICLE_MODE = "full_article"
-DEFAULT_TEXT_TIMEOUT_SECONDS = 3600.0
+DEFAULT_TEXT_TIMEOUT_SECONDS = 600.0
 FALLBACK_GATEWAY_ERRORS = {
     "TEXT_GATEWAY_TIMEOUT",
     "TEXT_GATEWAY_UNAVAILABLE",
@@ -101,6 +102,7 @@ class FaithfulTextEditor:
             "model": self.model,
             "temperature": 0,
             "response_format": {"type": "json_object"},
+            "max_tokens": _article_max_tokens(source_text),
             "messages": [
                 {"role": "system", "content": prompt},
                 {
@@ -115,6 +117,7 @@ class FaithfulTextEditor:
                     ),
                 },
             ],
+            **openai_text_generation_options(self.model),
         }
         try:
             response_payload = await self._request(request_payload, cancel_check)
@@ -224,7 +227,10 @@ class FaithfulTextEditor:
         async def send() -> dict[str, Any]:
             try:
                 async with httpx.AsyncClient(
-                    timeout=httpx.Timeout(self.timeout_seconds),
+                    timeout=httpx.Timeout(
+                        self.timeout_seconds,
+                        connect=min(30.0, self.timeout_seconds),
+                    ),
                     transport=self.transport,
                     trust_env=trust_environment_proxy(self.endpoint),
                 ) as client:
@@ -265,10 +271,18 @@ class FaithfulTextEditor:
                 ) from exc
 
         task = asyncio.create_task(send())
+        deadline = time.monotonic() + self.timeout_seconds
         try:
             while not task.done():
                 await _ensure_active(cancel_check)
-                await asyncio.sleep(0.1)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise PipelineError(
+                        "TEXT_GATEWAY_TIMEOUT",
+                        f"文本整理服务超过 {self.timeout_seconds:g} 秒仍未完成",
+                        retryable=True,
+                    )
+                await asyncio.sleep(min(0.1, remaining))
             response = await task
         except BaseException:
             if not task.done():
@@ -358,15 +372,72 @@ def _unique_source_references(blocks: list[DocumentBlock]) -> list[SourceReferen
 def _response_json(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         content = payload["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
-    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+    except (KeyError, IndexError, TypeError) as exc:
         raise PipelineError(
             "TEXT_GATEWAY_INVALID_RESPONSE",
             "文本整理响应不是约定的 JSON 对象",
         ) from exc
+    content = _message_text(content)
+    if not content.strip():
+        stream = payload.get("_video2doc_stream")
+        reasoning_characters = (
+            int(stream.get("reasoning_characters") or 0)
+            if isinstance(stream, dict)
+            else 0
+        )
+        detail = (
+            "模型只返回了思考过程，没有生成文章正文"
+            if reasoning_characters
+            else "模型没有生成文章正文"
+        )
+        raise PipelineError("TEXT_GATEWAY_INVALID_RESPONSE", detail)
+    parsed = _parse_json_object(content)
+    if parsed is None:
+        # Several OpenAI-compatible relays ignore response_format and return
+        # the requested Markdown directly. The normal faithfulness gate still
+        # rejects shortened or altered articles after this compatibility path.
+        return {"article_markdown": content.strip()}
     if not isinstance(parsed, dict):
         raise PipelineError("TEXT_GATEWAY_INVALID_RESPONSE", "文本整理响应格式错误")
     return parsed
+
+
+def _message_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            str(part.get("text"))
+            for part in content
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    if isinstance(content, dict):
+        return json.dumps(content, ensure_ascii=False)
+    return ""
+
+
+def _parse_json_object(content: str) -> dict[str, Any] | None:
+    candidate = content.strip()
+    if candidate.startswith("```") and candidate.endswith("```"):
+        lines = candidate.splitlines()
+        if len(lines) >= 3:
+            candidate = "\n".join(lines[1:-1]).strip()
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        opening = candidate.find("{")
+        if opening < 0:
+            return None
+        try:
+            parsed, _end = decoder.raw_decode(candidate[opening:])
+        except json.JSONDecodeError:
+            return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _article_max_tokens(source_text: str) -> int:
+    return max(4096, min(32768, len(source_text) * 2))
 
 
 def _rejected_run(
@@ -475,6 +546,9 @@ def _json_response_payload(response: httpx.Response) -> dict[str, Any]:
 async def _consume_chat_completion_stream(response: httpx.Response) -> dict[str, Any]:
     content_parts: list[str] = []
     event_count = 0
+    reasoning_characters = 0
+    finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
     async for line in response.aiter_lines():
         if not line.startswith("data:"):
             continue
@@ -491,17 +565,24 @@ async def _consume_chat_completion_stream(response: httpx.Response) -> dict[str,
             ) from exc
         if not isinstance(event, dict):
             continue
+        if isinstance(event.get("usage"), dict):
+            usage = event["usage"]
         if event.get("error"):
             raise PipelineError("TEXT_GATEWAY_FAILED", "文本整理服务流式响应报告错误")
         choices = event.get("choices")
         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
             continue
         choice = choices[0]
+        if isinstance(choice.get("finish_reason"), str):
+            finish_reason = choice["finish_reason"]
         message = choice.get("delta") or choice.get("message") or {}
         if not isinstance(message, dict):
             continue
         content = message.get("content")
-        if isinstance(content, str):
+        reasoning = message.get("reasoning_content")
+        if isinstance(reasoning, str):
+            reasoning_characters += len(reasoning)
+        if isinstance(content, str) and content:
             content_parts.append(content)
         elif isinstance(content, list):
             content_parts.extend(
@@ -509,12 +590,26 @@ async def _consume_chat_completion_stream(response: httpx.Response) -> dict[str,
                 for part in content
                 if isinstance(part, dict) and isinstance(part.get("text"), str)
             )
-    if event_count == 0 or not content_parts:
+    if event_count == 0:
         raise PipelineError(
             "TEXT_GATEWAY_INVALID_RESPONSE",
             "文本整理服务未返回有效的流式内容",
         )
-    return {"choices": [{"message": {"content": "".join(content_parts)}}]}
+    result: dict[str, Any] = {
+        "choices": [
+            {
+                "message": {"content": "".join(content_parts)},
+                "finish_reason": finish_reason,
+            }
+        ],
+        "_video2doc_stream": {
+            "event_count": event_count,
+            "reasoning_characters": reasoning_characters,
+        },
+    }
+    if usage is not None:
+        result["usage"] = usage
+    return result
 
 
 def _default_prompt_path() -> Path:

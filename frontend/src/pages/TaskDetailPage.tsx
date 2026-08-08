@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import { api } from "../api/client";
 import { StateView } from "../components/StateView";
 import { StatusBadge } from "../components/StatusBadge";
 import type { TaskDetail } from "../types";
 import { formatDate, formatDuration } from "../utils/status";
+
+const MarkdownPreview = lazy(() =>
+  import("../components/MarkdownPreview").then(module => ({
+    default: module.MarkdownPreview,
+  })),
+);
 
 export function TaskDetailPage({ taskId }: { taskId: number }) {
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -183,7 +189,13 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
         <span>{task.export_path ?? "尚未导出"}</span>
       </div>
       {task.markdown_preview
-        ? <pre className="markdown-preview">{task.markdown_preview}</pre>
+        ? <Suspense fallback={<div className="state-card">正在渲染 Markdown…</div>}>
+            <MarkdownPreview
+              markdown={task.markdown_preview}
+              taskId={task.id}
+              artifactPaths={task.artifacts.map(item => item.path)}
+            />
+          </Suspense>
         : <div className="state-card">Markdown 尚未生成。</div>}
       {task.exports.length > 0 && <div className="export-list">
         {task.exports.map(item => <article key={item.id}>

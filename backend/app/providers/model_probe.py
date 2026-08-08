@@ -12,6 +12,7 @@ from app.models import GatewayModel, ModelConfig
 from app.providers.gateways import (
     discover_gateway_models,
     openai_chat_completions_endpoint,
+    openai_text_generation_options,
     probe_gateway,
     trust_environment_proxy,
 )
@@ -58,6 +59,7 @@ async def probe_text_model(
             }
         ],
         "stream": False,
+        **openai_text_generation_options(model.name),
     }
     try:
         async with httpx.AsyncClient(

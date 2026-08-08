@@ -249,6 +249,93 @@ async def test_text_editor_consumes_streaming_chat_completion(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_glm_text_editor_disables_thinking_and_accepts_fenced_json(
+    tmp_path: Path,
+) -> None:
+    document = sample_document(tmp_path)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        request_json = json.loads(request.content)
+        assert request_json["thinking"] == {"type": "disabled"}
+        assert 4096 <= request_json["max_tokens"] <= 32768
+        input_json = json.loads(request_json["messages"][1]["content"])
+        article = f"### 围栏正文\n\n{input_json['source_text'].replace(chr(10), ' ')}"
+        content = f"```json\n{json.dumps({'article_markdown': article}, ensure_ascii=False)}\n```"
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    editor = FaithfulTextEditor(
+        base_url="http://127.0.0.1:8800/v1",
+        api_key="secret",
+        model="glm-4.7",
+        transport=httpx.MockTransport(handler),
+    )
+    edited, run = await editor.edit(document, raw_path=tmp_path / "glm.json")
+
+    assert run["accepted"] is True
+    assert "### 围栏正文" in next(
+        block.display_text for block in edited.all_blocks() if block.block_type != "image"
+    )
+
+
+@pytest.mark.asyncio
+async def test_text_editor_reports_reasoning_only_stream_without_persisting_reasoning(
+    tmp_path: Path,
+) -> None:
+    reasoning = "private reasoning must not be persisted"
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        events = [
+            {"choices": [{"delta": {"reasoning_content": reasoning}}]},
+            {"choices": [{"delta": {"content": ""}, "finish_reason": "length"}]},
+        ]
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+        body += "data: [DONE]\n\n"
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=body,
+        )
+
+    raw_path = tmp_path / "reasoning-only.json"
+    editor = FaithfulTextEditor(
+        base_url="http://127.0.0.1:8800/v1",
+        api_key="secret",
+        model="glm-4.7",
+        transport=httpx.MockTransport(handler),
+    )
+    _edited, run = await editor.edit(sample_document(tmp_path), raw_path=raw_path)
+
+    assert run["accepted"] is False
+    assert "只返回了思考过程" in run["reason"]
+    persisted = raw_path.read_text(encoding="utf-8")
+    assert reasoning not in persisted
+    assert '"reasoning_characters": 39' in persisted
+
+
+@pytest.mark.asyncio
+async def test_text_editor_accepts_faithful_plain_markdown_response(tmp_path: Path) -> None:
+    document = sample_document(tmp_path)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        input_json = json.loads(json.loads(request.content)["messages"][1]["content"])
+        article = f"### 纯 Markdown 正文\n\n{input_json['source_text'].replace(chr(10), ' ')}"
+        return httpx.Response(200, json={"choices": [{"message": {"content": article}}]})
+
+    editor = FaithfulTextEditor(
+        base_url="http://127.0.0.1:8800/v1",
+        api_key="secret",
+        model="compatible-model",
+        transport=httpx.MockTransport(handler),
+    )
+    edited, run = await editor.edit(document, raw_path=tmp_path / "plain-markdown.json")
+
+    assert run["accepted"] is True
+    assert "### 纯 Markdown 正文" in next(
+        block.display_text for block in edited.all_blocks() if block.block_type != "image"
+    )
+
+
+@pytest.mark.asyncio
 async def test_text_editor_retries_non_stream_when_gateway_rejects_streaming(
     tmp_path: Path,
 ) -> None:
