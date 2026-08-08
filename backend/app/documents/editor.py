@@ -183,7 +183,7 @@ class FaithfulTextEditor:
             formula_symbol_ratio=formula_symbol_ratio,
         )
         if not report.accepted:
-            reason = "; ".join(issue.code for issue in report.issues)
+            reason = "; ".join(f"{issue.code}（{issue.message}）" for issue in report.issues)
             run = _rejected_run(
                 self.model,
                 raw_path,

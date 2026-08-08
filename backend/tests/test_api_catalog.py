@@ -11,6 +11,13 @@ from app.services.gateways import seed_default_gateways
 from tests.helpers import wait_for_status
 
 
+def test_frontend_entry_point_is_never_cached(client: TestClient) -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+
+
 def test_direct_credentials_are_encrypted_and_never_returned(client: TestClient) -> None:
     secret = "direct-secret-value-for-test"
     model_response = client.post(

@@ -9,7 +9,11 @@ from app.documents.ir import Document, DocumentBlock
 
 
 NUMBER_PATTERN = re.compile(r"(?<![\w.])[+-]?(?:\d+(?:[.,]\d+)*|\.\d+)%?")
-IDENTIFIER_PATTERN = re.compile(r"\b[A-Za-z][A-Za-z0-9_.:+/#-]{2,}\b")
+IDENTIFIER_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_.:+/#-])[A-Za-z][A-Za-z0-9_.:+/#-]{2,}"
+    r"(?![A-Za-z0-9_.:+/#-])"
+)
+IDENTIFIER_SIGNAL_PATTERN = re.compile(r"[A-Z0-9_.:+/#-]")
 CODE_SPAN_PATTERN = re.compile(r"`{1,3}[^`]+`{1,3}", re.DOTALL)
 FORMULA_SYMBOLS = set("=+-*/^_∑∫√≈≠≤≥<>[]{}()")
 
@@ -68,7 +72,7 @@ def validate_block_edit(
                 block.block_id,
             )
         )
-    identifiers = IDENTIFIER_PATTERN.findall(original)
+    identifiers = _technical_identifiers(original)
     missing_identifiers = _missing_tokens(identifiers, edited, casefold=True)
     if missing_identifiers:
         issues.append(
@@ -181,3 +185,20 @@ def _missing_tokens(
         if present < count:
             missing.extend([token] * (count - present))
     return missing
+
+
+def _technical_identifiers(text: str) -> list[str]:
+    """Return tokens whose spelling carries an identifier-like signal.
+
+    Plain lowercase English words in an ASR transcript can be lyrics, filler,
+    or speech recognition noise. Treating every three-letter word as a proper
+    name made harmless cleanup such as removing ``uuuuu yeah`` fail the whole
+    article. Mixed-case names, acronyms, versions, model names, and tokens with
+    identifier punctuation remain protected.
+    """
+
+    return [
+        token
+        for token in IDENTIFIER_PATTERN.findall(text)
+        if IDENTIFIER_SIGNAL_PATTERN.search(token)
+    ]

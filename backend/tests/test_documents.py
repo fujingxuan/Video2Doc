@@ -168,6 +168,40 @@ def test_faithfulness_rejects_number_identifier_and_formula_loss(tmp_path: Path)
     }
 
 
+def test_faithfulness_ignores_plain_lowercase_lyrics_and_asr_vocalizations(
+    tmp_path: Path,
+) -> None:
+    document = sample_document(tmp_path)
+    transcript = next(block for block in document.all_blocks() if block.block_type == "transcript")
+    transcript.original_text = "SteamOS 3.8 machine mini uuuuu yeah uuuu yeah meet me with you"
+    transcript.edited_text = "SteamOS 3.8 Machine Mini"
+
+    report = validate_block_edit(
+        transcript,
+        returned_source_ids=[item.source_id for item in transcript.source_references],
+        minimum_length_ratio=0.0,
+    )
+
+    assert report.accepted
+    assert "IDENTIFIERS_LOST" not in {item.code for item in report.issues}
+
+
+def test_faithfulness_still_rejects_structured_identifier_loss(tmp_path: Path) -> None:
+    document = sample_document(tmp_path)
+    transcript = next(block for block in document.all_blocks() if block.block_type == "transcript")
+    transcript.original_text = "保留 SteamOS 3.8、APIName 和 model-v2。"
+    transcript.edited_text = "保留 SteamOS 3.8。"
+
+    report = validate_block_edit(
+        transcript,
+        returned_source_ids=[item.source_id for item in transcript.source_references],
+        minimum_length_ratio=0.0,
+    )
+
+    assert not report.accepted
+    assert "IDENTIFIERS_LOST" in {item.code for item in report.issues}
+
+
 @pytest.mark.asyncio
 async def test_text_editor_accepts_structured_faithful_response(tmp_path: Path) -> None:
     document = sample_document(tmp_path)
