@@ -77,6 +77,8 @@ export default function App() {
   }, [connected, refreshTasks]);
 
   const content = useMemo(() => {
+    const edit = path.match(/^\/tasks\/(\d+)\/edit$/);
+    if (edit) return <NewTaskPage key={edit[1]} editTaskId={Number(edit[1])} profiles={profiles} gatewayModels={gatewayModels} models={models} onCreated={refreshTasks} />;
     const detail = path.match(/^\/tasks\/(\d+)$/);
     if (detail) return <TaskDetailPage taskId={Number(detail[1])} />;
     switch (path) {

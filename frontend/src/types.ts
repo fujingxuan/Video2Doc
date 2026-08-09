@@ -304,6 +304,13 @@ export interface CacheClearResult {
   skipped: Array<{ task_id: number; reason: string }>;
 }
 
+export interface TaskDeleteResult {
+  task_id: number;
+  files_removed: number;
+  bytes_freed: number;
+  deleted_paths: string[];
+}
+
 export interface SystemStatus {
   platform: string;
   tools: Record<string, {

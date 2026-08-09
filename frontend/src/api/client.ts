@@ -12,6 +12,7 @@ import type {
   Task,
   TaskDetail,
   SystemStatus,
+  TaskDeleteResult,
 } from "../types";
 
 const defaultApiBase = ["5173", "4173"].includes(window.location.port)
@@ -130,6 +131,9 @@ export const api = {
       .join("/")}`,
   createTasks: (payload: Record<string, unknown>) =>
     request<Task[]>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
+  updateTask: (id: number, payload: Record<string, unknown>) =>
+    request<Task>(`/tasks/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteTask: (id: number) => request<TaskDeleteResult>(`/tasks/${id}`, { method: "DELETE" }),
   cancelTask: (id: number) => request<Task>(`/tasks/${id}/cancel`, { method: "POST" }),
   retryTask: (id: number) => request<Task>(`/tasks/${id}/retry`, { method: "POST" }),
   queue: () => request<QueueState>("/queue"),

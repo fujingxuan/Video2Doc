@@ -29,9 +29,9 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
   → Windows 单入口应用查看、取消、重试和打开结果
 ```
 
-所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；有效媒体、ASR、链接字幕抓取产物、内嵌字幕抽帧/OCR、常规帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；它在一次请求中接收完整正文并返回一篇连续 Markdown 文章。结构校验、数字/术语/代码/公式/长度检查失败时会拒绝模型输出，并回退为连续原文文章；原始逐段来源关系仍保存在 Document 与 sidecar 中。
+所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；新建任务会恢复上一个任务的完整处理设置，尚未开始的队列任务可安全编辑。删除任务会在路径与任务身份校验后同步删除对应工作区和导出成品，原始本地输入媒体不在删除范围。有效媒体、ASR、链接字幕抓取产物、内嵌字幕抽帧/OCR、常规帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；它在一次请求中接收完整正文并返回一篇连续 Markdown 文章。结构校验、数字/术语/代码/公式/长度检查失败时会拒绝模型输出，并回退为连续原文文章；原始逐段来源关系仍保存在 Document 与 sidecar 中。
 
-完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。操作说明见 [应用使用手册](docs/USER_GUIDE.md)、[Obsidian 导出说明](docs/OBSIDIAN_EXPORT.md) 和 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)；本轮真实证据见 [2.3.0 三类模型、托管 Gateway 与画面字幕验收报告](docs/ITERATION_2_3_ACCEPTANCE_REPORT.md)。
+完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。操作说明见 [应用使用手册](docs/USER_GUIDE.md)、[Obsidian 导出说明](docs/OBSIDIAN_EXPORT.md) 和 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)；本轮真实证据见 [3.0.0 任务管理与界面优化验收报告](docs/ITERATION_3_0_ACCEPTANCE_REPORT.md)，历史模型验收见 [2.3.0 三类模型、托管 Gateway 与画面字幕验收报告](docs/ITERATION_2_3_ACCEPTANCE_REPORT.md)。
 
 ## 技术栈
 

@@ -2,23 +2,31 @@ import { useEffect, useMemo, useState } from "react";
 
 import { api } from "../api/client";
 import type {
-  AppSettings,
   GatewayModel,
   ModelConfig,
   ProcessingProfile,
 } from "../types";
+import { taskFormDefaults } from "../utils/taskDefaults";
 
 interface Props {
   profiles: ProcessingProfile[];
   gatewayModels: GatewayModel[];
   models: ModelConfig[];
   onCreated: () => Promise<void>;
+  editTaskId?: number;
 }
 
-export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Props) {
+export function NewTaskPage({
+  profiles,
+  gatewayModels,
+  models,
+  onCreated,
+  editTaskId,
+}: Props) {
   const [sourceType, setSourceType] = useState<"URL" | "LOCAL_FILE">("URL");
   const [textSource, setTextSource] = useState<"ASR" | "SUBTITLE">("ASR");
   const [sources, setSources] = useState("");
+  const [title, setTitle] = useState("");
   const [profileId, setProfileId] = useState("");
   const [asrGatewayId, setAsrGatewayId] = useState("");
   const [asrGatewayModelId, setAsrGatewayModelId] = useState("");
@@ -39,23 +47,58 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [pickingOutput, setPickingOutput] = useState(false);
+  const [initializing, setInitializing] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
-  const [settings, setSettings] = useState<AppSettings | null>(null);
 
   useEffect(() => {
-    api.settings()
-      .then(value => {
-        setSettings(value);
-        setTextEditEnabled(value.default_text_edit_enabled);
-        if (value.inbox_path && /^(?:[a-z]:[\\/]|\\\\)/i.test(value.inbox_path)) {
-          setExportDirectory(value.inbox_path);
-        } else if (value.obsidian_vault_path) {
-          const relative = (value.inbox_path || "Inbox").replace(/^[\\/]+/, "");
-          setExportDirectory(`${value.obsidian_vault_path.replace(/[\\/]+$/, "")}\\${relative}`);
+    let active = true;
+    setInitializing(true);
+    Promise.all([
+      api.settings(),
+      editTaskId ? api.task(editTaskId) : Promise.resolve(null),
+    ])
+      .then(([settings, task]) => {
+        if (!active) return;
+        const defaults = taskFormDefaults(
+          settings,
+          task?.snapshot.snapshot_json ?? settings.last_task_config,
+          Boolean(task),
+        );
+        setSourceType(defaults.sourceType);
+        setTextSource(defaults.textSource);
+        setSources(defaults.sources);
+        setTitle(defaults.title);
+        setProfileId(defaults.profileId);
+        setAsrGatewayId(defaults.asrGatewayId);
+        setAsrGatewayModelId(defaults.asrGatewayModelId);
+        setOcrEnabled(defaults.ocrEnabled);
+        setEmbeddedCaptionFallback(defaults.embeddedCaptionFallback);
+        setOcrGatewayId(defaults.ocrGatewayId);
+        setOcrGatewayModelId(defaults.ocrGatewayModelId);
+        setTextEditEnabled(defaults.textEditEnabled);
+        setTextModelId(defaults.textModelId);
+        setExportDirectory(defaults.exportDirectory);
+        setFrameStrategy(defaults.frameStrategy);
+        setFrameInterval(defaults.frameInterval);
+        setSceneThreshold(defaults.sceneThreshold);
+        setMaxCandidateFrames(defaults.maxCandidateFrames);
+        setFusionWindow(defaults.fusionWindow);
+        if (task && task.status !== "QUEUED") {
+          setMessage("该任务已经开始处理，只能查看，不能再修改队列配置。");
+        } else if (!task && defaults.restored) {
+          setMessage("已自动恢复上一个任务的处理方案、模型、OCR、文本整理与导出设置。");
+        } else {
+          setMessage(null);
         }
       })
-      .catch(error => setMessage(error instanceof Error ? error.message : "设置加载失败"));
-  }, []);
+      .catch(error => {
+        if (active) setMessage(error instanceof Error ? error.message : "设置加载失败");
+      })
+      .finally(() => {
+        if (active) setInitializing(false);
+      });
+    return () => { active = false; };
+  }, [editTaskId]);
 
   const asrGateways = useMemo(
     () => Array.from(new Map(
@@ -144,6 +187,10 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       setMessage("请至少选择或输入一个视频、音频或媒体 URL。");
       return;
     }
+    if (editTaskId && inputs.length !== 1) {
+      setMessage("编辑队列任务时只能保留一个输入来源；批量任务请分别编辑。");
+      return;
+    }
     if (sourceType === "URL" && inputs.some(value => !/^https?:\/\//i.test(value))) {
       setMessage("URL 输入必须使用 http 或 https。");
       return;
@@ -186,13 +233,8 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
     setBusy(true);
     setMessage(null);
     try {
-      const tasks = await api.createTasks({
+      const configuration = {
         pipeline_mode: "REAL",
-        inputs: inputs.map(source => ({
-          source,
-          source_type: sourceType,
-          text_source: textSource,
-        })),
         profile_id: profileId ? Number(profileId) : null,
         asr_gateway_model_id: asrGatewayModelId
           ? Number(asrGatewayModelId)
@@ -214,12 +256,25 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
           fusion_window_seconds: fusionWindow,
           keep_timestamps: false,
         },
-      });
-      setSources("");
-      setMessage(`已创建 ${tasks.length} 个完整转换任务。`);
+      };
+      const taskInputs = inputs.map(source => ({
+        source,
+        source_type: sourceType,
+        text_source: textSource,
+        ...(editTaskId ? { title: title.trim() || null } : {}),
+      }));
+      if (editTaskId) {
+        await api.updateTask(editTaskId, { ...configuration, input: taskInputs[0] });
+        setMessage("队列任务设置已更新。");
+      } else {
+        const tasks = await api.createTasks({ ...configuration, inputs: taskInputs });
+        setSources("");
+        setMessage(`已创建 ${tasks.length} 个完整转换任务。`);
+      }
       await onCreated();
+      if (editTaskId) window.location.hash = "/queue";
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "创建失败");
+      setMessage(error instanceof Error ? error.message : (editTaskId ? "保存失败" : "创建失败"));
     } finally {
       setBusy(false);
     }
@@ -228,12 +283,22 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
   return <>
     <header className="page-header">
       <div>
-        <p className="eyebrow">视频 / 音频 / 网页 URL</p>
-        <h1>新建完整转换任务</h1>
-        <p>文本可来自 ASR，或由视频网页链接直接抓取字幕；随后完成可选 OCR、忠实整理与 Markdown 导出。</p>
+        <p className="eyebrow">{editTaskId ? "仅限尚未开始的任务" : "视频 / 音频 / 网页 URL"}</p>
+        <h1>{editTaskId ? "编辑队列任务" : "新建完整转换任务"}</h1>
+        <p>{editTaskId
+          ? "保存后会更新输入来源和完整配置快照；任务一旦开始处理就不再允许修改。"
+          : "自动沿用上一个任务的处理设置；只需填写新的输入来源即可加入队列。"}</p>
       </div>
     </header>
-    <section className="panel form-panel">
+    <section className="panel form-panel" aria-busy={initializing}>
+      {editTaskId && <label>任务标题
+        <input
+          maxLength={300}
+          value={title}
+          onChange={event => setTitle(event.target.value)}
+          placeholder="留空时根据输入来源自动生成"
+        />
+      </label>}
       <div className="segmented">
         <button
           className={sourceType === "URL" ? "selected" : ""}
@@ -483,10 +548,11 @@ export function NewTaskPage({ profiles, gatewayModels, models, onCreated }: Prop
       </div>
       {message && <p className="form-message">{message}</p>}
       <div className="actions">
-        <button className="primary" disabled={busy} onClick={() => void submit()}>
-          {busy ? "正在创建…" : "加入串行队列"}
+        <button className="primary" disabled={busy || initializing} onClick={() => void submit()}>
+          {busy ? (editTaskId ? "正在保存…" : "正在创建…") : (editTaskId ? "保存队列修改" : "加入串行队列")}
         </button>
         <button disabled={!sources} onClick={() => setSources("")}>清空输入</button>
+        {editTaskId && <button onClick={() => { window.location.hash = "/queue"; }}>取消编辑</button>}
       </div>
     </section>
   </>;

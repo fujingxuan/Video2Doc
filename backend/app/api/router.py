@@ -35,6 +35,7 @@ from app.schemas.api import (
     TaskBatchCreate,
     TaskDetail,
     TaskRead,
+    TaskUpdate,
 )
 from app.services.catalog import CatalogService
 from app.services.cache import TaskCacheService
@@ -156,7 +157,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="2.3.3",
+        version="3.0.0",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -304,6 +305,20 @@ def list_tasks(
 @router.get("/tasks/{task_id}", response_model=TaskDetail, tags=["tasks"])
 def get_task(task_id: int, session: Session = Depends(get_db)) -> TaskDetail:
     return TaskService(session).get(task_id)
+
+
+@router.put("/tasks/{task_id}", response_model=TaskRead, tags=["tasks"])
+def update_task(
+    task_id: int,
+    payload: TaskUpdate,
+    session: Session = Depends(get_db),
+) -> TaskRead:
+    return TaskService(session, queue_worker).update(task_id, payload)
+
+
+@router.delete("/tasks/{task_id}", response_model=dict, tags=["tasks"])
+def delete_task(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session, queue_worker).delete(task_id)
 
 
 @router.get("/tasks/{task_id}/snapshot", response_model=dict, tags=["tasks"])

@@ -489,6 +489,16 @@ class TaskInput(BaseModel):
             raise ValueError("输入来源不能为空或包含 NUL 字符")
         return normalized
 
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if "\x00" in normalized:
+            raise ValueError("任务标题不能包含 NUL 字符")
+        return normalized or None
+
     @model_validator(mode="after")
     def subtitle_requires_video_url(self) -> TaskInput:
         if self.text_source == "SUBTITLE" and self.source_type != "URL":
@@ -496,8 +506,7 @@ class TaskInput(BaseModel):
         return self
 
 
-class TaskBatchCreate(BaseModel):
-    inputs: list[TaskInput] = Field(min_length=1, max_length=100)
+class TaskConfiguration(BaseModel):
     profile_id: int | None = None
     config_overrides: dict[str, Any] = Field(default_factory=dict)
     pipeline_mode: Literal["REAL", "SIMULATED"] = "REAL"
@@ -539,6 +548,14 @@ class TaskBatchCreate(BaseModel):
         if "\x00" in normalized or path.is_absolute() or ".." in path.parts:
             raise ValueError("Export Inbox must be a safe relative path")
         return normalized
+
+
+class TaskBatchCreate(TaskConfiguration):
+    inputs: list[TaskInput] = Field(min_length=1, max_length=100)
+
+
+class TaskUpdate(TaskConfiguration):
+    input: TaskInput
 
 
 class SnapshotRead(BaseModel):

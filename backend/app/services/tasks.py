@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -21,13 +22,15 @@ from app.models import (
 )
 from app.models.entities import utcnow
 from app.repositories.tasks import TaskRepository
-from app.schemas.api import QueueStatus, TaskBatchCreate, TaskDetail, TaskRead
+from app.schemas.api import QueueStatus, TaskBatchCreate, TaskDetail, TaskInput, TaskRead, TaskUpdate
 from app.services.gateways import sanitize_gateway_metadata
 from app.services.serializers import task_detail, task_read
 from app.storage.workspace import (
+    append_task_log,
     create_workspace,
     list_artifacts,
     read_json,
+    write_json,
 )
 
 
@@ -61,41 +64,12 @@ class TaskService:
         tasks: list[Task] = []
         for task_input in payload.inputs:
             title = task_input.title or Path(task_input.source).name or task_input.source[:100]
-            snapshot = copy.deepcopy(base_snapshot)
-            snapshot["processing"]["text_source"] = task_input.text_source
-            snapshot["input"] = {
-                "source": task_input.source,
-                "source_type": task_input.source_type,
-                "title": title,
-                "text_source": task_input.text_source,
-            }
-            if task_input.text_source == "SUBTITLE":
-                snapshot["subtitle"] = {
-                    "mode": "URL_SUBTITLE_FETCH",
-                    "provider": "yt-dlp-subtitle",
-                    "source_url": task_input.source,
-                    "language_priority": [
-                        "zh-Hans",
-                        "zh-CN",
-                        "zh-Hant",
-                        "zh-TW",
-                        "zh-HK",
-                        "zh",
-                        "en",
-                        "en-orig",
-                    ],
-                    "embedded_ocr_fallback": bool(
-                        snapshot["processing"].get("embedded_subtitle_ocr_fallback")
-                    ),
-                    "embedded_ocr_interval_seconds": float(
-                        snapshot["processing"].get("embedded_subtitle_interval_seconds", 1.0)
-                    ),
-                }
-                snapshot["input"]["subtitle"] = copy.deepcopy(snapshot["subtitle"])
-            snapshot["simulation"] = {
-                "enabled": payload.pipeline_mode == "SIMULATED",
-                "failure_mode": task_input.simulate_failure,
-            }
+            snapshot = _task_snapshot(
+                base_snapshot,
+                task_input,
+                title=title,
+                pipeline_mode=payload.pipeline_mode,
+            )
             item = Task(
                 source=task_input.source,
                 source_type=task_input.source_type,
@@ -111,7 +85,7 @@ class TaskService:
             item.snapshot = TaskConfigSnapshot(schema_version=6, snapshot_json=snapshot)
             tasks.append(item)
         settings.last_profile_id = profile.id if profile else None
-        settings.last_task_config = copy.deepcopy(base_snapshot)
+        settings.last_task_config = copy.deepcopy(tasks[-1].snapshot.snapshot_json)
         self.session.commit()
         if self.worker:
             self.worker.notify()
@@ -125,6 +99,66 @@ class TaskService:
         if not item:
             raise NotFoundError("Task", task_id)
         return task_detail(item)
+
+    def update(self, task_id: int, payload: TaskUpdate) -> TaskRead:
+        item = self.repo.get(task_id, detail=True)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        if item.status != "QUEUED":
+            raise ConflictError("Only queued tasks can be edited")
+
+        settings = self._get_or_create_settings()
+        profile = self._resolve_profile(payload.profile_id, settings)
+        base_snapshot = self._build_snapshot(
+            profile,
+            settings,
+            payload.config_overrides,
+            payload.pipeline_mode,
+            payload.asr_model_id,
+            payload.asr_gateway_model_id,
+            payload.ocr_gateway_model_id,
+            payload.text_model_id,
+            payload.export_directory,
+            payload.export_vault_path,
+            payload.export_inbox_relative_path,
+            require_asr=payload.input.text_source in {"ASR", "SUBTITLE"},
+        )
+        title = payload.input.title or Path(payload.input.source).name or payload.input.source[:100]
+        snapshot = _task_snapshot(
+            base_snapshot,
+            payload.input,
+            title=title,
+            pipeline_mode=payload.pipeline_mode,
+        )
+        result = self.session.execute(
+            update(Task)
+            .where(Task.id == task_id, Task.status == "QUEUED")
+            .values(
+                source=payload.input.source,
+                source_type=payload.input.source_type,
+                title=title,
+            )
+        )
+        if result.rowcount != 1:
+            self.session.rollback()
+            raise ConflictError("Task started before the edit could be saved")
+        workspace = _validated_workspace(item)
+        if workspace is None:
+            self.session.rollback()
+            raise ConflictError("Task workspace no longer exists; the queued task cannot be edited")
+        item.snapshot.schema_version = 6
+        item.snapshot.snapshot_json = snapshot
+        settings.last_profile_id = profile.id if profile else None
+        settings.last_task_config = copy.deepcopy(snapshot)
+        _sync_workspace_snapshot(workspace, snapshot)
+        append_task_log(workspace, "Queued task settings were edited before processing")
+        self.session.commit()
+        updated_item = self.repo.get(task_id)
+        if updated_item is None:
+            raise NotFoundError("Task", task_id)
+        if self.worker:
+            self.worker.notify()
+        return task_read(updated_item)
 
     def snapshot(self, task_id: int) -> dict[str, Any]:
         item = self.repo.get(task_id, detail=True)
@@ -282,6 +316,47 @@ class TaskService:
         if self.worker:
             self.worker.notify()
         return task_read(item)
+
+    def delete(self, task_id: int) -> dict[str, Any]:
+        item = self.repo.get(task_id, detail=True)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        if item.status == "PROCESSING":
+            raise ConflictError("A processing task must be cancelled before it can be deleted")
+
+        previous_status = item.status
+        previous_stage = item.current_stage
+        claimed = self.session.execute(
+            update(Task)
+            .where(Task.id == task_id, Task.status == previous_status)
+            .values(status="DELETING", current_stage="DELETING")
+        )
+        if claimed.rowcount != 1:
+            self.session.rollback()
+            raise ConflictError("Task state changed before deletion could start")
+        self.session.commit()
+        try:
+            result = _delete_task_files(item)
+        except (OSError, ValueError, ConflictError) as exc:
+            self.session.rollback()
+            current = self.session.get(Task, task_id)
+            if current is not None and current.status == "DELETING":
+                current.status = previous_status
+                current.current_stage = previous_stage
+                self.session.commit()
+            message = exc.message if isinstance(exc, ConflictError) else str(exc)
+            raise ConflictError(f"Task files could not be deleted safely: {message}") from exc
+
+        self.session.delete(item)
+        self.session.commit()
+        if self.worker:
+            self.worker.notify()
+        return {
+            "task_id": task_id,
+            "files_removed": result["files_removed"],
+            "bytes_freed": result["bytes_freed"],
+            "deleted_paths": result["deleted_paths"],
+        }
 
     def queue_status(self) -> QueueStatus:
         counts = self.repo.counts()
@@ -628,6 +703,208 @@ class TaskService:
             self.session.add(item)
             self.session.flush()
         return item
+
+
+def _task_snapshot(
+    base_snapshot: dict[str, Any],
+    task_input: TaskInput,
+    *,
+    title: str,
+    pipeline_mode: str,
+) -> dict[str, Any]:
+    snapshot = copy.deepcopy(base_snapshot)
+    snapshot["processing"]["text_source"] = task_input.text_source
+    snapshot["input"] = {
+        "source": task_input.source,
+        "source_type": task_input.source_type,
+        "title": title,
+        "text_source": task_input.text_source,
+    }
+    if task_input.text_source == "SUBTITLE":
+        snapshot["subtitle"] = {
+            "mode": "URL_SUBTITLE_FETCH",
+            "provider": "yt-dlp-subtitle",
+            "source_url": task_input.source,
+            "language_priority": [
+                "zh-Hans",
+                "zh-CN",
+                "zh-Hant",
+                "zh-TW",
+                "zh-HK",
+                "zh",
+                "en",
+                "en-orig",
+            ],
+            "embedded_ocr_fallback": bool(
+                snapshot["processing"].get("embedded_subtitle_ocr_fallback")
+            ),
+            "embedded_ocr_interval_seconds": float(
+                snapshot["processing"].get("embedded_subtitle_interval_seconds", 1.0)
+            ),
+        }
+        snapshot["input"]["subtitle"] = copy.deepcopy(snapshot["subtitle"])
+    snapshot["simulation"] = {
+        "enabled": pipeline_mode == "SIMULATED",
+        "failure_mode": task_input.simulate_failure,
+    }
+    return snapshot
+
+
+def _validated_workspace(item: Task) -> Path | None:
+    if not item.workspace_path:
+        return None
+    workspace = Path(item.workspace_path)
+    if not workspace.exists():
+        return None
+    try:
+        workspace = workspace.resolve(strict=True)
+    except OSError as exc:
+        raise ConflictError("Task workspace cannot be resolved") from exc
+    snapshot = item.snapshot.snapshot_json if item.snapshot else {}
+    data_path = (snapshot.get("paths") or {}).get("data")
+    if not isinstance(data_path, str) or not data_path.strip():
+        raise ConflictError("Task snapshot does not contain its data root")
+    data_root = Path(data_path).resolve(strict=False)
+    if workspace == data_root or not workspace.is_relative_to(data_root):
+        raise ConflictError("Task workspace is outside its recorded data root")
+    if not workspace.name.endswith(f"_{item.id:06d}"):
+        raise ConflictError("Task workspace name does not match the task ID")
+    state = read_json(workspace / "task_state.json")
+    if not state or state.get("task_id") != item.id:
+        raise ConflictError("Task workspace identity check failed")
+    return workspace
+
+
+def _sync_workspace_snapshot(workspace: Path, snapshot: dict[str, Any]) -> None:
+    write_json(workspace / "task_config.json", snapshot)
+    disabled_marker = workspace / "03_ocr/DISABLED.txt"
+    processing = snapshot.get("processing") or {}
+    ocr_disabled = not processing.get("ocr_enabled") and not processing.get(
+        "embedded_subtitle_ocr_fallback"
+    )
+    if ocr_disabled:
+        disabled_marker.write_text(
+            "OCR is disabled for this task snapshot. No OCR processing was performed.\n",
+            encoding="utf-8",
+        )
+    else:
+        disabled_marker.unlink(missing_ok=True)
+
+
+def _delete_task_files(item: Task) -> dict[str, Any]:
+    workspace = _validated_workspace(item)
+    snapshot = item.snapshot.snapshot_json if item.snapshot else {}
+    targets: list[Path] = []
+    if workspace is not None:
+        targets.append(workspace)
+
+    source_path = None
+    if item.source_type == "LOCAL_FILE":
+        try:
+            source_path = Path(item.source).resolve(strict=False)
+        except OSError:
+            source_path = None
+
+    for export in item.markdown_exports:
+        if export.target_type == "WORKSPACE" or export.status != "COMPLETED":
+            continue
+        export_root = _export_root(export.config_json)
+        for value in (
+            export.markdown_path,
+            export.attachment_directory,
+            export.data_directory,
+        ):
+            if value:
+                targets.append(_validated_generated_target(Path(value), export_root, source_path))
+
+    fallback_root_value = (snapshot.get("paths") or {}).get("inbox")
+    fallback_root = (
+        Path(fallback_root_value).resolve(strict=False)
+        if isinstance(fallback_root_value, str) and fallback_root_value.strip()
+        else None
+    )
+    for value in (item.output_path, item.export_path):
+        if not value:
+            continue
+        candidate = Path(value)
+        if workspace is not None and candidate.resolve(strict=False).is_relative_to(workspace):
+            continue
+        if fallback_root is None:
+            raise ConflictError("Task output root is missing from its snapshot")
+        targets.append(_validated_generated_target(candidate, fallback_root, source_path))
+
+    unique_targets: list[Path] = []
+    for target in targets:
+        resolved = target.resolve(strict=False)
+        if any(resolved == existing for existing in unique_targets):
+            continue
+        if workspace is not None and resolved != workspace and resolved.is_relative_to(workspace):
+            continue
+        unique_targets.append(resolved)
+
+    files_removed = 0
+    bytes_freed = 0
+    deleted_paths: list[str] = []
+    for target in sorted(unique_targets, key=lambda value: len(value.parts), reverse=True):
+        if not target.exists():
+            continue
+        if target.is_symlink():
+            raise ConflictError(f"Refusing to delete generated symlink: {target}")
+        if target.is_dir():
+            files = [path for path in target.rglob("*") if path.is_file() and not path.is_symlink()]
+            if any(path.is_symlink() for path in target.rglob("*")):
+                raise ConflictError(f"Refusing to delete a generated directory containing links: {target}")
+            files_removed += len(files)
+            bytes_freed += sum(_file_size(path) for path in files)
+            shutil.rmtree(target)
+        elif target.is_file():
+            files_removed += 1
+            bytes_freed += _file_size(target)
+            target.unlink()
+        else:
+            raise ConflictError(f"Generated path is not a regular file or directory: {target}")
+        deleted_paths.append(str(target))
+    return {
+        "files_removed": files_removed,
+        "bytes_freed": bytes_freed,
+        "deleted_paths": deleted_paths,
+    }
+
+
+def _export_root(config: dict[str, Any] | None) -> Path:
+    config = config or {}
+    vault = config.get("vault_path")
+    relative = config.get("inbox_relative_path", ".")
+    if not isinstance(vault, str) or not vault.strip():
+        raise ConflictError("Completed export does not record its output root")
+    if not isinstance(relative, str):
+        raise ConflictError("Completed export has an invalid relative output path")
+    root = (Path(vault) / relative).resolve(strict=False)
+    vault_root = Path(vault).resolve(strict=False)
+    if root != vault_root and not root.is_relative_to(vault_root):
+        raise ConflictError("Completed export root escapes its recorded Vault")
+    return root
+
+
+def _validated_generated_target(
+    candidate: Path,
+    output_root: Path,
+    source_path: Path | None,
+) -> Path:
+    resolved = candidate.resolve(strict=False)
+    root = output_root.resolve(strict=False)
+    if resolved == root or not resolved.is_relative_to(root):
+        raise ConflictError(f"Generated path is outside its recorded output root: {candidate}")
+    if source_path is not None and resolved == source_path:
+        raise ConflictError("Refusing to delete the original input file")
+    return resolved
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
 
 
 def _ffprobe_for(ffmpeg_path: str | None) -> str:
