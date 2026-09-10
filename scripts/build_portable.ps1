@@ -112,6 +112,7 @@ try {
         --hidden-import uvicorn.protocols.http.auto `
         --hidden-import uvicorn.protocols.websockets.auto `
         --hidden-import uvicorn.lifespan.on `
+        --hidden-import python_multipart `
         (Join-Path $backend "video2doc_launcher.py")
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed." }
 }
@@ -120,7 +121,14 @@ finally { Pop-Location }
 if (-not (Test-Path -LiteralPath $pyinstallerOutput)) {
     throw "PyInstaller did not create the expected Video2Doc directory."
 }
-Move-Item -LiteralPath $pyinstallerOutput -Destination $portable
+$resolvedDist = (Resolve-Path -LiteralPath $distRoot).Path
+$resolvedOutput = (Resolve-Path -LiteralPath $pyinstallerOutput).Path
+$absolutePortable = [IO.Path]::GetFullPath($portable)
+if (-not $resolvedOutput.StartsWith($resolvedDist + "\", [System.StringComparison]::OrdinalIgnoreCase) -or
+    -not $absolutePortable.StartsWith($resolvedDist + "\", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to move a portable build outside its distribution directory."
+}
+Move-Item -LiteralPath $resolvedOutput -Destination $absolutePortable
 
 $packagedPrompt = Join-Path $portable "_internal\app\prompts\faithful_article_v1.txt"
 if (-not (Test-Path -LiteralPath $packagedPrompt -PathType Leaf)) {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,7 @@ class TaskCacheService:
         self.session = session
 
     def clear(self, task_ids: list[int] | None = None) -> dict[str, Any]:
-        statement = select(Task).order_by(Task.id)
+        statement = select(Task).where(Task.deleted_at.is_(None)).order_by(Task.id)
         if task_ids is not None:
             statement = statement.where(Task.id.in_(set(task_ids)))
         tasks = list(self.session.scalars(statement))
@@ -51,7 +52,14 @@ class TaskCacheService:
             if not task.workspace_path:
                 skipped.append({"task_id": task.id, "reason": "任务没有工作区"})
                 continue
-            result = clear_workspace_cache(Path(task.workspace_path))
+            try:
+                result = clear_workspace_cache(Path(task.workspace_path))
+            except OSError:
+                skipped.append({
+                    "task_id": task.id,
+                    "reason": "工作区包含链接或缓存无法访问，请检查路径和文件占用后重试",
+                })
+                continue
             result["task_id"] = task.id
             cleared.append(result)
             total_files += int(result["files_removed"])
@@ -66,12 +74,27 @@ class TaskCacheService:
 
 
 def clear_workspace_cache(workspace: Path) -> dict[str, int]:
+    if workspace.exists() and _is_link(workspace):
+        raise OSError("Refusing to clear cache through a workspace link")
     try:
         root = workspace.resolve(strict=True)
     except OSError:
         return {"files_removed": 0, "bytes_freed": 0}
     if not root.is_dir():
         return {"files_removed": 0, "bytes_freed": 0}
+
+    # Preflight before deleting anything. resolve() alone is insufficient:
+    # it loses junction/symlink identity, including links to preserved outputs
+    # within this workspace. os.walk must not descend into Windows junctions.
+    def walk_error(error: OSError) -> None:
+        raise error
+
+    for directory, subdirectories, filenames in os.walk(
+        root, followlinks=False, onerror=walk_error,
+    ):
+        for name in (*subdirectories, *filenames):
+            if _is_link(Path(directory) / name):
+                raise OSError("Refusing to clear cache in a workspace containing links")
 
     files_removed = 0
     bytes_freed = 0
@@ -111,6 +134,13 @@ def clear_workspace_cache(workspace: Path) -> dict[str, int]:
     )
     write_artifact_index(root)
     return {"files_removed": files_removed, "bytes_freed": bytes_freed}
+
+
+def _is_link(path: Path) -> bool:
+    metadata = path.lstat()
+    return stat.S_ISLNK(metadata.st_mode) or bool(
+        getattr(metadata, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    )
 
 
 def _tree_metrics(path: Path) -> tuple[int, int]:

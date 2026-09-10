@@ -81,7 +81,13 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
 
     <section className="panel action-bar">
       <div className="actions">
-        {["QUEUED", "PROCESSING"].includes(task.status) && (
+        {task.status === "WAITING_REVIEW" && (
+          <button className="primary" onClick={() => { window.location.hash = `/tasks/${task.id}/manual-review`; }}>校对初稿 / 完成任务</button>
+        )}
+        {task.document_path && !["QUEUED", "PROCESSING"].includes(task.status) && (
+          <button onClick={() => { window.location.hash = `/tasks/${task.id}/review`; }}>审阅整理差异</button>
+        )}
+        {["QUEUED", "PROCESSING", "WAITING_REVIEW"].includes(task.status) && (
           <button onClick={() => void operate("cancel")}>取消任务</button>
         )}
         {["FAILED", "INTERRUPTED"].includes(task.status) && (

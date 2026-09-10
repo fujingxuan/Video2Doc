@@ -57,7 +57,7 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
             ).fetchall()
         }
 
-    assert revision == ("0011_full_article_text_edit",)
+    assert revision == ("0013_manual_review",)
     assert {
         "frames_manifest_path",
         "ocr_timeline_path",
@@ -65,6 +65,9 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
         "document_path",
         "markdown_path",
         "export_path",
+        "deleted_at",
+        "trash_expires_at",
+        "review_submission_path",
     }.issubset(task_columns)
     assert {"document_artifacts", "text_edit_runs", "markdown_exports"}.issubset(tables)
     assert "model_usage" in stage_columns
@@ -97,7 +100,34 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
             ).fetchall()
         }
     assert revision == ("0006_ocr_fusion_artifacts",)
-    assert {"document_path", "markdown_path", "export_path"}.isdisjoint(task_columns)
+    assert {"document_path", "markdown_path", "export_path", "deleted_at", "trash_expires_at"}.isdisjoint(task_columns)
     assert {"document_artifacts", "text_edit_runs", "markdown_exports"}.isdisjoint(
         tables
     )
+
+
+def test_trash_migration_preserves_existing_task_and_snapshot(tmp_path: Path) -> None:
+    backend_dir = Path(__file__).resolve().parents[1]
+    database_path = tmp_path / 'existing.db'
+    environment = os.environ.copy()
+    environment['VIDEO2DOC_DATABASE_URL'] = f'sqlite:///{database_path.as_posix()}'
+    def migrate(direction: str, revision: str) -> None:
+        result = subprocess.run([sys.executable, '-m', 'alembic', direction, revision],
+                                cwd=backend_dir, env=environment, capture_output=True,
+                                text=True, encoding='utf-8', timeout=60)
+        assert result.returncode == 0, result.stdout + result.stderr
+    migrate('upgrade', '0011_full_article_text_edit')
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("INSERT INTO tasks (id, source, source_type, title, status, current_stage, progress, cancel_requested, attempt, created_at, updated_at) VALUES (1, 'original.mp4', 'LOCAL_FILE', 'Existing history', 'COMPLETED', 'COMPLETED', 100, 0, 2, '2026-09-01', '2026-09-01')")
+        connection.execute("INSERT INTO task_config_snapshots (task_id, schema_version, snapshot_json, created_at) VALUES (1, 6, ?, '2026-09-01')", ('{"unchanged": true}',))
+        before = connection.execute('SELECT * FROM tasks').fetchone()
+    migrate('upgrade', 'head')
+    with sqlite3.connect(database_path) as connection:
+        after = connection.execute('SELECT * FROM tasks').fetchone()
+        assert after[:len(before)] == before and after[len(before):] == (None, None, None)
+        assert connection.execute('SELECT snapshot_json FROM task_config_snapshots').fetchone() == ('{"unchanged": true}',)
+        assert 'ix_tasks_history_page' in {row[1] for row in connection.execute('PRAGMA index_list(tasks)')}
+    migrate('downgrade', '0011_full_article_text_edit')
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute('SELECT * FROM tasks').fetchone() == before
+        assert connection.execute('SELECT snapshot_json FROM task_config_snapshots').fetchone() == ('{"unchanged": true}',)

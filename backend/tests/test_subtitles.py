@@ -13,6 +13,7 @@ from app.providers.subtitles import (
     YtDlpSubtitleSource,
     _caption_cues,
     import_subtitle,
+    _subtitle_get,
 )
 from app.storage.workspace import WorkspacePaths, write_json
 
@@ -73,7 +74,7 @@ async def test_ytdlp_subtitle_source_fetches_chinese_caption_and_reuses_it(
     command = runner.calls[0]
     assert "--skip-download" in command
     assert "--write-subs" in command
-    assert "--write-auto-subs" in command
+    assert "--no-write-auto-subs" in command
     assert command[command.index("--sub-langs") + 1] == "zh-CN"
     assert acquired.path == reused.path
     assert acquired.language == "zh-CN"
@@ -222,3 +223,108 @@ def test_embedded_caption_prefers_large_lower_text_over_page_noise() -> None:
     cues = _caption_cues((result,), duration=6.0, interval_seconds=1.0)
 
     assert cues == [(4.5, 5.5, "把付费用户的单条字数上限")]
+
+
+@pytest.mark.asyncio
+async def test_subtitle_tries_next_track_and_ignores_stale_or_partial_files(tmp_path):
+    paths = WorkspacePaths.from_root(tmp_path / "task")
+    paths.create()
+    write_json(paths.metadata / "ytdlp.json", {
+        "subtitles": {"zh-CN": [{"ext": "vtt"}]},
+        "automatic_captions": {"zh-CN": [{"ext": "json3"}]},
+    })
+    stale = paths.source / "subtitles" / "source.zh-CN.vtt"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n错误的旧字幕\n", encoding="utf-8")
+
+    class Runner:
+        calls = []
+        async def run(self, args, **kwargs):
+            self.calls.append(args)
+            output = Path(args[args.index("--output") + 1])
+            if "--write-subs" in args:
+                output.with_name("source.zh-CN.vtt.part").write_text("unfinished", encoding="utf-8")
+                raise PipelineError("PROCESS_FAILED", "manual track unavailable")
+            write_json(output.with_name("source.zh-CN.json3"), {"events": [
+                {"tStartMs": 500, "dDurationMs": 1200, "segs": [{"utf8": "有效字幕"}]},
+            ]})
+    runner = Runner()
+    acquired = await YtDlpSubtitleSource("yt-dlp", runner).acquire(
+        "https://example.com/video", paths, cancel_check=lambda: False, progress=lambda *args: None)
+    assert len(runner.calls) == 2
+    assert acquired.source_kind == "automatic" and acquired.subtitle_format == "json3"
+    assert import_subtitle(Path(acquired.path)).segments[0].text == "有效字幕"
+    assert stale.read_text(encoding="utf-8").endswith("错误的旧字幕\n")
+
+
+@pytest.mark.asyncio
+async def test_bilibili_continues_after_endpoint_and_track_failure(tmp_path):
+    paths = WorkspacePaths.from_root(tmp_path / "task")
+    paths.create()
+    seen = []
+    async def handler(request):
+        seen.append(request.url.path)
+        if request.url.path == "/x/web-interface/view":
+            return httpx.Response(200, json={"code": 0, "data": {
+                "title": "测试视频", "pages": [{"cid": 7, "duration": 2}],
+            }})
+        if request.url.path == "/x/player/wbi/v2":
+            return httpx.Response(503)
+        if request.url.path == "/x/player/v2":
+            return httpx.Response(200, json={"code": 0, "data": {"subtitle": {"subtitles": [
+                {"lan": "zh-CN", "subtitle_url": "https://captions.example/missing"},
+                {"lan": "ai-zh", "ai_type": 1, "subtitle_url": "https://captions.example/automatic"},
+            ]}}})
+        if request.url.path == "/missing":
+            return httpx.Response(404)
+        return httpx.Response(200, json={"body": [{"from": 0.0, "to": 1.5, "content": "自动字幕"}]})
+    acquired = await BilibiliSubtitleSource(transport=httpx.MockTransport(handler)).acquire_if_available(
+        "https://www.bilibili.com/video/BV1xx411c7mD", paths,
+        cancel_check=lambda: False, progress=lambda *args: None)
+    assert acquired is not None and acquired.source_kind == "automatic"
+    assert seen.count("/x/player/wbi/v2") == 2
+    assert "/x/player/v2" in seen and "/missing" in seen
+    assert (paths.metadata / "ytdlp.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_bilibili_invalid_page_does_not_silently_select_another_page(tmp_path):
+    paths = WorkspacePaths.from_root(tmp_path / "task")
+    paths.create()
+    async def handler(request):
+        assert request.url.path == "/x/web-interface/view"
+        return httpx.Response(200, json={"code": 0, "data": {"pages": [{"cid": 7}]}})
+    acquired = await BilibiliSubtitleSource(transport=httpx.MockTransport(handler)).acquire_if_available(
+        "https://www.bilibili.com/video/BV1xx411c7mD?p=9", paths,
+        cancel_check=lambda: False, progress=lambda *args: None)
+    assert acquired is None
+
+
+@pytest.mark.asyncio
+async def test_subtitle_http_cancellation_stops_inflight_request():
+    import asyncio
+    cancelled = False
+    finished = asyncio.Event()
+    async def handler(request):
+        nonlocal cancelled
+        cancelled = True
+        try:
+            await asyncio.sleep(10)
+        finally:
+            finished.set()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(PipelineError) as error:
+            await _subtitle_get(client, "https://example.com/subtitle", lambda: cancelled)
+    assert error.value.code == "PROCESS_CANCELLED"
+    assert finished.is_set()
+
+
+@pytest.mark.parametrize("text", ["00:00:01.000 -->", "00:00:00.000 --> 00:00:nan\nbody"])
+def test_invalid_vtt_timing_does_not_crash_parser(tmp_path, text):
+    path = tmp_path / "bad.vtt"
+    path.write_text(text, encoding="utf-8")
+    try:
+        imported = import_subtitle(path)
+        assert all(segment.end_time is None for segment in imported.segments)
+    except PipelineError as error:
+        assert error.code == "SUBTITLE_EMPTY"

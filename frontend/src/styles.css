@@ -113,3 +113,49 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .export-list small, .export-list span { color: var(--muted); }
 .panel > details { border: 1px solid var(--border); border-radius: 9px; padding: .75rem; margin-top: .7rem; }
 .panel > details > summary { cursor: pointer; color: #d1dbd1; font-weight: 700; }
+
+.history-filters { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; gap: 1rem; margin-bottom: 1rem; }
+.history-filters label { display: grid; gap: .35rem; color: var(--muted); font-size: .8rem; }
+.history-filters input, .history-filters select { min-width: 0; width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: .6rem; background: #111914; color: var(--text); }
+.history-viewport { height: min(64vh, 640px); overflow: auto; border: 1px solid var(--border); border-radius: 11px; }
+.history-table { table-layout: fixed; min-width: 890px; }
+.history-table th { position: sticky; top: 0; z-index: 1; height: 48px; }
+.history-table th:nth-child(1) { width: 36px; }
+.history-table th:nth-child(2) { width: 210px; }
+.history-table th:nth-child(3) { width: 80px; }
+.history-table th:nth-child(4) { width: 115px; }
+.history-table th:nth-child(5) { width: 150px; }
+.history-table th:nth-child(6) { width: 200px; }
+.history-table .progress { width: 88px; }
+.history-row, .history-row td { height: 112px; }
+.history-row td { overflow: hidden; }
+.history-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.history-row td > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-row td:nth-child(5) > small { white-space: normal; }
+.virtual-spacer td { padding: 0; border: 0; line-height: 0; }
+.history-pagination { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .75rem; padding-top: 1rem; color: var(--muted); font-size: .8rem; }
+.history-pagination .actions { align-items: center; gap: .75rem; }
+.review-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2rem; }
+.review-columns .panel { min-width: 0; }
+.review-columns h2 small { color: var(--muted); font-weight: 400; margin-left: .5rem; }
+.panel .review-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 70vh; font-size: .86rem; }
+.review-summary p { color: var(--muted); font-size: .86rem; }
+.button-link { text-decoration: none; color: var(--text); border: 1px solid var(--border); background: var(--surface-raised); border-radius: 9px; padding: .42rem .62rem; font-size: .75rem; }
+.button-link:hover { border-color: var(--accent); }
+.confirm-dialog { width: min(520px, calc(100vw - 2rem)); padding: 1.5rem; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 80px #0008; }
+.confirm-dialog::backdrop { background: #0009; }
+.confirm-dialog h2 { margin: 0 0 1rem; font-size: 1.2rem; }
+.confirm-dialog p { color: var(--muted); line-height: 1.8; }
+.confirm-dialog .actions { justify-content: flex-end; margin-top: 1.5rem; }
+@media (max-width: 950px) { .review-columns { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .history-filters { grid-template-columns: 1fr 1fr; } .history-filters label:first-child { grid-column: 1 / -1; } }
+
+.manual-review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 18px 0; }
+.manual-review-grid label { display: grid; gap: .6rem; width: 100%; color: var(--muted); font-size: .85rem; }
+.manual-review-grid label + label { margin-top: 1rem; }
+.manual-review-grid textarea { width: 100%; height: min(60vh, 650px); min-height: 360px; padding: .9rem; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); font: inherit; line-height: 1.75; resize: vertical; }
+.manual-review-grid input[type="file"] { width: 100%; min-width: 0; }
+.metric-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.audio-upload { padding: 20px; border: 1px dashed var(--border, #bcc8d6); border-radius: 10px; }
+.status-waiting_review { background: #fff1cd; color: #77530b; }
+@media (max-width: 900px) { .manual-review-grid { grid-template-columns: 1fr; } }

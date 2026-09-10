@@ -585,6 +585,7 @@ class StageRead(BaseModel):
 
 
 class TaskRead(BaseModel):
+    review_submission_path: str | None = None
     id: int
     source: str
     source_type: str
@@ -611,6 +612,15 @@ class TaskRead(BaseModel):
     updated_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+    deleted_at: datetime | None = None
+    trash_expires_at: datetime | None = None
+
+
+class TaskPage(BaseModel):
+    items: list[TaskRead]
+    total: int
+    offset: int
+    limit: int
 
 
 class TaskDetail(TaskRead):
@@ -628,6 +638,7 @@ class TaskDetail(TaskRead):
 
 
 class QueueStatus(BaseModel):
+    waiting_review: int = 0
     max_concurrency: int = 1
     running: int
     queued: int

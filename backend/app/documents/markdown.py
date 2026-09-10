@@ -169,6 +169,10 @@ def _processing_summary(processing: dict[str, object]) -> dict[str, object]:
 
 
 def _edit_status(document: Document) -> str:
+    if document.edit_metadata.get("manual_review"):
+        if document.edit_metadata.get("reason") == "user_confirmed_original":
+            return "用户确认使用初稿（未启用文本模型）"
+        return "用户确认采用人工校对稿（保留原始转写与修改记录）"
     if (
         not document.edit_metadata
         or document.edit_metadata.get("enabled") is False

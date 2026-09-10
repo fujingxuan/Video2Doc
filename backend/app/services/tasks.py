@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import os
 import shutil
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -15,6 +16,7 @@ from app.core.credentials import credential_is_configured, credential_source
 from app.models import (
     AppSetting,
     GatewayModel,
+    MarkdownExport,
     ModelConfig,
     ProcessingProfile,
     Task,
@@ -22,7 +24,7 @@ from app.models import (
 )
 from app.models.entities import utcnow
 from app.repositories.tasks import TaskRepository
-from app.schemas.api import QueueStatus, TaskBatchCreate, TaskDetail, TaskInput, TaskRead, TaskUpdate
+from app.schemas.api import QueueStatus, TaskBatchCreate, TaskDetail, TaskInput, TaskPage, TaskRead, TaskUpdate
 from app.services.gateways import sanitize_gateway_metadata
 from app.services.serializers import task_detail, task_read
 from app.storage.workspace import (
@@ -43,8 +45,11 @@ class TaskService:
         self.session = session
         self.repo = TaskRepository(session)
         self.worker = worker
+        self.created_upload_workspaces: list[Path] = []
 
-    def create_batch(self, payload: TaskBatchCreate) -> list[TaskRead]:
+    def create_batch(
+        self, payload: TaskBatchCreate, *, uploaded_files: dict[str, dict] | None = None,
+    ) -> list[TaskRead]:
         settings = self._get_or_create_settings()
         profile = self._resolve_profile(payload.profile_id, settings)
         base_snapshot = self._build_snapshot(
@@ -82,6 +87,18 @@ class TaskService:
             data_root = Path(settings.data_path) if settings.data_path else get_settings().data_dir
             workspace = create_workspace(data_root, task_id=item.id, title=title, snapshot=snapshot)
             item.workspace_path = str(workspace)
+            if uploaded_files and task_input.source in uploaded_files:
+                self.created_upload_workspaces.append(workspace)
+                upload = uploaded_files[task_input.source]
+                destination = workspace / "00_source" / "upload" / upload["filename"]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(task_input.source, destination)
+                item.source = str(destination)
+                snapshot["input"]["source"] = str(destination)
+                snapshot["input"]["upload"] = {
+                    **upload, "path": str(destination), "owned_copy": True,
+                }
+                _sync_workspace_snapshot(workspace, snapshot)
             item.snapshot = TaskConfigSnapshot(schema_version=6, snapshot_json=snapshot)
             tasks.append(item)
         settings.last_profile_id = profile.id if profile else None
@@ -93,6 +110,16 @@ class TaskService:
 
     def list(self, status: str | None = None) -> list[TaskRead]:
         return [task_read(item) for item in self.repo.list(status)]
+
+    def page(
+        self, *, offset: int = 0, limit: int = 100, status: str | None = None,
+        search: str = "", trashed: bool = False,
+    ) -> TaskPage:
+        items, total, actual_offset = self.repo.page(
+            offset=offset, limit=limit, status=status, search=search, trashed=trashed,
+        )
+        return TaskPage(items=[task_read(item) for item in items], total=total,
+                        offset=actual_offset, limit=limit)
 
     def get(self, task_id: int) -> TaskDetail:
         item = self.repo.get(task_id, detail=True)
@@ -106,6 +133,8 @@ class TaskService:
             raise NotFoundError("Task", task_id)
         if item.status != "QUEUED":
             raise ConflictError("Only queued tasks can be edited")
+        if item.review_submission_path or (item.snapshot.snapshot_json.get("input") or {}).get("upload"):
+            raise ConflictError("已上传文件或已确认稿件的任务不能更换输入，请新建任务")
 
         settings = self._get_or_create_settings()
         profile = self._resolve_profile(payload.profile_id, settings)
@@ -132,7 +161,7 @@ class TaskService:
         )
         result = self.session.execute(
             update(Task)
-            .where(Task.id == task_id, Task.status == "QUEUED")
+            .where(Task.id == task_id, Task.status == "QUEUED", Task.deleted_at.is_(None))
             .values(
                 source=payload.input.source,
                 source_type=payload.input.source_type,
@@ -246,8 +275,8 @@ class TaskService:
             raise NotFoundError("Task", task_id)
         if not item.workspace_path:
             raise NotFoundError("Task workspace", task_id)
-        workspace = Path(item.workspace_path).resolve(strict=True)
         try:
+            workspace = Path(item.workspace_path).resolve(strict=True)
             candidate = (workspace / relative_path).resolve(strict=True)
         except (FileNotFoundError, OSError) as exc:
             raise NotFoundError("Task artifact", relative_path) from exc
@@ -269,16 +298,22 @@ class TaskService:
         item = self.repo.get(task_id)
         if not item:
             raise NotFoundError("Task", task_id)
-        if item.status == "QUEUED":
-            item.status = "CANCELLED"
-            item.current_stage = "CANCELLED"
-            item.error_code = "user_cancelled"
-            item.error_message = "Task was cancelled before processing started"
-            item.completed_at = utcnow()
+        if item.status in {"QUEUED", "WAITING_REVIEW"}:
+            result = self.session.execute(
+                update(Task).where(Task.id == task_id, Task.status == item.status,
+                                   Task.deleted_at.is_(None))
+                .values(status="CANCELLED", current_stage="CANCELLED",
+                        error_code="user_cancelled",
+                        error_message="Task was cancelled before processing started",
+                        completed_at=utcnow())
+            )
+            if result.rowcount != 1:
+                self.session.rollback()
+                raise ConflictError("任务状态已变化，请刷新后重试取消")
         elif item.status == "PROCESSING":
             result = self.session.execute(
                 update(Task)
-                .where(Task.id == task_id, Task.status == "PROCESSING")
+                .where(Task.id == task_id, Task.status == "PROCESSING", Task.deleted_at.is_(None))
                 .values(cancel_requested=True)
             )
             if result.rowcount != 1:
@@ -299,50 +334,115 @@ class TaskService:
             raise NotFoundError("Task", task_id)
         if item.status not in {"FAILED", "INTERRUPTED"}:
             raise ConflictError("Only failed or interrupted tasks can be retried")
-        item.status = "QUEUED"
-        item.current_stage = "QUEUED"
-        item.progress = 0
-        item.cancel_requested = False
-        item.error_code = None
-        item.error_message = None
-        item.started_at = None
-        item.completed_at = None
-        item.output_path = None
-        item.document_path = None
-        item.markdown_path = None
-        item.export_path = None
-        item.attempt += 1
+        result = self.session.execute(
+            update(Task).where(Task.id == task_id, Task.status.in_(["FAILED", "INTERRUPTED"]),
+                               Task.deleted_at.is_(None), Task.attempt == item.attempt)
+            .values(status="QUEUED", current_stage="QUEUED", progress=0,
+                    cancel_requested=False, error_code=None, error_message=None,
+                    started_at=None, completed_at=None, output_path=None,
+                    document_path=None, markdown_path=None, export_path=None,
+                    attempt=Task.attempt + 1)
+        )
+        if result.rowcount != 1:
+            self.session.rollback()
+            raise ConflictError("任务状态已变化，请刷新后重试")
         self.session.commit()
         if self.worker:
             self.worker.notify()
         return task_read(item)
 
-    def delete(self, task_id: int) -> dict[str, Any]:
-        item = self.repo.get(task_id, detail=True)
+    def delete(self, task_id: int) -> TaskRead:
+        """Move to trash without moving or deleting any generated files."""
+        item = self.repo.get(task_id, include_deleted=True)
         if not item:
             raise NotFoundError("Task", task_id)
-        if item.status == "PROCESSING":
-            raise ConflictError("A processing task must be cancelled before it can be deleted")
+        if item.deleted_at is not None:
+            return task_read(item)
+        now = utcnow()
+        result = self.session.execute(
+            update(Task).where(
+                Task.id == task_id, Task.status.not_in(["PROCESSING", "DELETING"]),
+                Task.deleted_at.is_(None),
+            ).values(deleted_at=now, trash_expires_at=now + timedelta(days=30))
+        )
+        if result.rowcount != 1:
+            self.session.rollback()
+            raise ConflictError("运行中的任务需先取消，才能移入回收站")
+        self.session.commit()
+        self.session.refresh(item)
+        if self.worker:
+            self.worker.notify()
+        return task_read(item)
+
+    def restore(self, task_id: int) -> TaskRead:
+        item = self.repo.get(task_id, include_deleted=True)
+        if item is None or item.deleted_at is None:
+            raise NotFoundError("Trashed task", task_id)
+        result = self.session.execute(
+            update(Task).where(
+                Task.id == task_id, Task.deleted_at.is_not(None), Task.status != "DELETING",
+            ).values(deleted_at=None, trash_expires_at=None)
+        )
+        if result.rowcount != 1:
+            self.session.rollback()
+            raise ConflictError("任务正在永久删除，无法恢复")
+        self.session.commit()
+        self.session.refresh(item)
+        if self.worker:
+            self.worker.notify()
+        return task_read(item)
+
+    def purge_expired(self) -> dict[str, Any]:
+        cutoff = utcnow()
+        ids = list(self.session.scalars(
+            select(Task.id).where(Task.deleted_at.is_not(None), Task.trash_expires_at <= cutoff,
+                                  Task.status != "DELETING")
+            .order_by(Task.trash_expires_at, Task.id).limit(100)
+        ))
+        deleted, skipped = [], []
+        for task_id in ids:
+            try:
+                deleted.append(self.purge(task_id, expired_before=cutoff))
+            except (ConflictError, NotFoundError) as exc:
+                skipped.append({"task_id": task_id, "reason": exc.message})
+        return {"deleted": deleted, "skipped": skipped}
+
+    def purge(self, task_id: int, *, expired_before: datetime | None = None) -> dict[str, Any]:
+        item = self.repo.get(task_id, detail=True, include_deleted=True)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        if item.deleted_at is None:
+            raise ConflictError("请先将任务移入回收站，再确认永久删除")
+        if item.status in {"PROCESSING", "DELETING"}:
+            raise ConflictError("任务正在执行或删除，请稍后重试")
 
         previous_status = item.status
         previous_stage = item.current_stage
+        claim = update(Task).where(
+            Task.id == task_id, Task.status == previous_status,
+            Task.deleted_at == item.deleted_at,
+        )
+        if expired_before is not None:
+            claim = claim.where(Task.trash_expires_at <= expired_before)
         claimed = self.session.execute(
-            update(Task)
-            .where(Task.id == task_id, Task.status == previous_status)
-            .values(status="DELETING", current_stage="DELETING")
+            claim.values(status="DELETING", current_stage="DELETING")
+            .execution_options(synchronize_session="fetch")
         )
         if claimed.rowcount != 1:
             self.session.rollback()
             raise ConflictError("Task state changed before deletion could start")
         self.session.commit()
         try:
-            result = _delete_task_files(item)
+            result = _delete_task_files(item, protected_paths=self._other_task_paths(task_id))
         except (OSError, ValueError, ConflictError) as exc:
             self.session.rollback()
             current = self.session.get(Task, task_id)
             if current is not None and current.status == "DELETING":
-                current.status = previous_status
-                current.current_stage = previous_stage
+                current.status = previous_status if isinstance(exc, ConflictError) else "FAILED"
+                current.current_stage = previous_stage if isinstance(exc, ConflictError) else "FAILED"
+                if not isinstance(exc, ConflictError):
+                    current.error_code = "delete_failed"
+                    current.error_message = "永久删除未完成，部分文件可能已删除；可检查后重新永久删除"
                 self.session.commit()
             message = exc.message if isinstance(exc, ConflictError) else str(exc)
             raise ConflictError(f"Task files could not be deleted safely: {message}") from exc
@@ -358,19 +458,39 @@ class TaskService:
             "deleted_paths": result["deleted_paths"],
         }
 
+    def _other_task_paths(self, task_id: int) -> list[Path]:
+        """Do not purge files referenced by another task, including trashed tasks."""
+        paths: list[Path] = []
+        rows = self.session.execute(select(
+            Task.source, Task.source_type, Task.workspace_path, Task.output_path,
+            Task.export_path, Task.markdown_path,
+        ).where(Task.id != task_id))
+        for source, source_type, *outputs in rows:
+            values = outputs + ([source] if source_type == "LOCAL_FILE" else [])
+            paths.extend(Path(value).resolve(strict=False) for value in values if value)
+        rows = self.session.execute(select(
+            MarkdownExport.markdown_path, MarkdownExport.attachment_directory,
+            MarkdownExport.data_directory,
+        ).where(MarkdownExport.task_id != task_id, MarkdownExport.status == "COMPLETED"))
+        for row in rows:
+            paths.extend(Path(value).resolve(strict=False) for value in row if value)
+        return paths
+
     def queue_status(self) -> QueueStatus:
         counts = self.repo.counts()
         running_task = self.session.scalar(
-            select(Task).where(Task.status == "PROCESSING").order_by(Task.started_at).limit(1)
+            select(Task.id).where(Task.status == "PROCESSING", Task.deleted_at.is_(None))
+            .order_by(Task.started_at).limit(1)
         )
         return QueueStatus(
             running=counts.get("PROCESSING", 0),
             queued=counts.get("QUEUED", 0),
+            waiting_review=counts.get("WAITING_REVIEW", 0),
             completed=counts.get("COMPLETED", 0),
             failed=counts.get("FAILED", 0),
             cancelled=counts.get("CANCELLED", 0),
             interrupted=counts.get("INTERRUPTED", 0),
-            running_task_id=running_task.id if running_task else None,
+            running_task_id=running_task,
         )
 
     def _resolve_profile(
@@ -535,6 +655,9 @@ class TaskService:
         if unknown:
             raise ConflictError(f"Unsupported task config overrides: {', '.join(sorted(unknown))}")
         processing.update(copy.deepcopy(overrides))
+        processing["manual_review_enabled"] = (
+            pipeline_mode == "REAL" and not processing.get("text_edit_enabled", False)
+        )
         if pipeline_mode == "REAL" and require_asr and asr_gateway_model is None:
             raise ConflictError("A real task must select an independent ASR gateway model")
         if (
@@ -756,6 +879,7 @@ def _validated_workspace(item: Task) -> Path | None:
     workspace = Path(item.workspace_path)
     if not workspace.exists():
         return None
+    _reject_generated_links(workspace)
     try:
         workspace = workspace.resolve(strict=True)
     except OSError as exc:
@@ -791,7 +915,7 @@ def _sync_workspace_snapshot(workspace: Path, snapshot: dict[str, Any]) -> None:
         disabled_marker.unlink(missing_ok=True)
 
 
-def _delete_task_files(item: Task) -> dict[str, Any]:
+def _delete_task_files(item: Task, *, protected_paths: list[Path] | None = None) -> dict[str, Any]:
     workspace = _validated_workspace(item)
     snapshot = item.snapshot.snapshot_json if item.snapshot else {}
     targets: list[Path] = []
@@ -803,6 +927,13 @@ def _delete_task_files(item: Task) -> dict[str, Any]:
         try:
             source_path = Path(item.source).resolve(strict=False)
         except OSError:
+            source_path = None
+        upload = (snapshot.get("input") or {}).get("upload")
+        if (
+            workspace is not None and source_path is not None and isinstance(upload, dict)
+            and upload.get("owned_copy") is True and upload.get("path") == item.source
+            and source_path.is_relative_to(workspace / "00_source" / "upload")
+        ):
             source_path = None
 
     for export in item.markdown_exports:
@@ -845,6 +976,26 @@ def _delete_task_files(item: Task) -> dict[str, Any]:
     files_removed = 0
     bytes_freed = 0
     deleted_paths: list[str] = []
+    protected = list(protected_paths or [])
+    if source_path is not None:
+        protected.append(source_path)
+    # Validate every target before the first deletion; protect nested source
+    # files, cross-task outputs and Windows junctions as well as symlinks.
+    from app.services.cache import _is_link
+
+    for target in unique_targets:
+        if any(target == path or path.is_relative_to(target) or target.is_relative_to(path)
+               for path in protected):
+            raise ConflictError("文件仍被原始输入或其他任务引用，不能永久删除")
+        if target.exists() and _is_link(target):
+            raise ConflictError("不能永久删除包含目录链接的生成物")
+        if target.is_dir():
+            def walk_error(error: OSError) -> None:
+                raise error
+            for directory, subdirectories, filenames in os.walk(target, followlinks=False,
+                                                                onerror=walk_error):
+                if any(_is_link(Path(directory) / name) for name in (*subdirectories, *filenames)):
+                    raise ConflictError("不能永久删除包含目录链接的生成物")
     for target in sorted(unique_targets, key=lambda value: len(value.parts), reverse=True):
         if not target.exists():
             continue
@@ -891,6 +1042,7 @@ def _validated_generated_target(
     output_root: Path,
     source_path: Path | None,
 ) -> Path:
+    _reject_generated_links(candidate)
     resolved = candidate.resolve(strict=False)
     root = output_root.resolve(strict=False)
     if resolved == root or not resolved.is_relative_to(root):
@@ -898,6 +1050,14 @@ def _validated_generated_target(
     if source_path is not None and resolved == source_path:
         raise ConflictError("Refusing to delete the original input file")
     return resolved
+
+
+def _reject_generated_links(path: Path) -> None:
+    from app.services.cache import _is_link
+
+    for candidate in (path.absolute(), *path.absolute().parents):
+        if candidate.exists() and _is_link(candidate):
+            raise ConflictError("生成物路径包含符号链接或目录联接，无法安全永久删除")
 
 
 def _file_size(path: Path) -> int:

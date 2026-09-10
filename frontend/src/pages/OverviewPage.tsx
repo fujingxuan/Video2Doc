@@ -4,7 +4,7 @@ import { formatDate } from "../utils/status";
 
 export function OverviewPage({ queue, tasks, connected }: { queue: QueueState | null; tasks: Task[]; connected: boolean }) {
   const cards = [
-    ["处理中", queue?.running ?? 0], ["等待中", queue?.queued ?? 0], ["已完成", queue?.completed ?? 0], ["需要处理", (queue?.failed ?? 0) + (queue?.interrupted ?? 0)],
+    ["处理中", queue?.running ?? 0], ["等待中", queue?.queued ?? 0], ["待人工校对", queue?.waiting_review ?? 0], ["已完成", queue?.completed ?? 0], ["需要处理", (queue?.failed ?? 0) + (queue?.interrupted ?? 0)],
   ];
   return <>
     <header className="page-header"><div><p className="eyebrow">工作台</p><h1>任务总览</h1><p>查看完整转换任务和单并发持久化队列状态。</p></div><span className={`connection ${connected ? "online" : "offline"}`}>{connected ? "实时连接" : "连接中断"}</span></header>

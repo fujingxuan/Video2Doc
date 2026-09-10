@@ -4,7 +4,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -34,6 +34,7 @@ from app.schemas.api import (
     SettingsUpdate,
     TaskBatchCreate,
     TaskDetail,
+    TaskPage,
     TaskRead,
     TaskUpdate,
 )
@@ -48,6 +49,10 @@ from app.services.system import (
     select_subtitle_file,
 )
 from app.services.tasks import TaskService
+from app.services.events import paged_event_stream
+from app.services.review import TaskReviewService
+from app.services.manual_review import ManualDraftInput, ManualReviewService, ManualSubmitInput
+from app.services.uploads import create_uploaded_audio_tasks
 from app.workers.queue import queue_worker
 
 
@@ -157,7 +162,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="3.0.0",
+        version="3.1.0",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -302,6 +307,63 @@ def list_tasks(
     return TaskService(session).list(status_filter)
 
 
+def task_page_query(
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
+    status_filter: str | None = Query(default=None, alias="status", max_length=32),
+    search: str = Query(default="", max_length=200),
+    trashed: bool = Query(default=False),
+) -> dict:
+    return {"offset": offset, "limit": limit, "status": status_filter,
+            "search": search, "trashed": trashed}
+
+
+@router.get("/tasks/page", response_model=TaskPage, tags=["tasks"])
+def task_page(query: dict = Depends(task_page_query), session: Session = Depends(get_db)) -> TaskPage:
+    return TaskService(session).page(**query)
+
+
+@router.post("/tasks/trash/purge-expired", response_model=dict, tags=["tasks"])
+def purge_expired_tasks(session: Session = Depends(get_db)) -> dict:
+    return TaskService(session, queue_worker).purge_expired()
+
+
+@router.post("/tasks/upload-audio", response_model=list[TaskRead], status_code=201, tags=["tasks"])
+def upload_audio(
+    files: list[UploadFile] = File(...), configuration: str = Form("{}"),
+    session: Session = Depends(get_db),
+) -> list[TaskRead]:
+    return create_uploaded_audio_tasks(files, configuration, session, queue_worker)
+
+
+@router.get("/tasks/{task_id}/manual-review", response_model=dict, tags=["tasks"])
+def manual_review(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return ManualReviewService(session).get(task_id)
+
+
+@router.put("/tasks/{task_id}/manual-review", response_model=dict, tags=["tasks"])
+def save_manual_review(
+    task_id: int, payload: ManualDraftInput, session: Session = Depends(get_db),
+) -> dict:
+    return ManualReviewService(session).save(task_id, payload)
+
+
+@router.get("/tasks/{task_id}/manual-review/draft", tags=["tasks"])
+def download_manual_draft(task_id: int, session: Session = Depends(get_db)) -> PlainTextResponse:
+    draft = ManualReviewService(session).get(task_id)
+    return PlainTextResponse(
+        draft["original_text"], media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="task-{task_id}-draft.md"'},
+    )
+
+
+@router.post("/tasks/{task_id}/manual-review/submit", response_model=dict, tags=["tasks"])
+def submit_manual_review(
+    task_id: int, payload: ManualSubmitInput, session: Session = Depends(get_db),
+) -> dict:
+    return ManualReviewService(session, queue_worker).submit(task_id, payload)
+
+
 @router.get("/tasks/{task_id}", response_model=TaskDetail, tags=["tasks"])
 def get_task(task_id: int, session: Session = Depends(get_db)) -> TaskDetail:
     return TaskService(session).get(task_id)
@@ -316,9 +378,32 @@ def update_task(
     return TaskService(session, queue_worker).update(task_id, payload)
 
 
-@router.delete("/tasks/{task_id}", response_model=dict, tags=["tasks"])
-def delete_task(task_id: int, session: Session = Depends(get_db)) -> dict:
+@router.delete("/tasks/{task_id}", response_model=TaskRead, tags=["tasks"])
+def delete_task(task_id: int, session: Session = Depends(get_db)) -> TaskRead:
     return TaskService(session, queue_worker).delete(task_id)
+
+
+@router.post("/tasks/{task_id}/restore", response_model=TaskRead, tags=["tasks"])
+def restore_task(task_id: int, session: Session = Depends(get_db)) -> TaskRead:
+    return TaskService(session, queue_worker).restore(task_id)
+
+
+@router.delete("/tasks/{task_id}/permanent", response_model=dict, tags=["tasks"])
+def purge_task(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session, queue_worker).purge(task_id)
+
+
+@router.get("/tasks/{task_id}/review", response_model=dict, tags=["tasks"])
+def review_task(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskReviewService(session).get(task_id)
+
+
+@router.get("/tasks/{task_id}/review/diff", tags=["tasks"])
+def review_task_diff(task_id: int, session: Session = Depends(get_db)) -> PlainTextResponse:
+    return PlainTextResponse(
+        TaskReviewService(session).get(task_id)["diff"],
+        headers={"Content-Disposition": f'attachment; filename="task-{task_id}.diff"'},
+    )
 
 
 @router.get("/tasks/{task_id}/snapshot", response_model=dict, tags=["tasks"])
@@ -426,5 +511,13 @@ def events() -> StreamingResponse:
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/events/pages", tags=["queue"])
+def page_events(query: dict = Depends(task_page_query)) -> StreamingResponse:
+    return StreamingResponse(
+        paged_event_stream(**query), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

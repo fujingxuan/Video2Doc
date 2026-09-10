@@ -3,6 +3,8 @@ import type { TaskStatus } from "../types";
 const LABELS: Record<TaskStatus, string> = {
   QUEUED: "等待中",
   PROCESSING: "处理中",
+  WAITING_REVIEW: "待人工校对",
+  DELETING: "正在永久删除",
   COMPLETED: "已完成",
   FAILED: "失败",
   CANCELLED: "已取消",

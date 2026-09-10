@@ -328,36 +328,50 @@ class OpenAICompatibleAsrProvider:
         cancel_endpoint: str | None = None,
         request_id: str | None = None,
     ) -> httpx.Response:
-        task = asyncio.create_task(
-            client.post(
-                self.endpoint,
-                headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
-                data=data,
-                files=files,
-            )
-        )
-        while not task.done():
+        async def ensure_active() -> None:
             if process_registry.shutting_down:
                 from app.core.errors import PipelineInterrupted
 
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
                 raise PipelineInterrupted(stage="ASR_TRANSCRIBE")
             if await check_cancelled(cancel_check):
+                raise PipelineCancelled(stage="ASR_TRANSCRIBE")
+
+        task: asyncio.Task[httpx.Response] | None = None
+        try:
+            await ensure_active()
+            task = asyncio.create_task(
+                client.post(
+                    self.endpoint,
+                    headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
+                    data=data,
+                    files=files,
+                )
+            )
+            while not task.done():
+                await ensure_active()
+                await asyncio.wait({task}, timeout=get_settings().process_poll_seconds)
+            # A response can complete between polls while cancellation or
+            # shutdown is being requested. Never persist that late response.
+            await ensure_active()
+            return await task
+        except PipelineCancelled:
+            if task is not None:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-                if cancel_endpoint and request_id:
-                    try:
-                        await asyncio.wait_for(
-                            client.post(f"{cancel_endpoint}/{request_id}"), timeout=2.0
-                        )
-                    except (Exception, asyncio.CancelledError):
-                        # Closing the upload already prevents accepting a late result. The
-                        # explicit cancellation call is best effort for local inference workers.
-                        pass
-                raise PipelineCancelled(stage="ASR_TRANSCRIBE")
-            await asyncio.sleep(get_settings().process_poll_seconds)
-        return await task
+            if cancel_endpoint and request_id:
+                try:
+                    await asyncio.wait_for(
+                        client.post(f"{cancel_endpoint}/{request_id}"), timeout=2.0
+                    )
+                except Exception:
+                    # The explicit cancellation is best effort for local workers.
+                    pass
+            raise
+        finally:
+            if task is not None:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 class UnifiedAsrGatewayProvider(OpenAICompatibleAsrProvider):

@@ -5,6 +5,7 @@ const links = [
   ["/", "总览"],
   ["/new", "新建任务"],
   ["/queue", "任务队列"],
+  ["/trash", "回收站"],
   ["/llm", "LLM"],
   ["/ocr", "OCR"],
   ["/asr", "ASR"],

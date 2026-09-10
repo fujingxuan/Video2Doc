@@ -29,7 +29,7 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
   → Windows 单入口应用查看、取消、重试和打开结果
 ```
 
-所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；新建任务会恢复上一个任务的完整处理设置，尚未开始的队列任务可安全编辑。删除任务会在路径与任务身份校验后同步删除对应工作区和导出成品，原始本地输入媒体不在删除范围。有效媒体、ASR、链接字幕抓取产物、内嵌字幕抽帧/OCR、常规帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；它在一次请求中接收完整正文并返回一篇连续 Markdown 文章。结构校验、数字/术语/代码/公式/长度检查失败时会拒绝模型输出，并回退为连续原文文章；原始逐段来源关系仍保存在 Document 与 sidecar 中。
+所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；新建任务会恢复上一个任务的完整处理设置，尚未开始的队列任务可安全编辑。历史任务支持搜索、分页和虚拟滚动，当前页用 SSE 增量刷新；任务详情可按需审阅原文与实际采用正文的差异。删除任务默认移入回收站，可撤销或恢复；记录 30 天保留期，到期后由用户手动确认永久清理。只有永久删除才会在路径、任务身份与跨任务引用校验后清理生成文件，原始输入媒体始终保留。有效媒体、ASR、链接字幕抓取产物、内嵌字幕抽帧/OCR、常规帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；它在一次请求中接收完整正文并返回一篇连续 Markdown 文章。结构校验、数字/术语/代码/公式/长度检查失败时会拒绝模型输出，并回退为连续原文文章；原始逐段来源关系仍保存在 Document 与 sidecar 中。
 
 完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。操作说明见 [应用使用手册](docs/USER_GUIDE.md)、[Obsidian 导出说明](docs/OBSIDIAN_EXPORT.md) 和 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)；本轮真实证据见 [3.0.0 任务管理与界面优化验收报告](docs/ITERATION_3_0_ACCEPTANCE_REPORT.md)，历史模型验收见 [2.3.0 三类模型、托管 Gateway 与画面字幕验收报告](docs/ITERATION_2_3_ACCEPTANCE_REPORT.md)。
 
@@ -305,6 +305,15 @@ VIDEO2DOC_PROCESS_POLL_SECONDS=0.20
 
 在原有任务、队列、取消、重试、快照和 SSE API 之外，新增：
 
+- `GET /api/v1/tasks/page?offset=0&limit=100&status=COMPLETED&search=课程&trashed=false`：当前页、总数及实际 offset；limit 范围 1–200
+- `GET /api/v1/events/pages`：同样的分页参数；首次 `page`，随后 `delta`，无变化时 keep-alive
+- `DELETE /api/v1/tasks/{id}`：移入回收站，返回 Task（删除语义已变更）
+- `POST /api/v1/tasks/{id}/restore`：恢复任务
+- `DELETE /api/v1/tasks/{id}/permanent`：永久删除已经移入回收站的任务及生成物
+- `POST /api/v1/tasks/trash/purge-expired`：确认后手动清理最多 100 个过期项，返回成功项与跳过原因
+- `GET /api/v1/tasks/{id}/review`：已保存原文、实际采用正文及完整差异
+- `GET /api/v1/tasks/{id}/review/diff`：下载完整逐行差异
+
 - `GET /api/v1/tasks/{id}/media`
 - `GET /api/v1/tasks/{id}/transcript`
 - `GET /api/v1/tasks/{id}/artifacts`
@@ -365,10 +374,15 @@ ASR 部署与横向结果见 `docs/MODEL_DEPLOYMENT_REPORT.md`、`docs/ASR_MODEL
 - 当前只支持单后端进程、单任务并发；不支持多实例或分布式队列。
 - 当前离线分块使用固定能力上限与 5 秒重叠，尚未加入 VAD 边界微调。
 - Provider 若只返回整段文本而不返回 segment 时间戳，对应标准字段保持 `null`，不会伪造时间。
-- SSE 是轻量状态快照，不是可重放事件日志。
+- 新页面使用有界快照与 SSE 增量更新，重连重新同步；旧 `/tasks` 列表和 `/events` 全量快照接口保留兼容，不是可重放事件日志。
 - 当前视觉去重使用内容裁剪 dHash 与灰度像素差异，不是语义视觉模型；边缘情况按保留优先。
 - OCR 事件只做确定性空白清理、块级去重和相似页合并，不补写、改写或总结识别文本。
 - Windows 发行物是便携目录/ZIP，不是带自动升级和卸载器的 MSI 安装包。
 - 前端由隔离配置的 Edge 应用模式窗口显示；当前没有内嵌 WebView 或系统托盘。
 - 浏览器内 Markdown 预览是文本预览，不模拟 Obsidian 的完整主题与插件渲染。
 - RAG、问答、自动总结、向量数据库、Embedding 和语义搜索是永久排除功能，不是待办事项。
+
+
+### 3.1.0 更新
+
+支持浏览器上传本地音频；未启用文本模型时，转写后可下载初稿交给网页大模型校对、粘贴或导入修改稿后完成，也可直接使用初稿。等待校对不占用队列，保存后可跨重启继续，导出重试不重复转写。字幕优先抓取、备用语言/接口及 JSON3 支持已加强。详见 [使用手册](docs/USER_GUIDE.md) 与 [3.1.0 验收记录](docs/ITERATION_3_1_ACCEPTANCE_REPORT.md)。

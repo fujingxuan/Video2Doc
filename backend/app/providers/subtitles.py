@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import html
 import inspect
@@ -12,6 +13,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 import httpx
 from PIL import Image, ImageOps
@@ -19,7 +21,7 @@ from PIL import Image, ImageOps
 from app.core.config import get_settings
 from app.core.errors import PipelineError
 from app.providers.asr import AsrSegment, format_srt_time
-from app.providers.process import CancelCheck, ExternalProcessRunner
+from app.providers.process import CancelCheck, ExternalProcessRunner, process_registry
 from app.providers.gateways import trust_environment_proxy
 from app.providers.frames import (
     FrameExtractionConfig,
@@ -31,7 +33,7 @@ from app.providers.ocr import OcrResult
 from app.storage.workspace import WorkspacePaths, read_json, write_json
 
 
-SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass", ".ssa", ".txt"}
+SUBTITLE_EXTENSIONS = {".srt", ".vtt", ".ass", ".ssa", ".txt", ".json3"}
 DEFAULT_SUBTITLE_LANGUAGES = (
     "zh-Hans",
     "zh-CN",
@@ -96,129 +98,84 @@ class YtDlpSubtitleSource:
         cancel_check: CancelCheck,
         progress: Callable[[float | None, str], None],
     ) -> SubtitleAcquisition:
+        await _ensure_subtitle_active(cancel_check)
         manifest_path = paths.metadata / "subtitle_acquisition.json"
         reusable = _load_subtitle_acquisition(manifest_path, source=source)
         if reusable is not None:
             progress(1.0, f"复用已抓取字幕：{reusable.language or '未知语言'}")
             return reusable
-
         metadata = read_json(paths.metadata / "ytdlp.json")
-        if not isinstance(metadata, dict):
-            metadata = await self._load_metadata(
-                source,
-                paths,
-                cancel_check=cancel_check,
-            )
-        selected_language = _select_available_language(metadata, self.languages)
-        if selected_language is None:
-            bilibili = await BilibiliSubtitleSource(self.languages).acquire_if_available(
-                source,
-                paths,
-                cancel_check=cancel_check,
-                progress=progress,
-            )
-            if bilibili is not None:
-                return bilibili
-            raise PipelineError(
-                "SUBTITLE_NOT_FOUND",
-                "视频链接没有可用的中文或英文字幕（已同时检查人工字幕和自动字幕）",
-            )
-
-        destination = paths.source / "subtitles"
-        destination.mkdir(parents=True, exist_ok=True)
-        output_template = str(destination / "source.%(ext)s")
-        try:
-            result = await self.runner.run(
-                [
-                    self.executable,
-                    "--newline",
-                    "--no-playlist",
-                    "--no-warnings",
-                    "--skip-download",
-                    "--write-subs",
-                    "--write-auto-subs",
-                    "--sub-langs",
-                    selected_language,
-                    "--sub-format",
-                    "srt/vtt/ass/best",
-                    "--output",
-                    output_template,
-                    source,
-                ],
-                cwd=paths.root,
-                log_dir=paths.logs,
-                log_name="ytdlp_subtitles",
-                timeout_seconds=get_settings().media_process_timeout_seconds,
-                cancel_check=cancel_check,
-                stdout_callback=lambda line: progress(None, line[:300]),
-                stderr_callback=lambda line: progress(None, line[:300]),
-            )
-        except PipelineError as exc:
-            if exc.code in {"PROCESS_CANCELLED", "PROCESS_TIMEOUT", "backend_shutdown"}:
-                raise
-            code = "YTDLP_UNAVAILABLE" if exc.code == "PROCESS_UNAVAILABLE" else "SUBTITLE_FETCH_FAILED"
-            retryable = exc.retryable or "429" in str(exc.technical_detail or "")
-            raise PipelineError(
-                code,
-                (
-                    "找不到 yt-dlp，无法从视频链接抓取字幕"
-                    if code == "YTDLP_UNAVAILABLE"
-                    else "yt-dlp 从视频链接抓取字幕失败"
-                ),
-                technical_detail=exc.technical_detail,
-                retryable=retryable,
-                log_path=exc.log_path,
-            ) from exc
-
-        candidates = [
-            path
-            for path in destination.glob("source.*")
-            if path.is_file()
-            and path.suffix.casefold() in SUBTITLE_EXTENSIONS
-            and 0 < path.stat().st_size <= MAX_SUBTITLE_BYTES
-        ]
-        if not candidates:
-            bilibili = await BilibiliSubtitleSource(self.languages).acquire_if_available(
-                source,
-                paths,
-                cancel_check=cancel_check,
-                progress=progress,
-            )
-            if bilibili is not None:
-                return bilibili
-            raise PipelineError(
-                "SUBTITLE_NOT_FOUND",
-                "视频链接没有可用的中文或英文字幕（已同时尝试人工字幕和自动字幕）",
-                log_path=str(result.stderr_log),
-            )
-
-        selected = min(candidates, key=lambda path: _subtitle_candidate_rank(path, metadata))
-        language = _subtitle_language(selected)
-        source_kind = _subtitle_source_kind(language, metadata)
-        payload = selected.read_bytes()
-        acquisition = SubtitleAcquisition(
-            path=str(selected.resolve()),
-            language=language,
-            source_kind=source_kind,
-            subtitle_format=selected.suffix.casefold().removeprefix("."),
-            sha256=hashlib.sha256(payload).hexdigest(),
-            size_bytes=len(payload),
-            manifest_path=str(manifest_path),
+        errors: list[str] = []
+        if not isinstance(metadata, dict) or metadata.get("_video2doc_source_url", source) != source:
+            try:
+                metadata = await self._load_metadata(source, paths, cancel_check=cancel_check)
+            except PipelineError as exc:
+                if exc.code in {"PROCESS_CANCELLED", "backend_shutdown"}:
+                    raise
+                errors.append(exc.technical_detail or exc.user_message)
+                metadata = {}
+        for index, (language, source_kind) in enumerate(_subtitle_tracks(metadata, self.languages)[:6]):
+            await _ensure_subtitle_active(cancel_check)
+            # Each attempt owns a fresh directory: incomplete or stale tracks cannot win selection.
+            destination = paths.source / "subtitles" / uuid4().hex
+            destination.mkdir(parents=True, exist_ok=True)
+            try:
+                await self.runner.run([
+                    self.executable, "--newline", "--no-playlist", "--no-warnings",
+                    "--ignore-no-formats-error", "--skip-download",
+                    *( ["--write-subs", "--no-write-auto-subs"] if source_kind == "manual"
+                       else ["--no-write-subs", "--write-auto-subs"] ),
+                    "--sub-langs", re.escape(language).replace(r"\-", "-"),
+                    "--sub-format", "srt/vtt/ass/json3/best",
+                    "--retries", "3", "--extractor-retries", "3", "--socket-timeout", "20",
+                    "--retry-sleep", "http:exp=1:4", "--retry-sleep", "extractor:exp=1:4",
+                    "--output", str(destination / "source.%(ext)s"), source,
+                ], cwd=paths.root, log_dir=paths.logs, log_name=f"ytdlp_subtitles_{index}",
+                    timeout_seconds=min(120, get_settings().media_process_timeout_seconds),
+                    cancel_check=cancel_check,
+                    stdout_callback=lambda line: progress(None, line[:300]),
+                    stderr_callback=lambda line: progress(None, line[:300]))
+                for selected in sorted(destination.glob("source.*")):
+                    if (not selected.is_file() or selected.suffix.lower() not in SUBTITLE_EXTENSIONS
+                            or not 0 < selected.stat().st_size <= MAX_SUBTITLE_BYTES):
+                        continue
+                    try:
+                        imported = import_subtitle(selected, language=language)
+                        if any(segment.start_time is None or segment.end_time is None
+                               for segment in imported.segments):
+                            continue
+                    except PipelineError:
+                        continue
+                    await _ensure_subtitle_active(cancel_check)
+                    payload = selected.read_bytes()
+                    acquisition = SubtitleAcquisition(
+                        path=str(selected.resolve()), language=language, source_kind=source_kind,
+                        subtitle_format=selected.suffix.lower()[1:],
+                        sha256=hashlib.sha256(payload).hexdigest(), size_bytes=len(payload),
+                        manifest_path=str(manifest_path),
+                    )
+                    write_json(manifest_path, {
+                        "schema_version": 2, "source_url": source,
+                        "language_priority": list(self.languages), **acquisition.to_dict(),
+                    })
+                    progress(1.0, f"已抓取{_source_kind_label(source_kind)}字幕：{language}")
+                    return acquisition
+                errors.append(f"{language} ({source_kind}): 没有有效的完整字幕文件")
+            except PipelineError as exc:
+                if exc.code in {"PROCESS_CANCELLED", "backend_shutdown"}:
+                    raise
+                errors.append(f"{language}: {exc.technical_detail or exc.user_message}")
+                progress(None, f"{language} 字幕暂不可用，继续尝试备用字幕")
+        bilibili = await BilibiliSubtitleSource(self.languages).acquire_if_available(
+            source, paths, cancel_check=cancel_check, progress=progress,
         )
-        write_json(
-            manifest_path,
-            {
-                "schema_version": 1,
-                "source_url": source,
-                "language_priority": list(self.languages),
-                **acquisition.to_dict(),
-            },
+        if bilibili is not None:
+            return bilibili
+        raise PipelineError(
+            "SUBTITLE_FETCH_FAILED" if errors else "SUBTITLE_NOT_FOUND",
+            "视频链接没有可用的中文或英文字幕（已检查人工字幕和自动字幕，并尝试备用来源）",
+            technical_detail="; ".join(errors)[-4000:] or None, retryable=bool(errors),
         )
-        progress(
-            1.0,
-            f"已抓取{_source_kind_label(source_kind)}字幕：{language or '未知语言'}",
-        )
-        return acquisition
 
     async def _load_metadata(
         self,
@@ -232,6 +189,9 @@ class YtDlpSubtitleSource:
                 [
                     self.executable,
                     "--dump-single-json",
+                    "--ignore-no-formats-error",
+                    "--extractor-retries", "3", "--socket-timeout", "20",
+                    "--retry-sleep", "extractor:exp=1:4",
                     "--no-playlist",
                     "--no-warnings",
                     source,
@@ -239,7 +199,7 @@ class YtDlpSubtitleSource:
                 cwd=paths.root,
                 log_dir=paths.logs,
                 log_name="ytdlp_subtitle_metadata",
-                timeout_seconds=get_settings().media_process_timeout_seconds,
+                timeout_seconds=min(90, get_settings().media_process_timeout_seconds),
                 cancel_check=cancel_check,
             )
         except PipelineError as exc:
@@ -259,7 +219,10 @@ class YtDlpSubtitleSource:
             ) from exc
         try:
             metadata = json.loads("\n".join(result.stdout_lines))
-        except json.JSONDecodeError as exc:
+            if not isinstance(metadata, dict):
+                raise ValueError("Expected a metadata object")
+            metadata["_video2doc_source_url"] = source
+        except (ValueError, TypeError) as exc:
             raise PipelineError(
                 "SUBTITLE_FETCH_FAILED",
                 "yt-dlp 返回了无法解析的字幕信息",
@@ -291,129 +254,143 @@ class BilibiliSubtitleSource:
         cancel_check: CancelCheck,
         progress: Callable[[float | None, str], None],
     ) -> SubtitleAcquisition | None:
+        hosts = {"bilibili.com", "www.bilibili.com", "m.bilibili.com"}
         parsed = urlparse(source)
-        if parsed.hostname not in {"bilibili.com", "www.bilibili.com", "m.bilibili.com"}:
+        if parsed.hostname not in hosts | {"b23.tv", "www.b23.tv"}:
             return None
-        match = self._BVID_RE.search(source)
-        if match is None:
-            return None
-        bvid = match.group(1)
         await _ensure_subtitle_active(cancel_check)
-        headers = {
-            "User-Agent": "Mozilla/5.0 Video2Doc/2.3",
-            "Referer": f"https://www.bilibili.com/video/{bvid}",
-        }
         try:
             async with httpx.AsyncClient(
-                timeout=20.0,
-                headers=headers,
-                follow_redirects=True,
+                timeout=20.0, follow_redirects=True, max_redirects=5,
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.bilibili.com/"},
                 trust_env=trust_environment_proxy("https://api.bilibili.com"),
                 transport=self.transport,
             ) as client:
-                view_response = await client.get(
-                    "https://api.bilibili.com/x/web-interface/view",
-                    params={"bvid": bvid},
-                )
-                view_response.raise_for_status()
-                view = view_response.json()
-                if view.get("code") != 0 or not isinstance(view.get("data"), dict):
+                if parsed.hostname in {"b23.tv", "www.b23.tv"}:
+                    redirected = await _subtitle_get(client, source, cancel_check)
+                    parsed = urlparse(str(redirected.url))
+                    if parsed.hostname not in hosts:
+                        return None
+                match = self._BVID_RE.search(parsed.path)
+                aid = re.search(r"/av(\d+)", parsed.path, re.IGNORECASE)
+                if not match and not aid:
                     return None
-                pages = view["data"].get("pages")
-                page_index = max(
-                    0,
-                    int((parse_qs(parsed.query).get("p") or ["1"])[0]) - 1,
-                )
-                if isinstance(pages, list) and pages:
-                    selected_page = pages[min(page_index, len(pages) - 1)]
-                    cid = selected_page.get("cid") if isinstance(selected_page, dict) else None
-                else:
-                    cid = view["data"].get("cid")
-                if not cid:
+                identity = {"bvid": match.group(1)} if match else {"aid": aid.group(1)}
+                response = await _subtitle_get(client, "https://api.bilibili.com/x/web-interface/view",
+                                                cancel_check, params=identity)
+                view = response.json()
+                if not isinstance(view, dict) or view.get("code") != 0 or not isinstance(view.get("data"), dict):
                     return None
-                subtitle_items: list[dict[str, Any]] = []
+                data = view["data"]
+                bvid = str(data.get("bvid") or identity.get("bvid") or "")
+                page_index = int((parse_qs(parsed.query).get("p") or ["1"])[0]) - 1
+                pages = data.get("pages")
+                if page_index < 0 or (isinstance(pages, list) and pages and page_index >= len(pages)):
+                    return None
+                selected_page = pages[page_index] if isinstance(pages, list) and pages else data
+                if not isinstance(selected_page, dict) or not selected_page.get("cid"):
+                    return None
+                cid = selected_page["cid"]
                 for endpoint in ("/x/player/wbi/v2", "/x/player/v2"):
-                    await _ensure_subtitle_active(cancel_check)
-                    response = await client.get(
-                        "https://api.bilibili.com" + endpoint,
-                        params={"bvid": bvid, "cid": cid},
-                    )
-                    response.raise_for_status()
-                    payload = response.json()
-                    subtitle = (payload.get("data") or {}).get("subtitle")
-                    raw_items = (
-                        subtitle.get("subtitles") or subtitle.get("list")
-                        if isinstance(subtitle, dict)
-                        else None
-                    )
-                    if isinstance(raw_items, list):
-                        subtitle_items = [item for item in raw_items if isinstance(item, dict)]
-                    if subtitle_items:
-                        break
-                selected = _select_bilibili_subtitle(subtitle_items, self.languages)
-                if selected is None:
-                    return None
-                subtitle_url = str(
-                    selected.get("subtitle_url") or selected.get("url") or ""
-                ).strip()
-                if subtitle_url.startswith("//"):
-                    subtitle_url = "https:" + subtitle_url
-                if not subtitle_url.startswith("https://"):
-                    return None
-                await _ensure_subtitle_active(cancel_check)
-                body_response = await client.get(subtitle_url)
-                body_response.raise_for_status()
-                body_payload = body_response.json()
-        except (httpx.HTTPError, json.JSONDecodeError, TypeError, ValueError) as exc:
-            progress(None, f"B 站播放器字幕接口未返回可用字幕：{type(exc).__name__}")
-            return None
+                    try:
+                        response = await _subtitle_get(client, "https://api.bilibili.com" + endpoint,
+                                                       cancel_check, params={**identity, "cid": cid})
+                        payload = response.json()
+                        info = payload.get("data") if isinstance(payload, dict) else None
+                        subtitle = info.get("subtitle") if isinstance(info, dict) else None
+                        raw_items = (subtitle.get("subtitles") or subtitle.get("list")) if isinstance(subtitle, dict) else None
+                        remaining = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+                    except (httpx.HTTPError, ValueError, TypeError):
+                        continue
+                    for _ in range(min(6, len(remaining))):
+                        selected = _select_bilibili_subtitle(remaining, self.languages)
+                        if selected is None:
+                            break
+                        remaining.remove(selected)
+                        url = str(selected.get("subtitle_url") or selected.get("url") or "").strip()
+                        if url.startswith("//"):
+                            url = "https:" + url
+                        if not url.startswith("https://"):
+                            continue
+                        try:
+                            body_response = await _subtitle_get(client, url, cancel_check)
+                            body_payload = body_response.json()
+                            body = body_payload.get("body") if isinstance(body_payload, dict) else None
+                            cues = _bilibili_cues(body)
+                            if not cues:
+                                continue
+                        except (httpx.HTTPError, ValueError, TypeError):
+                            continue
+                        await _ensure_subtitle_active(cancel_check)
+                        destination = paths.source / "subtitles" / f"bilibili_{uuid4().hex}.srt"
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        destination.write_text(_render_srt(cues), encoding="utf-8")
+                        content = destination.read_bytes()
+                        language = str(selected.get("lan") or selected.get("lang") or "zh")
+                        manifest_path = paths.metadata / "subtitle_acquisition.json"
+                        acquisition = SubtitleAcquisition(
+                            path=str(destination.resolve()), language=language,
+                            source_kind="automatic" if (selected.get("ai_type") or language.startswith("ai-")) else "manual",
+                            subtitle_format="srt", sha256=hashlib.sha256(content).hexdigest(),
+                            size_bytes=len(content), manifest_path=str(manifest_path), provider="bilibili-player-api",
+                        )
+                        write_json(paths.metadata / "bilibili_subtitle.json", body_payload)
+                        write_json(paths.metadata / "ytdlp.json", {
+                            "_video2doc_source_url": source, "id": bvid or str(identity.get("aid")),
+                            "title": data.get("title"), "duration": selected_page.get("duration") or data.get("duration"),
+                            "webpage_url": source, "extractor": "bilibili-player-api",
+                        })
+                        write_json(manifest_path, {
+                            "schema_version": 2, "source_url": source, "bvid": bvid, "cid": cid,
+                            "language_priority": list(self.languages), **acquisition.to_dict(),
+                        })
+                        progress(1.0, f"已从 B 站播放器接口抓取字幕：{language}")
+                        return acquisition
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            progress(None, f"B 站播放器字幕接口暂不可用：{type(exc).__name__}")
+        return None
 
-        body = body_payload.get("body") if isinstance(body_payload, dict) else None
-        if not isinstance(body, list):
-            return None
-        cues: list[tuple[float, float, str]] = []
-        for item in body:
-            if not isinstance(item, dict):
-                continue
-            try:
-                start = max(0.0, float(item.get("from")))
-                end = max(start, float(item.get("to")))
-            except (TypeError, ValueError):
-                continue
-            content = html.unescape(str(item.get("content") or "")).strip()
-            if content:
-                cues.append((start, end, content))
-        if not cues:
-            return None
-        destination = paths.source / "subtitles" / "source.bilibili.srt"
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(_render_srt(cues), encoding="utf-8")
-        data = destination.read_bytes()
-        language = str(selected.get("lan") or selected.get("lang") or "zh")
-        manifest_path = paths.metadata / "subtitle_acquisition.json"
-        acquisition = SubtitleAcquisition(
-            path=str(destination.resolve()),
-            language=language,
-            source_kind=("automatic" if selected.get("ai_type") else "manual"),
-            subtitle_format="srt",
-            sha256=hashlib.sha256(data).hexdigest(),
-            size_bytes=len(data),
-            manifest_path=str(manifest_path),
-            provider="bilibili-player-api",
-        )
-        write_json(
-            manifest_path,
-            {
-                "schema_version": 2,
-                "source_url": source,
-                "bvid": bvid,
-                "cid": cid,
-                "language_priority": list(self.languages),
-                **acquisition.to_dict(),
-            },
-        )
-        progress(1.0, f"已从 B 站播放器接口抓取字幕：{language}")
-        return acquisition
+
+def _bilibili_cues(body) -> list[tuple[float, float, str]]:
+    cues = []
+    for item in body if isinstance(body, list) else []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            start, end = float(item.get("from")), float(item.get("to"))
+        except (TypeError, ValueError):
+            continue
+        content = html.unescape(str(item.get("content") or "")).strip()
+        if content and math.isfinite(start) and math.isfinite(end) and 0 <= start <= end:
+            cues.append((start, end, content))
+    return sorted(cues, key=lambda cue: cue[0])
+
+
+async def _subtitle_get(client: httpx.AsyncClient, url: str, cancel_check: CancelCheck, **kwargs):
+    for attempt in range(2):
+        await _ensure_subtitle_active(cancel_check)
+        request = asyncio.create_task(client.get(url, **kwargs))
+        try:
+            while not request.done():
+                await asyncio.wait({request}, timeout=0.2)
+                await _ensure_subtitle_active(cancel_check)
+            response = await request
+            response.raise_for_status()
+            if len(response.content) > MAX_SUBTITLE_BYTES:
+                raise ValueError("Subtitle response exceeds size limit")
+            return response
+        except httpx.HTTPError as exc:
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            if attempt or status is not None and status not in {408, 429, 500, 502, 503, 504}:
+                raise
+            for _ in range(5):
+                await asyncio.sleep(0.1)
+                await _ensure_subtitle_active(cancel_check)
+        finally:
+            if not request.done():
+                request.cancel()
+                await asyncio.gather(request, return_exceptions=True)
+    raise RuntimeError("Unreachable subtitle retry state")
 
 
 class EmbeddedCaptionOcrSource:
@@ -591,7 +568,7 @@ def _select_bilibili_subtitle(
     priority_map = {value.casefold(): index for index, value in enumerate(priorities)}
 
     def rank(item: dict[str, Any]) -> tuple[int, int, str]:
-        language = str(item.get("lan") or item.get("lang") or "").casefold()
+        language = str(item.get("lan") or item.get("lang") or "").casefold().removeprefix("ai-")
         exact = priority_map.get(language)
         if exact is None:
             exact = min(
@@ -602,11 +579,12 @@ def _select_bilibili_subtitle(
                 ),
                 default=len(priority_map) + 10,
             )
-        automatic = int(bool(item.get("ai_type") or item.get("ai_status")))
-        return exact, automatic, language
+        automatic = int(bool(item.get("ai_type") or item.get("ai_status") or str(item.get("lan", "")).startswith("ai-")))
+        # Manual Chinese first, then automatic Chinese, then English.
+        return (0 if language.startswith("zh") else 2) + automatic, exact, language
 
     selected = min(items, key=rank)
-    return selected if rank(selected)[0] < len(priority_map) + 10 else None
+    return selected if rank(selected)[1] < len(priority_map) + 10 else None
 
 
 def _render_srt(cues: list[tuple[float, float, str]]) -> str:
@@ -775,6 +753,8 @@ def _caption_text_similar(left: str, right: str) -> bool:
 
 
 async def _ensure_subtitle_active(cancel_check: CancelCheck) -> None:
+    if process_registry.shutting_down:
+        raise PipelineError("backend_shutdown", "应用正在关闭，字幕抓取已中断")
     value = cancel_check()
     if inspect.isawaitable(value):
         value = await value
@@ -793,6 +773,8 @@ def import_subtitle(
     provider: str = "imported-subtitle",
 ) -> SubtitleImport:
     try:
+        if path.stat().st_size > MAX_SUBTITLE_BYTES:
+            raise PipelineError("SUBTITLE_TOO_LARGE", "字幕文件超过 64 MiB")
         payload = path.read_bytes()
     except OSError as exc:
         raise PipelineError(
@@ -808,6 +790,9 @@ def import_subtitle(
     elif suffix in {".ass", ".ssa"}:
         cues = _parse_ass(text)
         subtitle_format = suffix.removeprefix(".")
+    elif suffix == ".json3":
+        cues = _parse_json3(text)
+        subtitle_format = "json3"
     elif suffix == ".txt":
         cues = _parse_plain_text(text)
         subtitle_format = "txt"
@@ -849,42 +834,29 @@ def _load_subtitle_acquisition(
     *,
     source: str | None = None,
 ) -> SubtitleAcquisition | None:
-    payload = read_json(path)
-    if not isinstance(payload, dict):
-        return None
-    if source is not None and payload.get("source_url") != source:
-        return None
-    subtitle_path = Path(str(payload.get("path") or ""))
-    if (
-        not subtitle_path.is_file()
-        or subtitle_path.suffix.casefold() not in SUBTITLE_EXTENSIONS
-        or not 0 < subtitle_path.stat().st_size <= MAX_SUBTITLE_BYTES
-    ):
-        return None
     try:
+        payload = read_json(path)
+        if not isinstance(payload, dict) or (source is not None and payload.get("source_url") != source):
+            return None
+        subtitle_path = Path(str(payload.get("path") or ""))
+        if (not subtitle_path.resolve(strict=False).is_relative_to(path.parent.parent.parent.resolve())
+                or not subtitle_path.is_file() or subtitle_path.suffix.casefold() not in SUBTITLE_EXTENSIONS
+                or not 0 < subtitle_path.stat().st_size <= MAX_SUBTITLE_BYTES):
+            return None
         subtitle_bytes = subtitle_path.read_bytes()
         expected_size = int(payload.get("size_bytes") or 0)
         expected_sha256 = str(payload.get("sha256") or "").casefold()
-        if (
-            expected_size != len(subtitle_bytes)
-            or not expected_sha256
-            or hashlib.sha256(subtitle_bytes).hexdigest() != expected_sha256
-        ):
+        if expected_size != len(subtitle_bytes) or hashlib.sha256(subtitle_bytes).hexdigest() != expected_sha256:
             return None
+        import_subtitle(subtitle_path)
         return SubtitleAcquisition(
-            path=str(subtitle_path.resolve()),
-            language=_optional_text(payload.get("language")),
+            path=str(subtitle_path.resolve()), language=_optional_text(payload.get("language")),
             source_kind=str(payload.get("source_kind") or "unknown"),
-            subtitle_format=str(
-                payload.get("subtitle_format")
-                or subtitle_path.suffix.casefold().removeprefix(".")
-            ),
-            sha256=expected_sha256,
-            size_bytes=expected_size,
-            manifest_path=str(path),
+            subtitle_format=str(payload.get("subtitle_format") or subtitle_path.suffix.casefold()[1:]),
+            sha256=expected_sha256, size_bytes=expected_size, manifest_path=str(path),
             provider=str(payload.get("provider") or "yt-dlp-subtitle"),
         )
-    except (OSError, TypeError, ValueError):
+    except (OSError, TypeError, ValueError, PipelineError):
         return None
 
 
@@ -905,6 +877,20 @@ def _subtitle_candidate_rank(path: Path, metadata: dict[str, Any]) -> tuple[int,
     source_kind = _subtitle_source_kind(language, metadata)
     source_rank = {"manual": 0, "automatic": 1, "unknown": 2}.get(source_kind, 2)
     return language_rank, source_rank, path.name.casefold()
+
+
+def _subtitle_tracks(metadata: dict, priorities: tuple[str, ...]) -> list[tuple[str, str]]:
+    tracks = []
+    order = {language.casefold(): index for index, language in enumerate(priorities)}
+    for prefix in ("zh", "en"):
+        for key, kind in (("subtitles", "manual"), ("automatic_captions", "automatic")):
+            source = metadata.get(key)
+            if isinstance(source, dict):
+                candidates = [lang for lang, entries in source.items()
+                              if isinstance(lang, str) and lang.casefold().startswith(prefix) and entries]
+                tracks.extend((lang, kind) for lang in sorted(
+                    candidates, key=lambda lang: (order.get(lang.casefold(), 99), lang.casefold())))
+    return tracks
 
 
 def _select_available_language(
@@ -1004,7 +990,7 @@ def _parse_timed_text(text: str) -> list[tuple[float | None, float | None, str]]
             continue
         left, right = line.split("-->", 1)
         start = _parse_timestamp(left.strip())
-        end_token = right.strip().split(maxsplit=1)[0]
+        end_token = (right.strip().split(maxsplit=1) or [""])[0]
         end = _parse_timestamp(end_token)
         index += 1
         content_lines: list[str] = []
@@ -1053,6 +1039,27 @@ def _parse_ass(text: str) -> list[tuple[float | None, float | None, str]]:
     return cues
 
 
+def _parse_json3(text: str) -> list[tuple[float, float, str]]:
+    try:
+        payload = json.loads(text)
+        events = payload.get("events") if isinstance(payload, dict) else None
+        if not isinstance(events, list):
+            raise ValueError("missing events")
+        cues = []
+        for event in events:
+            if not isinstance(event, dict) or not isinstance(event.get("segs"), list):
+                continue
+            start = float(event.get("tStartMs", 0)) / 1000
+            end = start + float(event.get("dDurationMs", 0)) / 1000
+            content = _clean_markup("".join(str(seg.get("utf8") or "")
+                                           for seg in event["segs"] if isinstance(seg, dict)))
+            if content and math.isfinite(start) and math.isfinite(end) and 0 <= start <= end:
+                cues.append((start, end, content))
+        return cues
+    except (ValueError, TypeError) as exc:
+        raise PipelineError("SUBTITLE_FORMAT_INVALID", "JSON3 字幕格式无效") from exc
+
+
 def _parse_plain_text(text: str) -> list[tuple[float | None, float | None, str]]:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     blocks = [
@@ -1077,7 +1084,7 @@ def _parse_timestamp(value: str) -> float | None:
         result = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
     except ValueError:
         return None
-    return result if result >= 0 else None
+    return result if math.isfinite(result) and result >= 0 else None
 
 
 def _clean_markup(value: str) -> str:

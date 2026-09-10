@@ -13,6 +13,9 @@ import type {
   TaskDetail,
   SystemStatus,
   TaskDeleteResult,
+  TaskPage,
+  TaskReview,
+  ManualReview,
 } from "../types";
 
 const defaultApiBase = ["5173", "4173"].includes(window.location.port)
@@ -37,7 +40,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${API_BASE}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
+      headers: { ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }), ...init?.headers },
     });
   } catch {
     throw new ApiError(
@@ -131,9 +134,31 @@ export const api = {
       .join("/")}`,
   createTasks: (payload: Record<string, unknown>) =>
     request<Task[]>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
+  uploadAudio: (files: File[], configuration: Record<string, unknown>) => {
+    const body = new FormData();
+    files.forEach(file => body.append("files", file));
+    body.append("configuration", JSON.stringify(configuration));
+    return request<Task[]>("/tasks/upload-audio", { method: "POST", body });
+  },
+  manualReview: (id: number) => request<ManualReview>(`/tasks/${id}/manual-review`),
+  manualDraftUrl: (id: number) => `${API_BASE}/tasks/${id}/manual-review/draft`,
+  saveManualReview: (id: number, payload: Record<string, unknown>) =>
+    request<{ saved: boolean }>(`/tasks/${id}/manual-review`, { method: "PUT", body: JSON.stringify(payload) }),
+  submitManualReview: (id: number, payload: Record<string, unknown>) =>
+    request<{ requires_confirmation: boolean; warnings: Array<{ code: string; message: string }>; task: Task | null }>(
+      `/tasks/${id}/manual-review/submit`, { method: "POST", body: JSON.stringify(payload) },
+    ),
   updateTask: (id: number, payload: Record<string, unknown>) =>
     request<Task>(`/tasks/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
-  deleteTask: (id: number) => request<TaskDeleteResult>(`/tasks/${id}`, { method: "DELETE" }),
+  taskPage: (query: string, signal?: AbortSignal) => request<TaskPage>(`/tasks/page?${query}`, { signal }),
+  taskReview: (id: number, signal?: AbortSignal) => request<TaskReview>(`/tasks/${id}/review`, { signal }),
+  reviewDiffUrl: (id: number) => `${API_BASE}/tasks/${id}/review/diff`,
+  deleteTask: (id: number) => request<Task>(`/tasks/${id}`, { method: "DELETE" }),
+  restoreTask: (id: number) => request<Task>(`/tasks/${id}/restore`, { method: "POST" }),
+  purgeTask: (id: number) => request<TaskDeleteResult>(`/tasks/${id}/permanent`, { method: "DELETE" }),
+  purgeExpiredTasks: () => request<{
+    deleted: TaskDeleteResult[]; skipped: Array<{ task_id: number; reason: string }>;
+  }>("/tasks/trash/purge-expired", { method: "POST" }),
   cancelTask: (id: number) => request<Task>(`/tasks/${id}/cancel`, { method: "POST" }),
   retryTask: (id: number) => request<Task>(`/tasks/${id}/retry`, { method: "POST" }),
   queue: () => request<QueueState>("/queue"),

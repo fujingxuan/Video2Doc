@@ -23,9 +23,11 @@ export function NewTaskPage({
   onCreated,
   editTaskId,
 }: Props) {
-  const [sourceType, setSourceType] = useState<"URL" | "LOCAL_FILE">("URL");
+  const [sourceType, setSourceType] = useState<"URL" | "LOCAL_FILE" | "UPLOAD">("URL");
   const [textSource, setTextSource] = useState<"ASR" | "SUBTITLE">("ASR");
   const [sources, setSources] = useState("");
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadKey, setUploadKey] = useState(0);
   const [title, setTitle] = useState("");
   const [profileId, setProfileId] = useState("");
   const [asrGatewayId, setAsrGatewayId] = useState("");
@@ -183,7 +185,7 @@ export function NewTaskPage({
 
   const submit = async () => {
     const inputs = sources.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
-    if (!inputs.length) {
+    if (sourceType === "UPLOAD" ? !uploadFiles.length : !inputs.length) {
       setMessage("请至少选择或输入一个视频、音频或媒体 URL。");
       return;
     }
@@ -267,7 +269,10 @@ export function NewTaskPage({
         await api.updateTask(editTaskId, { ...configuration, input: taskInputs[0] });
         setMessage("队列任务设置已更新。");
       } else {
-        const tasks = await api.createTasks({ ...configuration, inputs: taskInputs });
+        const tasks = sourceType === "UPLOAD"
+          ? await api.uploadAudio(uploadFiles, configuration)
+          : await api.createTasks({ ...configuration, inputs: taskInputs });
+        setUploadFiles([]); setUploadKey(value => value + 1);
         setSources("");
         setMessage(`已创建 ${tasks.length} 个完整转换任务。`);
       }
@@ -299,28 +304,32 @@ export function NewTaskPage({
           placeholder="留空时根据输入来源自动生成"
         />
       </label>}
-      <div className="segmented">
+      <div className="segmented" aria-disabled={busy}>
         <button
-          className={sourceType === "URL" ? "selected" : ""}
+          disabled={busy} className={sourceType === "URL" ? "selected" : ""}
           onClick={() => { setSourceType("URL"); setSources(""); }}
         >
           视频网页 URL
         </button>
         <button
-          className={sourceType === "LOCAL_FILE" ? "selected" : ""}
+          disabled={busy} className={sourceType === "LOCAL_FILE" ? "selected" : ""}
           onClick={() => {
             setSourceType("LOCAL_FILE");
             setTextSource("ASR");
             setSources("");
           }}
         >
-          本地视频 / 音频
+          本地视频 / 音频路径
         </button>
+        {!editTaskId && <button disabled={busy} className={sourceType === "UPLOAD" ? "selected" : ""}
+          onClick={() => { setSourceType("UPLOAD"); setTextSource("ASR"); setOcrEnabled(false); setSources(""); }}>
+          上传本地音频
+        </button>}
       </div>
       {sourceType === "LOCAL_FILE" && <button onClick={() => void pickFiles()} disabled={picking}>
         {picking ? "等待选择…" : "选择本地媒体文件…"}
       </button>}
-      <label>
+      {sourceType !== "UPLOAD" && <label>
         {sourceType === "URL" ? "媒体 URL（每行一个）" : "本地媒体绝对路径（每行一个）"}
         <textarea
           rows={7}
@@ -330,7 +339,21 @@ export function NewTaskPage({
             ? "https://www.youtube.com/watch?v=...\nhttps://www.bilibili.com/video/..."
             : "D:\\Media\\lecture.mp4\nD:\\Media\\audio.m4a"}
         />
-      </label>
+      </label>}
+      {sourceType === "UPLOAD" && <label className="audio-upload">选择音频文件
+        <input key={uploadKey} type="file" multiple disabled={busy}
+          accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.opus,.wma,.aiff,.aif,.amr"
+          onChange={event => {
+            const files = Array.from(event.target.files ?? []);
+            if (files.length > 20 || files.some(file => file.size > 2 * 1024 ** 3 || file.size === 0)) {
+              setMessage("每次最多上传 20 个音频文件，单个文件需大于 0 且不超过 2 GiB。");
+              setUploadFiles([]); event.target.value = ""; return;
+            }
+            setUploadFiles(files); setMessage(null);
+          }} />
+        <small>支持 WAV、MP3、M4A、FLAC 等格式。上传后会保留任务副本。</small>
+        {uploadFiles.map((file, index) => <span key={index}>{file.name} · {(file.size / 1024 ** 2).toFixed(2)} MB</span>)}
+      </label>}
       <fieldset>
         <legend>文本获取方式</legend>
         <div className="segmented">
@@ -543,15 +566,15 @@ export function NewTaskPage({
       </fieldset>
 
       <div className="notice">
-        无文本模型也能完成完整 Markdown；应用不会生成摘要、核心观点、问答、RAG 或知识库索引。
+        不启用文本模型时，转写后会等待人工校对。可将初稿交给网页大模型修改后填回，也可直接使用初稿完成。
         LLM、OCR、ASR 连接分别在左侧对应页面配置。
       </div>
       {message && <p className="form-message">{message}</p>}
       <div className="actions">
         <button className="primary" disabled={busy || initializing} onClick={() => void submit()}>
-          {busy ? (editTaskId ? "正在保存…" : "正在创建…") : (editTaskId ? "保存队列修改" : "加入串行队列")}
+          {busy ? (editTaskId ? "正在保存…" : (sourceType === "UPLOAD" ? "正在上传音频…" : "正在创建…")) : (editTaskId ? "保存队列修改" : "加入串行队列")}
         </button>
-        <button disabled={!sources} onClick={() => setSources("")}>清空输入</button>
+        <button disabled={busy || (!sources && !uploadFiles.length)} onClick={() => { setSources(""); setUploadFiles([]); setUploadKey(value => value + 1); }}>清空输入</button>
         {editTaskId && <button onClick={() => { window.location.hash = "/queue"; }}>取消编辑</button>}
       </div>
     </section>

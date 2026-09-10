@@ -151,6 +151,10 @@ def test_delete_task_removes_database_workspace_and_export_bundle(
     response = client.delete(f"/api/v1/tasks/{task_id}")
 
     assert response.status_code == 200, response.text
+    assert response.json()["deleted_at"] is not None
+    assert workspace.exists() and markdown.exists() and attachments.exists() and sidecars.exists()
+    response = client.delete(f"/api/v1/tasks/{task_id}/permanent")
+    assert response.status_code == 200, response.text
     assert response.json()["files_removed"] >= 4
     assert not workspace.exists()
     assert not markdown.exists()
@@ -202,8 +206,10 @@ def test_delete_never_removes_the_original_local_input(
         task.output_path = str(original)
         session.commit()
 
-    with SessionLocal() as session, pytest.raises(ConflictError):
+    with SessionLocal() as session:
         TaskService(session).delete(task_id)
+        with pytest.raises(ConflictError):
+            TaskService(session).purge(task_id)
 
     assert original.read_bytes() == b"original-media"
     assert workspace.is_dir()

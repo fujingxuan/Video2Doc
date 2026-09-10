@@ -106,6 +106,7 @@ STAGE_RANGES: dict[str, tuple[int, int]] = {
     "FUSION_VALIDATE": (87, 89),
     "DOCUMENT_BUILD": (89, 92),
     "TEXT_EDIT": (92, 94),
+    "MANUAL_REVIEW": (94, 94),
     "MARKDOWN_RENDER": (94, 97),
     "OBSIDIAN_EXPORT": (97, 99),
     "FINALIZE": (99, 100),
@@ -239,6 +240,7 @@ async def run_real_pipeline(task_id: int) -> None:
         source = task.source
         source_type = task.source_type
         attempt = task.attempt
+        review_submission_path = task.review_submission_path
     paths = WorkspacePaths.from_root(workspace)
     paths.create()
     tracker = StageTracker(task_id, workspace, snapshot)
@@ -256,6 +258,10 @@ async def run_real_pipeline(task_id: int) -> None:
             return task is None or task.cancel_requested
 
     try:
+        if review_submission_path:
+            await _resume_manual_review(task_id, attempt, tracker, paths, snapshot,
+                                        review_submission_path, cancelled)
+            return
         tracker.start("INPUT_VALIDATE", message="正在验证输入来源")
         kind, normalized_source = classify_input(source, source_type)
         source_record = paths.metadata / "input.json"
@@ -300,12 +306,11 @@ async def run_real_pipeline(task_id: int) -> None:
             input_artifacts=[str(source_record)],
         )
         preflight_acquisition: MediaAcquisitionResult | None = None
+        subtitle_preflight_error: PipelineError | None = None
         if (
             subtitle_mode
             and not subtitle_path
             and kind == "URL"
-            and not bool(subtitle_config.get("embedded_ocr_fallback"))
-            and not bool(processing.get("ocr_enabled"))
         ):
             try:
                 subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
@@ -329,19 +334,17 @@ async def run_real_pipeline(task_id: int) -> None:
                     metadata,
                     metadata_path,
                 )
-                tracker.progress(1.0, "平台字幕获取完成；已跳过完整视频下载")
+                if processing.get("ocr_enabled"):
+                    preflight_acquisition = None
+                    tracker.progress(None, "平台字幕已保存，继续获取画面供 OCR 使用")
+                else:
+                    tracker.progress(1.0, "平台字幕获取完成；已跳过完整视频下载")
             except PipelineError as exc:
-                if exc.code != "SUBTITLE_NOT_FOUND":
+                if exc.code in {"PROCESS_CANCELLED", "backend_shutdown"}:
                     raise
-                if not asr_config:
-                    raise PipelineError(
-                        "ASR_FALLBACK_UNAVAILABLE",
-                        "视频没有可用字幕，且处理方案未配置 ASR 模型",
-                        technical_detail=exc.technical_detail or exc.user_message,
-                    ) from exc
-                subtitle_mode = False
-                subtitle_fallback_message = "未发现可用字幕，已自动切换到处理方案中的 ASR 模型"
-                tracker.progress(None, subtitle_fallback_message)
+                subtitle_preflight_error = exc
+                append_task_log(workspace, f"平台字幕未获取成功：{exc.code}: {exc.user_message}")
+                tracker.progress(None, "平台字幕暂不可用，继续获取媒体以尝试内嵌字幕或语音识别")
 
         acquisition = preflight_acquisition or _load_acquisition(acquisition_path)
         reusable_acquisition = bool(
@@ -352,7 +355,8 @@ async def run_real_pipeline(task_id: int) -> None:
                     and acquisition.local_media_path
                     and Path(acquisition.local_media_path).is_file()
                 )
-                or (not acquisition.media_available and subtitle_mode and subtitle_path)
+                or (not acquisition.media_available and subtitle_mode and subtitle_path
+                    and not processing.get("ocr_enabled"))
             )
         )
         if reusable_acquisition:
@@ -443,6 +447,8 @@ async def run_real_pipeline(task_id: int) -> None:
 
             try:
                 try:
+                    if subtitle_preflight_error is not None:
+                        raise subtitle_preflight_error
                     subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
                         normalized_source,
                         paths,
@@ -451,7 +457,7 @@ async def run_real_pipeline(task_id: int) -> None:
                     )
                 except PipelineError as exc:
                     embedded_fallback = bool(subtitle_config.get("embedded_ocr_fallback"))
-                    if exc.code != "SUBTITLE_NOT_FOUND" or not embedded_fallback:
+                    if exc.code not in {"SUBTITLE_NOT_FOUND", "SUBTITLE_FETCH_FAILED", "SUBTITLE_EMPTY", "PROCESS_TIMEOUT", "YTDLP_UNAVAILABLE"} or not embedded_fallback:
                         raise
                     if not ocr_config:
                         raise PipelineError(
@@ -488,6 +494,7 @@ async def run_real_pipeline(task_id: int) -> None:
                 if exc.code not in {
                     "SUBTITLE_NOT_FOUND",
                     "EMBEDDED_SUBTITLE_NOT_FOUND",
+                    "SUBTITLE_FETCH_FAILED", "SUBTITLE_EMPTY", "PROCESS_TIMEOUT", "YTDLP_UNAVAILABLE",
                 }:
                     raise
                 if not asr_config:
@@ -1348,6 +1355,90 @@ async def _run_document_pipeline(
         ],
     )
 
+    if not edit_enabled and processing.get("manual_review_enabled"):
+        from app.services.manual_review import review_seed_path
+
+        seed_path = review_seed_path(paths.root, attempt)
+        write_json(seed_path, {
+            "document": document.model_dump(mode="json"),
+            "context": {
+                "transcript_artifacts": transcript_artifacts,
+                "fusion_payload": fusion_payload, "fusion_artifacts": fusion_artifacts,
+                "frames_manifest_path": frames_manifest_path,
+                "ocr_timeline_path": ocr_timeline_path,
+            },
+        })
+        tracker.start("MANUAL_REVIEW", message="初稿已生成，等待用户确认或提交修改稿",
+                      input_artifacts=[str(seed_path)])
+        with SessionLocal() as session:
+            result = session.execute(update(Task).where(
+                Task.id == task_id, Task.status == "PROCESSING", Task.cancel_requested.is_(False),
+                Task.deleted_at.is_(None), Task.attempt == attempt,
+            ).values(status="WAITING_REVIEW", current_stage="MANUAL_REVIEW", progress=94,
+                     transcript_path=transcript_artifacts["normalized"],
+                     fusion_timeline_path=fusion_artifacts["timeline"],
+                     frames_manifest_path=frames_manifest_path, ocr_timeline_path=ocr_timeline_path))
+            if result.rowcount != 1:
+                session.rollback()
+                raise PipelineCancelled(stage="MANUAL_REVIEW")
+            run = _current_stage(session, task_id, attempt, "MANUAL_REVIEW")
+            if run:
+                run.status = "WAITING_REVIEW"
+            session.commit()
+        write_artifact_index(paths.root)
+        tracker._write_state("待人工校对：可提交修改稿，或直接使用初稿完成")
+        return
+
+    await _render_document_outputs(
+        task_id, attempt=attempt, tracker=tracker, paths=paths, snapshot=snapshot,
+        document=document, document_path=document_path,
+        transcript_artifacts=transcript_artifacts, fusion_payload=fusion_payload,
+        fusion_artifacts=fusion_artifacts, cancelled=cancelled,
+        frames_manifest_path=frames_manifest_path, ocr_timeline_path=ocr_timeline_path,
+    )
+
+
+async def _resume_manual_review(task_id, attempt, tracker, paths, snapshot, submission, cancelled):
+    from app.services.tasks import TaskService
+
+    with SessionLocal() as session:
+        relative = Path(submission).resolve().relative_to(paths.root.resolve()).as_posix()
+        submission_path = TaskService(session).artifact_path(task_id, relative)
+    payload = read_json(submission_path)
+    if not isinstance(payload, dict):
+        raise PipelineError("MANUAL_REVIEW_INVALID", "已确认稿件缺失或损坏")
+    document = Document.model_validate(payload["document"])
+    # A retry may use a new attempt; its immutable decision still references the same source.
+    with SessionLocal() as session:
+        run = _current_stage(session, task_id, attempt, "MANUAL_REVIEW")
+        if run is None:
+            run = TaskStageRun(task_id=task_id, attempt=attempt, stage="MANUAL_REVIEW",
+                               started_at=utcnow(), input_artifacts=[str(submission_path)])
+            session.add(run)
+        run.status = "COMPLETED"
+        run.progress = 100
+        run.finished_at = utcnow()
+        run.message = "用户已确认稿件，继续导出，无需重新转写"
+        session.commit()
+    document_path = paths.output / "document.json"
+    validation_path = paths.output / "text_edit" / f"attempt_{attempt:04d}_validation.json"
+    write_json(document_path, document.model_dump(mode="json"))
+    write_json(validation_path, {"edit_run": document.edit_metadata,
+                                 "faithfulness": payload["faithfulness"]})
+    _record_document_and_edit(task_id, attempt, document, document_path,
+                              validation_path, submission_path, document.edit_metadata)
+    await _render_document_outputs(
+        task_id, attempt=attempt, tracker=tracker, paths=paths, snapshot=snapshot,
+        document=document, document_path=document_path, cancelled=cancelled,
+        **payload["context"],
+    )
+
+
+async def _render_document_outputs(
+    task_id, *, attempt, tracker, paths, snapshot, document, document_path,
+    transcript_artifacts, fusion_payload, fusion_artifacts, cancelled,
+    frames_manifest_path=None, ocr_timeline_path=None,
+):
     source_sidecar = {
         "schema_version": 1,
         "document_id": document.document_id,
@@ -1513,30 +1604,28 @@ def _record_document_and_edit(
     edit_run: dict,
 ) -> None:
     with SessionLocal() as session:
-        session.add(
-            DocumentArtifact(
-                task_id=task_id,
-                attempt=attempt,
-                schema_version=document.schema_version,
-                document_path=str(document_path),
-                block_count=len(document.all_blocks()),
-                source_reference_count=len(document.source_ids()),
-            )
-        )
-        session.add(
-            TextEditRun(
-                task_id=task_id,
-                attempt=attempt,
-                provider=str(edit_run.get("provider") or "none"),
-                model=(str(edit_run["model"]) if edit_run.get("model") is not None else None),
-                prompt_version=str(edit_run.get("prompt_version") or PROMPT_VERSION),
-                accepted=bool(edit_run.get("accepted")),
-                fallback_used=bool(edit_run.get("fallback_used")),
-                raw_response_path=str(edit_raw_path) if edit_raw_path else None,
-                validation_path=str(validation_path),
-                elapsed_seconds=float(edit_run.get("elapsed_seconds") or 0.0),
-            )
-        )
+        artifact = session.scalar(select(DocumentArtifact).where(
+            DocumentArtifact.task_id == task_id, DocumentArtifact.attempt == attempt))
+        if artifact is None:
+            artifact = DocumentArtifact(task_id=task_id, attempt=attempt)
+            session.add(artifact)
+        artifact.schema_version = document.schema_version
+        artifact.document_path = str(document_path)
+        artifact.block_count = len(document.all_blocks())
+        artifact.source_reference_count = len(document.source_ids())
+        edit = session.scalar(select(TextEditRun).where(
+            TextEditRun.task_id == task_id, TextEditRun.attempt == attempt))
+        if edit is None:
+            edit = TextEditRun(task_id=task_id, attempt=attempt)
+            session.add(edit)
+        edit.provider = str(edit_run.get("provider") or "none")
+        edit.model = str(edit_run["model"]) if edit_run.get("model") is not None else None
+        edit.prompt_version = str(edit_run.get("prompt_version") or PROMPT_VERSION)
+        edit.accepted = bool(edit_run.get("accepted"))
+        edit.fallback_used = bool(edit_run.get("fallback_used"))
+        edit.raw_response_path = str(edit_raw_path) if edit_raw_path else None
+        edit.validation_path = str(validation_path)
+        edit.elapsed_seconds = float(edit_run.get("elapsed_seconds") or 0.0)
         task = session.get(Task, task_id)
         if task:
             task.document_path = str(document_path)

@@ -16,6 +16,17 @@ from app.storage.workspace import write_json
 from tests.helpers import wait_for_status
 
 
+def accept_initial_draft(client: TestClient, task_id: int) -> None:
+    waiting = wait_for_status(client, task_id, {"WAITING_REVIEW"})
+    assert waiting["progress"] == 94 and waiting["export_path"] is None
+    draft = client.get(f"/api/v1/tasks/{task_id}/manual-review").json()
+    response = client.post(f"/api/v1/tasks/{task_id}/manual-review/submit", json={
+        "attempt": draft["attempt"], "source_sha256": draft["source_sha256"], "action": "original",
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["requires_confirmation"] is False
+
+
 def media_info(path: Path, *, video: bool) -> MediaInfo:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{}", encoding="utf-8")
@@ -128,6 +139,7 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
     )
     assert created.status_code == 201, created.text
     task_id = created.json()[0]["id"]
+    accept_initial_draft(client, task_id)
     completed = wait_for_status(client, task_id, {"COMPLETED"})
     assert completed["progress"] == 100
     assert completed["media_info"]["has_video"] is True
@@ -146,6 +158,7 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
         "FUSION_VALIDATE",
         "DOCUMENT_BUILD",
         "TEXT_EDIT",
+        "MANUAL_REVIEW",
         "MARKDOWN_RENDER",
         "OBSIDIAN_EXPORT",
         "FINALIZE",
@@ -155,7 +168,7 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
     assert completed["export_path"] and Path(completed["export_path"]).is_file()
     markdown = Path(completed["export_path"]).read_text(encoding="utf-8")
     assert "受控转写" in markdown
-    assert "未启用（忠实原文回退）" in markdown
+    assert "用户确认使用初稿" in markdown
     assert {item["target_type"] for item in completed["exports"]} == {
         "WORKSPACE",
         "OBSIDIAN",
@@ -325,6 +338,7 @@ def test_url_chinese_subtitle_skips_asr_and_exports_timestamp_free_markdown(
         },
     )
     assert created.status_code == 201, created.text
+    accept_initial_draft(client, created.json()[0]["id"])
     completed = wait_for_status(client, created.json()[0]["id"], {"COMPLETED"})
     assert media_acquire_calls == 0
     stage_names = [stage["stage"] for stage in completed["stages"]]
@@ -477,6 +491,7 @@ def test_missing_url_subtitle_automatically_falls_back_to_profile_asr(
         },
     )
     assert created.status_code == 201, created.text
+    accept_initial_draft(client, created.json()[0]["id"])
     completed = wait_for_status(client, created.json()[0]["id"], {"COMPLETED"})
     stages = [stage["stage"] for stage in completed["stages"]]
     assert "AUDIO_EXTRACT" in stages
@@ -681,6 +696,7 @@ def test_database_worker_runs_ocr_fusion_stages_and_serves_traceable_artifacts(
     )
     assert created.status_code == 201, created.text
     task_id = created.json()[0]["id"]
+    accept_initial_draft(client, task_id)
     completed = wait_for_status(client, task_id, {"COMPLETED"})
     assert completed["frame_summary"]["kept_count"] == 1
     assert completed["ocr_preview"]["block_count"] == 1
@@ -689,7 +705,7 @@ def test_database_worker_runs_ocr_fusion_stages_and_serves_traceable_artifacts(
         "ocr_event": 1,
         "frame_event": 1,
     }
-    assert [stage["stage"] for stage in completed["stages"]][-11:] == [
+    assert [stage["stage"] for stage in completed["stages"]][-12:] == [
         "FRAME_EXTRACT",
         "FRAME_DEDUP",
         "OCR_RECOGNIZE",
@@ -698,6 +714,7 @@ def test_database_worker_runs_ocr_fusion_stages_and_serves_traceable_artifacts(
         "FUSION_VALIDATE",
         "DOCUMENT_BUILD",
         "TEXT_EDIT",
+        "MANUAL_REVIEW",
         "MARKDOWN_RENDER",
         "OBSIDIAN_EXPORT",
         "FINALIZE",

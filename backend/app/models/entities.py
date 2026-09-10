@@ -207,6 +207,7 @@ class AppSetting(TimestampMixin, Base):
 class Task(TimestampMixin, Base):
     __tablename__ = "tasks"
     __table_args__ = (
+        Index("ix_tasks_history_page", "deleted_at", "created_at", "id"),
         Index(
             "uq_tasks_single_processing",
             "status",
@@ -235,10 +236,13 @@ class Task(TimestampMixin, Base):
     fusion_timeline_path: Mapped[str | None] = mapped_column(Text)
     artifacts_index_path: Mapped[str | None] = mapped_column(Text)
     document_path: Mapped[str | None] = mapped_column(Text)
+    review_submission_path: Mapped[str | None] = mapped_column(Text)
     markdown_path: Mapped[str | None] = mapped_column(Text)
     export_path: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    trash_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     snapshot: Mapped[TaskConfigSnapshot] = relationship(
         back_populates="task", cascade="all, delete-orphan", uselist=False, lazy="selectin"

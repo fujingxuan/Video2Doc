@@ -16,6 +16,32 @@ ACCEPTANCE_SCRIPT = (
 )
 
 
+def test_packaged_acceptance_continues_after_manual_review_gate():
+    import json
+    import runpy
+
+    import httpx
+
+    submitted = []
+
+    def handler(request):
+        if request.url.path.endswith("/submit"):
+            submitted.append(json.loads(request.content))
+            return httpx.Response(200, json={"requires_confirmation": False})
+        if request.url.path.endswith("/manual-review"):
+            return httpx.Response(200, json={"attempt": 1, "source_sha256": "a" * 64})
+        return httpx.Response(200, json={
+            "status": "COMPLETED" if submitted else "WAITING_REVIEW",
+            "current_stage": "MANUAL_REVIEW", "progress": 94,
+        })
+
+    namespace = runpy.run_path(str(ACCEPTANCE_SCRIPT))
+    with httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test") as client:
+        task = namespace["_wait_task"](client, 7, 1)
+    assert task["status"] == "COMPLETED"
+    assert submitted == [{"action": "original", "attempt": 1, "source_sha256": "a" * 64}]
+
+
 def test_packaged_application_runs_fresh_real_pipeline(
     request: pytest.FixtureRequest,
     tmp_path: Path,

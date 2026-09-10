@@ -2,6 +2,8 @@ export type Capability = "ASR" | "OCR" | "TEXT_PROCESSING" | "VISION";
 export type TaskStatus =
   | "QUEUED"
   | "PROCESSING"
+  | "WAITING_REVIEW"
+  | "DELETING"
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED"
@@ -145,6 +147,7 @@ export interface StageRun {
 }
 
 export interface Task {
+  review_submission_path?: string | null;
   id: number;
   source: string;
   source_type: string;
@@ -171,6 +174,8 @@ export interface Task {
   updated_at: string;
   started_at: string | null;
   completed_at: string | null;
+  deleted_at?: string | null;
+  trash_expires_at?: string | null;
 }
 
 export interface TaskDetail extends Task {
@@ -249,6 +254,7 @@ export interface TaskDetail extends Task {
 }
 
 export interface QueueState {
+  waiting_review?: number;
   max_concurrency: number;
   running: number;
   queued: number;
@@ -311,6 +317,55 @@ export interface TaskDeleteResult {
   deleted_paths: string[];
 }
 
+export interface TaskPage {
+  items: Task[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface TaskPageQuery {
+  offset?: number;
+  limit?: number;
+  status?: string;
+  search?: string;
+  trashed?: boolean;
+}
+
+export interface TaskFeed {
+  page: TaskPage;
+  queue: QueueState;
+}
+
+export interface TaskPageDelta {
+  upserts: Task[];
+  removed_ids: number[];
+  order: number[];
+  total: number;
+  offset: number;
+  limit: number;
+  queue: QueueState;
+}
+
+export interface TaskReview {
+  manual_review?: boolean;
+  task_id: number;
+  title: string;
+  attempt: number;
+  original_text: string;
+  edited_text: string;
+  diff: string;
+  changed: boolean;
+  original_characters: number;
+  edited_characters: number;
+  source_count: number;
+  accepted: boolean | null;
+  fallback_used: boolean;
+  model: string | null;
+  reason: string | null;
+  prompt_version: string | null;
+}
+
 export interface SystemStatus {
   platform: string;
   tools: Record<string, {
@@ -324,4 +379,15 @@ export interface SystemStatus {
   log_directory: string;
   api_prefix: string;
   port: number;
+}
+
+export interface ManualReview {
+  task_id: number;
+  title: string;
+  attempt: number;
+  source_sha256: string;
+  original_text: string;
+  edited_text: string;
+  source_count: number;
+  prompt: string;
 }
