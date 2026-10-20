@@ -10,13 +10,14 @@ from typing import Any
 from app.core.config import get_settings
 from app.core.errors import ConflictError, PipelineError
 from app.models import AppSetting
+from app.providers.ytdlp_options import default_ytdlp_executable
 
 
 def media_tool_status(settings: AppSetting) -> dict[str, Any]:
     configured = {
         "ffmpeg": settings.ffmpeg_path or "ffmpeg",
         "ffprobe": _ffprobe_for(settings.ffmpeg_path),
-        "yt_dlp": settings.ytdlp_path or "yt-dlp",
+        "yt_dlp": settings.ytdlp_path or default_ytdlp_executable(),
     }
     tools = {
         name: _probe_tool(value, "--version" if name == "yt_dlp" else "-version")

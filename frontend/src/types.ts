@@ -12,6 +12,7 @@ export type TaskStatus =
 export interface ModelConfig {
   id: number;
   name: string;
+  display_name?: string;
   capabilities: Capability[];
   notes: string | null;
   enabled: boolean;
@@ -195,6 +196,7 @@ export interface TaskDetail extends Task {
     video_streams?: Array<Record<string, unknown>>;
   } | null;
   transcript_preview: {
+    quality_warnings?: string[];
     provider?: string;
     model?: string;
     language?: string | null;
@@ -243,6 +245,7 @@ export interface TaskDetail extends Task {
     target_type: "WORKSPACE" | "OBSIDIAN";
     status: string;
     markdown_path: string | null;
+    word_path?: string | null;
     attachment_directory: string | null;
     data_directory: string | null;
     image_count: number;

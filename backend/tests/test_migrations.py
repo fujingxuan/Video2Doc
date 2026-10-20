@@ -57,7 +57,7 @@ def test_alembic_upgrades_and_downgrades_document_export_head(tmp_path: Path) ->
             ).fetchall()
         }
 
-    assert revision == ("0013_manual_review",)
+    assert revision == ("0014_pipeline_lanes",)
     assert {
         "frames_manifest_path",
         "ocr_timeline_path",
@@ -124,7 +124,7 @@ def test_trash_migration_preserves_existing_task_and_snapshot(tmp_path: Path) ->
     migrate('upgrade', 'head')
     with sqlite3.connect(database_path) as connection:
         after = connection.execute('SELECT * FROM tasks').fetchone()
-        assert after[:len(before)] == before and after[len(before):] == (None, None, None)
+        assert after[:len(before)] == before and after[len(before):] == (None, None, None, "main")
         assert connection.execute('SELECT snapshot_json FROM task_config_snapshots').fetchone() == ('{"unchanged": true}',)
         assert 'ix_tasks_history_page' in {row[1] for row in connection.execute('PRAGMA index_list(tasks)')}
     migrate('downgrade', '0011_full_article_text_edit')

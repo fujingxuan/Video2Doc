@@ -356,7 +356,7 @@ def seed_default_gateways(session: Session) -> None:
             "models": [
                 {
                     "model_name": "fun-asr-realtime-2026-02-28",
-                    "display_name": "Fun-ASR Realtime 2026-02-28",
+                    "display_name": "Fun-ASR 02-28（云端长音频）",
                     "supports_native_long_audio": True,
                     "supports_streaming": True,
                     "supports_segment_timestamps": True,
@@ -368,7 +368,7 @@ def seed_default_gateways(session: Session) -> None:
                 },
                 {
                     "model_name": "fun-asr-realtime",
-                    "display_name": "Fun-ASR Realtime (stable alias)",
+                    "display_name": "Fun-ASR（云端实时）",
                     "supports_native_long_audio": True,
                     "supports_streaming": True,
                     "supports_segment_timestamps": True,
@@ -395,7 +395,7 @@ def seed_default_gateways(session: Session) -> None:
             "models": [
                 {
                     "model_name": "FireRedTeam/FireRedASR2-AED",
-                    "display_name": "FireRedASR2-AED",
+                    "display_name": "FireRed 2（中文·方言）",
                     "max_chunk_seconds": 55.0,
                     "supports_segment_timestamps": True,
                     "supports_word_timestamps": True,
@@ -422,7 +422,7 @@ def seed_default_gateways(session: Session) -> None:
             "models": [
                 {
                     "model_name": "Qwen/Qwen3-ASR-1.7B",
-                    "display_name": "Qwen3-ASR-1.7B + ForcedAligner",
+                    "display_name": "Qwen3 1.7B（多语·词级时间戳）",
                     "max_chunk_seconds": 180.0,
                     "max_alignment_seconds": 300.0,
                     "supports_segment_timestamps": True,
@@ -451,7 +451,7 @@ def seed_default_gateways(session: Session) -> None:
             "models": [
                 {
                     "model_name": "large-v3",
-                    "display_name": "Whisper large-v3 (quality)",
+                    "display_name": "Whisper V3（多语·质量优先）",
                     "max_chunk_seconds": 30.0,
                     "supports_segment_timestamps": True,
                     "supports_word_timestamps": True,
@@ -462,7 +462,7 @@ def seed_default_gateways(session: Session) -> None:
                 },
                 {
                     "model_name": "large-v3-turbo",
-                    "display_name": "Whisper large-v3-turbo (speed)",
+                    "display_name": "Whisper Turbo（多语·快速转写）",
                     "max_chunk_seconds": 30.0,
                     "supports_segment_timestamps": True,
                     "supports_word_timestamps": True,
@@ -505,7 +505,7 @@ def seed_default_gateways(session: Session) -> None:
             "models": [
                 {
                     "model_name": "PP-OCRv5_server",
-                    "display_name": "PP-OCRv5 Server (Chinese/English)",
+                    "display_name": "OCR v5（中英文画面）",
                     "supports_confidence": True,
                     "supports_language_detection": False,
                     "languages": ["ch", "en"],
@@ -543,7 +543,7 @@ def seed_default_gateways(session: Session) -> None:
             "models": [
                 {
                     "model_name": "PaddleOCR-VL-1.6-0.9B",
-                    "display_name": "PaddleOCR-VL 1.6 (external Docker)",
+                    "display_name": "OCR-VL 1.6（复杂版面）",
                     "supports_confidence": False,
                     "supports_language_detection": False,
                     "languages": ["zh", "en"],

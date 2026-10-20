@@ -306,6 +306,7 @@ class ModelUpdate(BaseModel):
 class ModelRead(BaseModel):
     id: int
     name: str
+    display_name: str = ""
     capabilities: list[Capability]
     notes: str | None
     enabled: bool
@@ -639,7 +640,7 @@ class TaskDetail(TaskRead):
 
 class QueueStatus(BaseModel):
     waiting_review: int = 0
-    max_concurrency: int = 1
+    max_concurrency: int = 2
     running: int
     queued: int
     completed: int

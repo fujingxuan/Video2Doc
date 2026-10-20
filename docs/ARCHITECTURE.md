@@ -311,7 +311,7 @@ FINALIZE (99-100)
 ## 18. 已知边界
 
 - 固定时长分块尚未做静音边界检测。
-- 当前只支持一个后端实例和单任务执行。
+- 当前只支持一个后端实例；真实 ASR 任务使用音频准备和主处理两个槽位，各最多一个任务。主处理覆盖转写、OCR、文档及导出，音频准备到 AUDIO_READY 后等待。SQLite 按 processing_lane 的 PROCESSING 唯一索引和进程内锁共同约束，锁在 Gateway 清理完成后释放。
 - Windows 本机使用 WinForms 选择媒体；非 Windows 环境仍使用路径输入。
 - SSE 不是可重放事件日志。
 - URL 下载成功仍依赖站点和本机 yt-dlp 版本。

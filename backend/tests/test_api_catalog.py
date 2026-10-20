@@ -259,7 +259,8 @@ def test_health_models_profiles_settings_and_immutable_snapshot(
         "protocol": "video2doc-asr-http-v1",
     }
     assert profile["ocr_selection"]["display_name"] == "Test OCR"
-    assert profile["text_selection"]["display_name"] == "gpt-5-mini"
+    assert profile["text_selection"]["display_name"] == "gpt-5-mini（全文校对）"
+    assert profile["text_selection"]["model_name"] == "gpt-5-mini"
 
     invalid = client.post(
         "/api/v1/profiles",

@@ -209,8 +209,8 @@ class Task(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_tasks_history_page", "deleted_at", "created_at", "id"),
         Index(
-            "uq_tasks_single_processing",
-            "status",
+            "uq_tasks_processing_lane",
+            "processing_lane",
             unique=True,
             sqlite_where=text("status = 'PROCESSING'"),
         ),
@@ -221,6 +221,7 @@ class Task(TimestampMixin, Base):
     source_type: Mapped[str] = mapped_column(String(32), index=True)
     title: Mapped[str] = mapped_column(String(300))
     status: Mapped[str] = mapped_column(String(32), index=True, default="QUEUED")
+    processing_lane: Mapped[str] = mapped_column(String(16), default="main", server_default="main")
     current_stage: Mapped[str] = mapped_column(String(64), default="QUEUED")
     progress: Mapped[int] = mapped_column(Integer, default=0)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)

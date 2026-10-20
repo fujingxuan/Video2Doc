@@ -8,7 +8,7 @@ import re
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -55,20 +55,6 @@ class OcrResult:
             **asdict(self),
             "blocks": [item.to_dict() for item in self.blocks],
         }
-
-
-class OcrGatewayClient(Protocol):
-    async def recognize(
-        self,
-        image_path: Path,
-        *,
-        model: str,
-        raw_path: Path,
-        frame_id: str | None = None,
-        media_timestamp: float | None = None,
-        language: str | None = None,
-        cancel_check: OcrCancelCheck | None = None,
-    ) -> OcrResult: ...
 
 
 class UnifiedOcrGatewayClient:

@@ -23,6 +23,7 @@ from app.models import (
     TaskConfigSnapshot,
 )
 from app.models.entities import utcnow
+from app.providers.ytdlp_options import default_ytdlp_executable
 from app.repositories.tasks import TaskRepository
 from app.schemas.api import QueueStatus, TaskBatchCreate, TaskDetail, TaskInput, TaskPage, TaskRead, TaskUpdate
 from app.services.gateways import sanitize_gateway_metadata
@@ -246,6 +247,19 @@ class TaskService:
         except OSError as exc:
             raise NotFoundError("Task Markdown", task_id) from exc
 
+    def copy_audio(self, task_id: int) -> dict[str, str]:
+        from app.services.clipboard import copy_file
+
+        item = self.repo.get(task_id)
+        if not item:
+            raise NotFoundError("Task", task_id)
+        if not any(stage.attempt == item.attempt and stage.stage == "AUDIO_VALIDATE"
+                   and stage.status == "COMPLETED" for stage in item.stages):
+            raise ConflictError("音频尚未完成验证，请等待 AUDIO_VALIDATE 完成")
+        path = self.artifact_path(task_id, "01_extract/audio/normalized.wav")
+        copy_file(path)
+        return {"path": str(path), "message": "音频文件已复制，可在文件夹中粘贴"}
+
     def open_target(self, task_id: int, target: str) -> dict[str, str]:
         item = self.repo.get(task_id)
         if not item:
@@ -256,6 +270,14 @@ class TaskService:
             value = str(Path(item.export_path).parent) if item.export_path else None
         elif target == "markdown":
             value = item.export_path or item.markdown_path
+        elif target == "word":
+            markdown = item.export_path or item.markdown_path
+            value = next((
+                (export.config_json or {}).get("word_path")
+                for export in sorted(item.markdown_exports, key=lambda entry: entry.id, reverse=True)
+                if export.status == "COMPLETED" and export.markdown_path == markdown
+                and (export.config_json or {}).get("word_path")
+            ), None)
         else:
             raise NotFoundError("Task open target", target)
         if not value:
@@ -470,10 +492,12 @@ class TaskService:
             paths.extend(Path(value).resolve(strict=False) for value in values if value)
         rows = self.session.execute(select(
             MarkdownExport.markdown_path, MarkdownExport.attachment_directory,
-            MarkdownExport.data_directory,
+            MarkdownExport.data_directory, MarkdownExport.config_json,
         ).where(MarkdownExport.task_id != task_id, MarkdownExport.status == "COMPLETED"))
-        for row in rows:
-            paths.extend(Path(value).resolve(strict=False) for value in row if value)
+        for markdown, attachments, data, config in rows:
+            paths.extend(Path(value).resolve(strict=False)
+                         for value in (markdown, attachments, data, (config or {}).get("word_path"))
+                         if value)
         return paths
 
     def queue_status(self) -> QueueStatus:
@@ -736,7 +760,7 @@ class TaskService:
             "tools": {
                 "ffmpeg": settings.ffmpeg_path or "ffmpeg",
                 "ffprobe": _ffprobe_for(settings.ffmpeg_path),
-                "ytdlp": settings.ytdlp_path or "yt-dlp",
+                "ytdlp": settings.ytdlp_path or default_ytdlp_executable(),
             },
             "gateways": {"asr": asr_gateway_snapshot, "ocr": ocr_gateway_snapshot},
             "asr": (
@@ -942,6 +966,7 @@ def _delete_task_files(item: Task, *, protected_paths: list[Path] | None = None)
         export_root = _export_root(export.config_json)
         for value in (
             export.markdown_path,
+            (export.config_json or {}).get("word_path"),
             export.attachment_directory,
             export.data_directory,
         ):

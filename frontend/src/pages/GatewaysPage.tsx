@@ -63,6 +63,7 @@ export function GatewaysPage({
   const [secretValue, setSecretValue] = useState("");
   const [timeoutSeconds, setTimeoutSeconds] = useState(gatewayType === "ASR" ? "300" : "180");
   const [maxRetries, setMaxRetries] = useState("1");
+  const [runtimeDevice, setRuntimeDevice] = useState("cuda");
   const [modelGatewayId, setModelGatewayId] = useState("");
   const [modelName, setModelName] = useState("");
   const [maxChunkSeconds, setMaxChunkSeconds] = useState(gatewayType === "ASR" ? "60" : "");
@@ -80,6 +81,7 @@ export function GatewaysPage({
     setAuthMode("none");
     setSecretEnvName("");
     setSecretValue("");
+    setRuntimeDevice("cuda");
   };
 
   const saveGateway = async () => {
@@ -95,6 +97,7 @@ export function GatewaysPage({
           ...(existing?.settings ?? {}),
           timeout_seconds: Number(timeoutSeconds),
           max_retries: Number(maxRetries),
+          ...(existing?.settings.runtime_kind === "asr" ? { runtime_device: runtimeDevice } : {}),
         },
       };
       if (authMode === "direct" && secretValue.trim()) payload.secret_value = secretValue;
@@ -122,6 +125,7 @@ export function GatewaysPage({
     setSecretValue("");
     setTimeoutSeconds(String(gateway.settings.timeout_seconds ?? 300));
     setMaxRetries(String(gateway.settings.max_retries ?? 1));
+    setRuntimeDevice(String(gateway.settings.runtime_device ?? "cuda"));
     setMessage(`正在编辑 ${gateway.name}`);
   };
 
@@ -228,6 +232,10 @@ export function GatewaysPage({
         <label>最大重试次数<input type="number" min="0" max="10" value={maxRetries} onChange={event => setMaxRetries(event.target.value)} /></label>
         <div className="actions"><button className="primary" disabled={!name.trim() || !baseUrl.trim() || (authMode === "environment" && !secretEnvName.trim()) || directSecretMissing} onClick={() => void saveGateway()}>{editingGatewayId === null ? "创建 Gateway" : "保存 Gateway"}</button>{editingGatewayId !== null && <button onClick={resetGateway}>取消编辑</button>}</div>
       </div>
+      {gatewayType === "ASR" && visibleGateways.find(item => item.id === editingGatewayId)?.settings.runtime_kind === "asr" && <div className="panel form-panel">
+        <label>本地语音识别设备<select value={runtimeDevice} onChange={event => setRuntimeDevice(event.target.value)}><option value="cuda">NVIDIA 独显（CUDA）</option><option value="cpu">CPU（无独显时使用）</option></select></label>
+        <p>随 Gateway 配置保存，在下一次自动启动模型时生效。连接测试会显示实际加载设备与精度。</p>
+      </div>}
       <div className="panel form-panel"><h2>手动添加 {gatewayType} 模型</h2>
         <label>所属 Gateway<select value={modelGatewayId} onChange={event => setModelGatewayId(event.target.value)}><option value="">请选择</option>{visibleGateways.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label>模型 ID<input value={modelName} onChange={event => setModelName(event.target.value)} /></label>

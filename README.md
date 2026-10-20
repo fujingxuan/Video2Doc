@@ -1,6 +1,31 @@
 # Video2Doc
 
-Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音频转换为完整、可追溯、可长期保存的文字资料。产品原则是“质量 > 成本 > 速度”，当前不会总结、提炼观点或补充视频外知识。
+Video2Doc 是一个 Windows 优先的本地 Web 应用，把视频、音频或媒体网页链接转换为 Markdown 和可编辑 Word（`.docx`），并保留画面、识别原文和来源记录。产品原则是“质量 > 成本 > 速度”，当前不会总结、提炼观点或补充视频外知识。
+
+[下载 Windows 便携版](https://github.com/fujingxuan/Video2Doc/releases/latest) · [使用手册](docs/USER_GUIDE.md) · [模型部署](docs/MODEL_DEPLOYMENT_REPORT.md)
+
+![Video2Doc 工作台](docs/images/workspace.png)
+
+## 下载与快速开始
+
+1. 使用 Windows 10/11，并安装 Microsoft Edge。在 [Releases](https://github.com/fujingxuan/Video2Doc/releases) 下载 Windows 便携 ZIP。
+2. **完整解压 ZIP 后**，双击目录中的 `Video2Doc.exe`。保留同目录的 `_internal` 等文件；这是 PyInstaller onedir 应用，单独复制 EXE 无法运行。
+3. 从 [FFmpeg 官方下载页](https://ffmpeg.org/download.html) 和 [yt-dlp 官方 Releases](https://github.com/yt-dlp/yt-dlp/releases) 安装媒体工具，放入 PATH 或在“应用设置”指定路径；`ffprobe.exe` 应与 `ffmpeg.exe` 位于同一目录。**本次公开便携包不附带 FFmpeg、ffprobe 或 yt-dlp**。启动界面无需另装 Python 或 Node.js。
+4. 根据任务配置 ASR/OCR Gateway。**发行包不含 ASR/OCR 模型权重及其独立运行环境**，本地模型需要另行部署，也可连接兼容的远程 Gateway；云端服务需要自行提供账号和密钥。文本整理模型是可选项。
+
+完整要求、启动参数和构建方法见 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)。使用远程识别或文本服务时，相应音频、图片或正文会发送至所选服务。
+
+项目代码采用 [MIT 许可证](LICENSE)。随包组件和外部模型分别受各自许可证约束，见 [第三方声明](THIRD_PARTY_NOTICES.md)。参与开发见 [贡献指南](CONTRIBUTING.md)，报告安全问题见 [安全说明](SECURITY.md)。
+
+## 版本说明
+
+以下保留历史更新说明；3.3.0 中“内置 yt-dlp”描述对应当时的本机构建。本次公开便携包将 yt-dlp 改为由用户单独安装。
+
+3.4.1 在每次最终导出中同时保留同名 Markdown 和可编辑 Word（`.docx`）。Word 使用相同最终正文并内嵌相关画面；两种文件一起执行重名处理与失败回滚。任务详情支持直接打开 Word。
+
+3.4.0 更新为浅色青绿工作台：分组侧栏与图标导航、转换引导、五类任务状态、最近任务空白引导，以及分步骤创建表单。所有模型配置、任务处理与导出能力沿用 3.3.0。
+
+3.3.0 优化 FireRed 权重加载、优先使用 WSL 原生模型环境，内置经官方哈希校验的 yt-dlp；纯 ASR 链接任务优先下载音频，模型名称附使用场景，本地 ASR 可选 CUDA／CPU，健康检查报告实际设备、精度和加载／推理耗时。要求登录的平台链接提供明确处理提示。
 
 ## 当前状态
 
@@ -29,7 +54,7 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
   → Windows 单入口应用查看、取消、重试和打开结果
 ```
 
-所有耗时阶段仍由 SQLite 数据库队列与单并发 Worker 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；新建任务会恢复上一个任务的完整处理设置，尚未开始的队列任务可安全编辑。历史任务支持搜索、分页和虚拟滚动，当前页用 SSE 增量刷新；任务详情可按需审阅原文与实际采用正文的差异。删除任务默认移入回收站，可撤销或恢复；记录 30 天保留期，到期后由用户手动确认永久清理。只有永久删除才会在路径、任务身份与跨任务引用校验后清理生成文件，原始输入媒体始终保留。有效媒体、ASR、链接字幕抓取产物、内嵌字幕抽帧/OCR、常规帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；它在一次请求中接收完整正文并返回一篇连续 Markdown 文章。结构校验、数字/术语/代码/公式/长度检查失败时会拒绝模型输出，并回退为连续原文文章；原始逐段来源关系仍保存在 Document 与 sidecar 中。
+所有耗时阶段仍由 SQLite 数据库队列与分阶段 Worker（转写单任务，音频可预取） 执行，不进入 API 请求线程。版本 6 不可变任务快照冻结 Gateway、文本来源、文本整理、Markdown 和导出语义；新建任务会恢复上一个任务的完整处理设置，尚未开始的队列任务可安全编辑。历史任务支持搜索、分页和虚拟滚动，当前页用 SSE 增量刷新；任务详情可按需审阅原文与实际采用正文的差异。删除任务默认移入回收站，可撤销或恢复；记录 30 天保留期，到期后由用户手动确认永久清理。只有永久删除才会在路径、任务身份与跨任务引用校验后清理生成文件，原始输入媒体始终保留。有效媒体、ASR、链接字幕抓取产物、内嵌字幕抽帧/OCR、常规帧和逐帧 OCR 可按指纹追溯或复用。文本模型不是硬依赖，且只允许轻度整理；它在一次请求中接收完整正文并返回一篇连续 Markdown 文章。结构校验、数字/术语/代码/公式/长度检查失败时会拒绝模型输出，并回退为连续原文文章；原始逐段来源关系仍保存在 Document 与 sidecar 中。
 
 完整产品边界见 [产品需求](docs/PRODUCT_REQUIREMENTS.md)，设计见 [架构文档](docs/ARCHITECTURE.md)，阶段状态见 [实施计划](docs/IMPLEMENTATION_PLAN.md)。操作说明见 [应用使用手册](docs/USER_GUIDE.md)、[Obsidian 导出说明](docs/OBSIDIAN_EXPORT.md) 和 [Windows 便携版说明](docs/WINDOWS_PORTABLE.md)；本轮真实证据见 [3.0.0 任务管理与界面优化验收报告](docs/ITERATION_3_0_ACCEPTANCE_REPORT.md)，历史模型验收见 [2.3.0 三类模型、托管 Gateway 与画面字幕验收报告](docs/ITERATION_2_3_ACCEPTANCE_REPORT.md)。
 
@@ -37,7 +62,7 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
 
 - 后端：Python 3.11+、FastAPI、Pydantic、SQLAlchemy 2、Alembic、SQLite、httpx
 - 前端：React 19、TypeScript 5、Vite 7
-- 外部程序：FFmpeg、ffprobe、yt-dlp
+- 外部媒体程序：FFmpeg、ffprobe、yt-dlp，均以独立进程调用
 - ASR：统一 Gateway `POST /v1/asr/transcriptions`；Fun-ASR 使用 DashScope WebSocket
 - OCR：独立 Gateway `POST /v1/ocr/recognitions`；本地 PaddleOCR 3.7 + PP-OCRv5 server
 - 文档：类型化 Document IR、确定性忠实编辑器、可选 OneAPI 兼容文本编辑器
@@ -46,32 +71,36 @@ Video2Doc 是一个 Windows 优先的本地 Web 应用，用于把视频或音�
 - 状态通信：REST + Server-Sent Events（SSE）
 - 测试：pytest、受控外部进程、httpx MockTransport、Vitest
 
-## 环境要求
+## 源码开发环境要求
 
 - Windows 10/11 和 PowerShell 5.1+
 - Python 3.11+
 - Node.js 20.19+
-- pnpm 10+
+- pnpm 11.9.0（与 `frontend/package.json` 的 `packageManager` 一致）
 - FFmpeg 与 ffprobe（同一发行包）
-- yt-dlp 独立可执行文件或 PATH 命令
+- yt-dlp 独立可执行文件：运行 `scripts\update_media_tools.ps1` 获取到 `tools\media`，或配置其他路径 / PATH 命令
 - 云端 ASR 可选 `DASHSCOPE_API_KEY`；本地 ASR 大模型可选 WSL2 + NVIDIA GPU
 - 本地 OCR 使用 Windows CPU 隔离环境，不占用 ASR 显存
 
-项目把 FFmpeg、ffprobe 和 yt-dlp 当作外部程序，而不提交大型二进制文件。yt-dlp 也采用外部程序方式，以便三类媒体命令统一使用异步流式日志、超时、取消和 Windows 进程树终止。
+公开便携包不提供 FFmpeg、ffprobe 或 yt-dlp，需要用户另行安装。源码开发时可通过下列脚本从 yt-dlp 官方 Release 下载，并核对官方 SHA-256 清单。应用会查找自定义构建包内的 yt-dlp、仓库 `tools\media\yt-dlp.exe` 和 PATH，设置页可指定其他路径。三类媒体命令均以独立进程执行，使用异步流式日志、超时、取消和 Windows 进程树终止。
 
 不要从不可信来源下载可执行文件。安装后运行：
 
 ```powershell
 Set-Location D:\Projects\Video2Doc
-.\scripts\check_media_tools.ps1
+.\scripts\update_media_tools.ps1
+.\scripts\check_media_tools.ps1 -YtDlp .\tools\media\yt-dlp.exe
 ```
 
-若程序不在 PATH，可在“应用设置”中填写 FFmpeg 和 yt-dlp 的完整路径。ffprobe 默认取 FFmpeg 同目录下的 `ffprobe.exe`。
+检查脚本默认只查询 PATH；上述 `-YtDlp` 参数指定仓库内的可执行文件。若 FFmpeg 不在 PATH，可为脚本传入 `-Ffmpeg`、`-Ffprobe`，并在“应用设置”中填写 FFmpeg 的完整路径。应用中的 ffprobe 默认取 FFmpeg 同目录下的 `ffprobe.exe`。
 
-## 安装
+## 从源码安装
+
+先在自己的项目目录克隆仓库。后文的 `D:\Projects\Video2Doc` 是示例路径，可替换为实际位置。
 
 ```powershell
-Set-Location D:\Projects\Video2Doc
+git clone https://github.com/fujingxuan/Video2Doc.git
+Set-Location Video2Doc
 Copy-Item .env.example .env
 .\scripts\setup.ps1
 ```
@@ -99,7 +128,7 @@ DASHSCOPE_API_KEY=replace-with-local-secret
 # DASHSCOPE_WORKSPACE_ID=optional-workspace-id
 ```
 
-真实密钥只能保留在未提交的 `.env` 或进程环境变量中。前端响应、SQLite、任务快照和日志均不保存密钥。
+真实密钥可来自未提交的 `.env`、进程环境变量，或由 Windows 当前用户 DPAPI 加密后保存。SQLite 中手工配置的密钥以密文保存；前端响应、任务快照和日志不保存明文密钥。
 
 ## 数据库迁移
 

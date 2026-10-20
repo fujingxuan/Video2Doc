@@ -14,7 +14,7 @@ from app.core.errors import ConflictError, NotFoundError
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.main import app
-from app.models import Task
+from app.models import Task, MarkdownExport
 from app.models.entities import utcnow
 from app.repositories.tasks import TaskRepository
 from app.services import events
@@ -234,6 +234,27 @@ def test_purge_link_preflight_does_not_delete_other_files(clean_database, tmp_pa
         with pytest.raises(ConflictError):
             service.purge(task_id)
     assert (workspace / "task_config.json").exists()
+
+
+def test_purge_protects_word_referenced_by_another_task(clean_database, tmp_path):
+    task_id, workspace = make_task(tmp_path, "shared-word")
+    retained = workspace / "05_output/shared.docx"
+    retained.write_bytes(b"shared Word")
+    with SessionLocal() as session:
+        other = Task(title="other-word-export", source="old-source", source_type="URL",
+                     status="COMPLETED")
+        session.add(other)
+        session.flush()
+        other.markdown_exports.append(MarkdownExport(
+            attempt=1, target_type="OBSIDIAN", status="COMPLETED",
+            config_json={"word_path": str(retained)},
+        ))
+        session.commit()
+        service = TaskService(session)
+        service.delete(task_id)
+        with pytest.raises(ConflictError):
+            service.purge(task_id)
+    assert retained.read_bytes() == b"shared Word"
 
 
 def test_restart_marks_interrupted_purge_without_deleting_files(clean_database, tmp_path):

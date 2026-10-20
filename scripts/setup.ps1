@@ -15,7 +15,7 @@ function Resolve-Python {
     throw "Python 3.11 or newer was not found. Install Python and ensure py.exe or python.exe is in PATH."
 }
 
-$pythonCommand = Resolve-Python
+$pythonCommand = @(Resolve-Python)
 $venvPython = Join-Path $backendDir ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $venvPython)) {
     Write-Host "Creating backend virtual environment..."
@@ -24,12 +24,18 @@ if (-not (Test-Path -LiteralPath $venvPython)) {
     if ($pythonCommand.Count -gt 1) { $arguments += $pythonCommand[1..($pythonCommand.Count - 1)] }
     $arguments += @("-m", "venv", (Join-Path $backendDir ".venv"))
     & $executable @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Backend virtual environment creation failed with exit code $LASTEXITCODE."
+    }
 }
 
 Push-Location $backendDir
 try {
     Write-Host "Installing backend dependencies..."
     & $venvPython -m pip install -e ".[dev]"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Backend dependency installation failed with exit code $LASTEXITCODE."
+    }
 }
 finally { Pop-Location }
 
@@ -44,6 +50,9 @@ Push-Location $frontendDir
 try {
     Write-Host "Installing frontend dependencies..."
     pnpm install
+    if ($LASTEXITCODE -ne 0) {
+        throw "Frontend dependency installation failed with exit code $LASTEXITCODE."
+    }
 }
 finally { Pop-Location }
 

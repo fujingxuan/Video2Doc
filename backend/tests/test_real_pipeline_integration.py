@@ -150,6 +150,7 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
         "MEDIA_PROBE",
         "AUDIO_EXTRACT",
         "AUDIO_VALIDATE",
+        "AUDIO_READY",
         "AUDIO_CHUNK",
         "ASR_TRANSCRIBE",
         "ASR_COMBINE",
@@ -166,6 +167,9 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
     assert completed["document_path"] and Path(completed["document_path"]).is_file()
     assert completed["markdown_path"] and Path(completed["markdown_path"]).is_file()
     assert completed["export_path"] and Path(completed["export_path"]).is_file()
+    exported_word = next(item["word_path"] for item in completed["exports"]
+                         if item["target_type"] == "OBSIDIAN")
+    assert Path(exported_word).is_file()
     markdown = Path(completed["export_path"]).read_text(encoding="utf-8")
     assert "受控转写" in markdown
     assert "用户确认使用初稿" in markdown
@@ -182,6 +186,8 @@ def test_database_worker_runs_real_pipeline_and_exposes_results(
     opened_response = client.post(f"/api/v1/tasks/{task_id}/open/markdown")
     assert opened_response.status_code == 200
     assert opened == [str(Path(completed["export_path"]).resolve())]
+    assert client.post(f"/api/v1/tasks/{task_id}/open/word").status_code == 200
+    assert opened[-1] == str(Path(exported_word).resolve())
     transcript = client.get(f"/api/v1/tasks/{task_id}/transcript")
     assert transcript.status_code == 200
     assert transcript.json()["segments"][0]["start_time"] == 0.5

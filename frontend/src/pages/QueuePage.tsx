@@ -134,7 +134,7 @@ export function QueuePage({ trashed = false }: { trashed?: boolean }) {
     />}
     <header className="page-header">
       <div>
-        <p className="eyebrow">{trashed ? "可恢复的任务与文件" : "最大并发数 1"}</p>
+        <p className="eyebrow">{trashed ? "可恢复的任务与文件" : "转写 1 个 · 音频预取 1 个"}</p>
         <h1>{trashed ? "回收站" : "任务队列"}</h1>
         <p>{trashed ? "生成文件原位保留；满 30 天后可手动清理过期项。恢复等待中的任务后会继续排队。" : "搜索和筛选历史任务。移入回收站后可撤销或恢复，运行中的任务需先取消。"}</p>
       </div>
@@ -196,7 +196,7 @@ export function QueuePage({ trashed = false }: { trashed?: boolean }) {
                   <button className="danger-button" disabled={working || task.status === "DELETING"} onClick={() => setConfirmation({ kind: "purge", ids: [task.id] })}>永久删除</button>
                 </> : <>
                   <button onClick={() => { window.location.hash = `/tasks/${task.id}`; }}>详情</button>
-                  {task.status === "WAITING_REVIEW" && <button onClick={() => { window.location.hash = `/tasks/${task.id}/manual-review`; }}>校对 / 完成</button>}
+                  {task.status === "WAITING_REVIEW" && <button onClick={() => { window.location.hash = `/tasks/${task.id}`; }}>校对 / 完成</button>}
                   {task.status === "QUEUED" && !task.review_submission_path && <button onClick={() => { window.location.hash = `/tasks/${task.id}/edit`; }}>编辑</button>}
                   {["QUEUED", "PROCESSING", "WAITING_REVIEW"].includes(task.status) && <button disabled={working} onClick={() => void act(task, "cancel")}>取消</button>}
                   {["FAILED", "INTERRUPTED"].includes(task.status) && <button disabled={working} onClick={() => void act(task, "retry")}>重试</button>}

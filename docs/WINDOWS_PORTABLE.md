@@ -1,5 +1,7 @@
 # Video2Doc Windows 便携版
 
+从 [GitHub Releases](https://github.com/fujingxuan/Video2Doc/releases/latest) 下载 Windows 便携 ZIP，完整解压后双击 `Video2Doc.exe`。运行界面无需安装 Python 或 Node.js；需要 Windows 10/11 和 Microsoft Edge。
+
 ## 发行形态
 
 构建产物：
@@ -13,7 +15,13 @@ dist\Video2Doc-Portable\
 dist\Video2Doc-Portable.zip
 ```
 
-这是 PyInstaller onedir 便携版。React production build、FastAPI 后端、Alembic 和迁移文件在同一发行目录中；FFmpeg、ffprobe、yt-dlp 和所选模型 Gateway 仍是外部依赖，避免把大型模型或用户已有 Docker 服务复制进应用。
+这是 PyInstaller onedir 便携版。React production build、FastAPI 后端、Alembic 和迁移文件在同一发行目录中。必须保留整个解压目录，**不能单独复制或发布 `Video2Doc.exe`**。
+
+本次公开 ZIP 不附带 FFmpeg、ffprobe 或 yt-dlp。请从 [FFmpeg 官方下载页](https://ffmpeg.org/download.html) 与 [yt-dlp 官方 Releases](https://github.com/yt-dlp/yt-dlp/releases) 获取相应工具，并放入 PATH；也可在“应用设置”填写 `ffmpeg.exe` 和 `yt-dlp.exe` 完整路径，将同一 FFmpeg 发行包的 `ffprobe.exe` 放在 `ffmpeg.exe` 旁边。
+
+发行包不含 ASR/OCR 模型权重、WSL/Python 模型运行环境或 Docker 镜像。需要识别时，请按 [ASR 部署说明](MODEL_DEPLOYMENT_REPORT.md) 与 [OCR 部署说明](OCR_MODEL_DEPLOYMENT_REPORT.md) 部署本地 Gateway，或配置兼容的远程服务及自己的密钥。远程服务会收到任务对应的音频、图片或正文。只有需要文本整理时才需配置 LLM。
+
+项目代码许可证见 [LICENSE](../LICENSE)，随包组件的声明见 [第三方声明](../THIRD_PARTY_NOTICES.md)；外部工具和模型遵循各自的许可条件。
 
 ## 启动与数据
 
@@ -51,7 +59,7 @@ Video2Doc.exe --app-home D:\Video2Doc-AppData --check-only
 
 ## 构建
 
-在已完成 `scripts\setup.ps1` 的仓库中执行：
+在已完成 `scripts\setup.ps1` 的仓库中执行。默认构建不捆绑 yt-dlp，FFmpeg 和模型也不会由便携构建脚本下载或打包。
 
 ```powershell
 Set-Location D:\Projects\Video2Doc
@@ -59,6 +67,15 @@ Set-Location D:\Projects\Video2Doc
 ```
 
 如依赖已经安装，可使用 `-SkipInstall`。脚本会先构建前端，再用 PyInstaller 生成 onedir，写入便携版 README，最后生成 ZIP。
+
+自行构建时可显式选择捆绑 yt-dlp：
+
+```powershell
+.\scripts\update_media_tools.ps1
+.\scripts\build_portable.ps1 -BundleYtDlp
+```
+
+下载器脚本从 yt-dlp 官方 Release 获取 EXE，并核对官方 SHA-256 清单。再发行该自定义包时，需要同时准备该组件及其捆绑依赖要求的许可证、对应源代码等第三方合规材料，详见 [第三方声明](../THIRD_PARTY_NOTICES.md)。
 
 ## 故障提示
 

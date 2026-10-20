@@ -21,6 +21,7 @@ def model_read(item: ModelConfig) -> ModelRead:
     return ModelRead(
         id=item.id,
         name=item.name,
+        display_name=_model_label(item.name, [cap.capability for cap in item.capabilities]),
         capabilities=[cap.capability for cap in item.capabilities],
         notes=item.notes,
         enabled=item.enabled,
@@ -76,9 +77,16 @@ def _profile_selection(
             source="MODEL_CONFIG",
             model_id=model.id,
             model_name=model.name,
-            display_name=model.name,
+            display_name=_model_label(model.name, [capability]),
         )
     return None
+
+
+def _model_label(name: str, capabilities: list[str]) -> str:
+    scenarios = {"TEXT_PROCESSING": "全文校对", "ASR": "语音转写", "OCR": "画面识别"}
+    scenario = "·".join(scenarios[cap] for cap in capabilities if cap in scenarios)
+    short_name = name.rsplit("/", 1)[-1]
+    return f"{short_name}（{scenario or '文本处理'}）"
 
 
 def settings_read(item: AppSetting) -> SettingsRead:
@@ -182,6 +190,7 @@ def task_detail(item: Task) -> TaskDetail:
             "target_type": export.target_type,
             "status": export.status,
             "markdown_path": export.markdown_path,
+            "word_path": (export.config_json or {}).get("word_path"),
             "attachment_directory": export.attachment_directory,
             "data_directory": export.data_directory,
             "image_count": export.image_count,

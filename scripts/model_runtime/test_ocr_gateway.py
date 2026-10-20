@@ -28,6 +28,7 @@ def main() -> None:
             },
             files={"file": (args.image.name, stream, "image/jpeg")},
             timeout=600,
+            trust_env=False,
         )
     if response.is_error:
         raise SystemExit(

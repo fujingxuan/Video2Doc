@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 import yaml
+from PIL import Image, ImageDraw
 
 from app.core.errors import PipelineCancelled, PipelineError
 from app.documents.builder import build_document
@@ -79,7 +80,9 @@ def sample_fusion(image_path: Path) -> dict:
 
 def sample_document(tmp_path: Path, *, source_type: str = "URL"):
     image = tmp_path / "frame.jpg"
-    image.write_bytes(b"jpeg")
+    frame = Image.new("RGB", (320, 180), "#e6f3f3")
+    ImageDraw.Draw(frame).text((20, 20), "Video2Doc frame 000001", fill="black")
+    frame.save(image)
     source = (
         "https://www.youtube.com/watch?v=abc"
         if source_type == "URL"
@@ -514,6 +517,8 @@ def test_obsidian_export_is_atomic_relative_and_renames_conflicts(tmp_path: Path
     second_markdown = Path(second.markdown_path)
     assert first_markdown.is_file()
     assert second_markdown.is_file()
+    assert Path(first.word_path).is_file()
+    assert Path(second.word_path).stem == second_markdown.stem
     assert second.conflict_resolution == "renamed"
     markdown = first_markdown.read_text(encoding="utf-8")
     assert str(tmp_path) not in markdown
@@ -547,6 +552,7 @@ def test_obsidian_export_cancel_rolls_back_without_partial_files(tmp_path: Path)
         )
     inbox = vault / "Inbox"
     assert not list(inbox.glob("*.md"))
+    assert not list(inbox.glob("*.docx"))
     assert not list(inbox.glob("*.assets"))
     assert not list(inbox.glob(".video2doc-*.tmp"))
 

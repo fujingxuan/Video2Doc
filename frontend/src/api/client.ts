@@ -123,7 +123,7 @@ export const api = {
   taskOcr: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/ocr`),
   taskTimeline: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/timeline`),
   taskDocument: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/document`),
-  openTaskTarget: (id: number, target: "workspace" | "export_directory" | "markdown") =>
+  openTaskTarget: (id: number, target: "workspace" | "export_directory" | "markdown" | "word") =>
     request<{ target: string; path: string }>(`/tasks/${id}/open/${target}`, {
       method: "POST",
     }),
@@ -140,6 +140,7 @@ export const api = {
     body.append("configuration", JSON.stringify(configuration));
     return request<Task[]>("/tasks/upload-audio", { method: "POST", body });
   },
+  copyAudio: (id: number) => request<{ path: string; message: string }>(`/tasks/${id}/audio/copy`, { method: "POST" }),
   manualReview: (id: number) => request<ManualReview>(`/tasks/${id}/manual-review`),
   manualDraftUrl: (id: number) => `${API_BASE}/tasks/${id}/manual-review/draft`,
   saveManualReview: (id: number, payload: Record<string, unknown>) =>

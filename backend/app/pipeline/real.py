@@ -31,6 +31,8 @@ from app.models import (
 )
 from app.models.entities import utcnow
 from app.pipeline.model_usage import stage_model_usage
+from app.pipeline.admission import processing_admission
+from app.pipeline.asr_quality import recover_repetition
 from app.providers.asr import (
     AsrRequest,
     AsrResult,
@@ -91,6 +93,7 @@ STAGE_RANGES: dict[str, tuple[int, int]] = {
     "MEDIA_PROBE": (9, 14),
     "AUDIO_EXTRACT": (14, 23),
     "AUDIO_VALIDATE": (23, 25),
+    "AUDIO_READY": (25, 25),
     "AUDIO_CHUNK": (25, 29),
     "ASR_TRANSCRIBE": (29, 47),
     "ASR_COMBINE": (47, 51),
@@ -257,7 +260,11 @@ async def run_real_pipeline(task_id: int) -> None:
             task = session.get(Task, task_id)
             return task is None or task.cancel_requested
 
+    admitted = False
     try:
+        if review_submission_path or snapshot.get("processing", {}).get("text_source") == "SUBTITLE":
+            await processing_admission.acquire(task_id, cancelled)
+            admitted = True
         if review_submission_path:
             await _resume_manual_review(task_id, attempt, tracker, paths, snapshot,
                                         review_submission_path, cancelled)
@@ -369,7 +376,10 @@ async def run_real_pipeline(task_id: int) -> None:
                 ),
             )
         else:
-            acquisition = await MediaSourceResolver(ytdlp_executable).acquire(
+            acquisition = await MediaSourceResolver(
+                ytdlp_executable,
+                audio_only=not processing.get("ocr_enabled") and not subtitle_mode,
+            ).acquire(
                 normalized_source,
                 kind,
                 paths,
@@ -554,6 +564,12 @@ async def run_real_pipeline(task_id: int) -> None:
                 raise PipelineError("AUDIO_EXTRACTION_FAILED", "标准化音频完整性检查失败")
             tracker.complete(message="标准化音频有效", output_artifacts=[str(audio_path)])
 
+        if not admitted:
+            tracker.start("AUDIO_READY", message="音频已就绪，可复制音频；等待前一个任务释放转写资源")
+            await processing_admission.acquire(task_id, cancelled)
+            admitted = True
+            tracker.complete(message="已取得转写资源", output_artifacts=[str(audio_path)])
+
         if subtitle_mode:
             protocol = subtitle_provider_name
             base_url = ""
@@ -703,6 +719,7 @@ async def run_real_pipeline(task_id: int) -> None:
             if started:
                 tracker.progress(None, "本地 ASR Gateway 已按需启动，正在提交音频")
         results: list[AsrResult] = []
+        quality_diagnostics: list[dict] = []
         language = asr_config.get("language")
         timestamp_granularity = (
             asr_gateway.get("timestamp_strategy") if isinstance(asr_gateway, dict) else None
@@ -766,6 +783,11 @@ async def run_real_pipeline(task_id: int) -> None:
                 result = normalize_asr_response(payload or {}, request, reusable, provider.name)
             else:
                 result = await provider.transcribe(request, attempt_paths, cancel_check=cancelled)
+            result, quality = await recover_repetition(
+                result, request, attempt_paths, provider, ffmpeg_executable,
+                cancelled, tracker.progress,
+            )
+            quality_diagnostics.extend(quality)
             results.append(result)
             _update_chunk_manifest_status(
                 paths.chunks / "manifest.json", chunk.index, "COMPLETED", attempt
@@ -799,7 +821,7 @@ async def run_real_pipeline(task_id: int) -> None:
                 else "正在映射全局时间轴并合并结果"
             ),
         )
-        merge_diagnostics: list[dict] = []
+        merge_diagnostics: list[dict] = list(quality_diagnostics)
         segments = combine_asr_results(results, chunks, diagnostics=merge_diagnostics)
         artifacts = save_transcript_artifacts(
             paths,
@@ -1123,16 +1145,13 @@ async def run_real_pipeline(task_id: int) -> None:
         tracker.fail(failure, "FAILED")
         _finish_task(task_id, "FAILED", failure)
     finally:
-        await _release_gateway_safely(
-            cleanup_asr_gateway,
-            paths=paths,
-            workspace=workspace,
-        )
-        await _release_gateway_safely(
-            cleanup_ocr_gateway,
-            paths=paths,
-            workspace=workspace,
-        )
+        if admitted:
+            try:
+                await _release_gateway_safely(cleanup_asr_gateway, paths=paths, workspace=workspace)
+                await _release_gateway_safely(cleanup_ocr_gateway, paths=paths, workspace=workspace)
+            finally:
+                processing_admission.release()
+
 
 
 async def _release_gateway_safely(
@@ -1459,7 +1478,7 @@ async def _render_document_outputs(
 
     tracker.start(
         "MARKDOWN_RENDER",
-        message="正在渲染工作区 Markdown 并复制相对路径附件",
+        message="正在生成工作区 Markdown 和 Word 并复制附件",
         input_artifacts=[str(document_path)],
     )
     workspace_config = export_snapshot.model_copy(
@@ -1492,9 +1511,10 @@ async def _render_document_outputs(
             task.markdown_path = workspace_result.markdown_path
             session.commit()
     tracker.complete(
-        message=f"工作区 Markdown 已生成，包含 {workspace_result.image_count} 张图片",
+        message=f"工作区 Markdown 和 Word 已生成，包含 {workspace_result.image_count} 张图片",
         output_artifacts=[
             workspace_result.markdown_path,
+            workspace_result.word_path,
             *(
                 [workspace_result.attachment_directory]
                 if workspace_result.attachment_directory
@@ -1506,8 +1526,8 @@ async def _render_document_outputs(
 
     tracker.start(
         "OBSIDIAN_EXPORT",
-        message="正在原子导出 Markdown、附件和追溯 sidecar 到 Obsidian Inbox",
-        input_artifacts=[workspace_result.markdown_path],
+        message="正在原子导出 Markdown、Word、附件和追溯 sidecar",
+        input_artifacts=[workspace_result.markdown_path, workspace_result.word_path],
     )
     try:
         export_result = export_document_bundle(
@@ -1542,11 +1562,12 @@ async def _render_document_outputs(
             session.commit()
     tracker.complete(
         message=(
-            f"Obsidian 导出完成：图片 {export_result.image_count}，"
+            f"Markdown 和 Word 导出完成：图片 {export_result.image_count}，"
             f"sidecar/原始产物 {export_result.sidecar_count}"
         ),
         output_artifacts=[
             export_result.markdown_path,
+            export_result.word_path,
             *([export_result.attachment_directory] if export_result.attachment_directory else []),
             *([export_result.data_directory] if export_result.data_directory else []),
         ],
@@ -1559,6 +1580,8 @@ async def _render_document_outputs(
             document_path.as_posix(),
             workspace_result.markdown_path,
             export_result.markdown_path,
+            workspace_result.word_path,
+            export_result.word_path,
         ],
     )
     artifact_index = write_artifact_index(paths.root)
@@ -1652,7 +1675,8 @@ def _record_export(
                 markdown_path=result.markdown_path if result else None,
                 attachment_directory=(result.attachment_directory if result else None),
                 data_directory=result.data_directory if result else None,
-                config_json=config.model_dump(mode="json"),
+                config_json={**config.model_dump(mode="json"),
+                             **({"word_path": result.word_path} if result else {})},
                 image_count=result.image_count if result else 0,
                 sidecar_count=result.sidecar_count if result else 0,
                 error_message=error_message,

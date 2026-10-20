@@ -244,6 +244,34 @@ async def test_ytdlp_and_ffmpeg_providers_create_traceable_artifacts(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_ytdlp_recovers_final_file_when_printed_chinese_path_is_garbled(
+    tmp_path: Path,
+) -> None:
+    paths = WorkspacePaths.from_root(tmp_path / "中文任务")
+    paths.create()
+
+    class GarbledPathRunner(FakeProcessRunner):
+        async def run(self, args, **kwargs):  # type: ignore[no-untyped-def]
+            result = await super().run(args, **kwargs)
+            if "--dump-single-json" not in args:
+                (paths.media / "source.mp4.part").write_bytes(b"partial")
+                (paths.media / "source.f100026.mp4").write_bytes(b"unmerged")
+                kwargs["stdout_callback"]("VIDEO2DOC_FILE:" + str(paths.media / "missing.mp4"))
+            return result
+
+    runner = GarbledPathRunner()
+    acquired = await YtDlpSource("fake-ytdlp", runner).acquire(
+        "https://example.com/watch?v=chinese",
+        paths,
+        cancel_check=lambda: False,
+        progress=lambda *_args: None,
+    )
+    assert Path(acquired.local_media_path) == (paths.media / "source.mp4").resolve()
+    assert Path(acquired.local_media_path).read_bytes() == b"media"
+    assert all(call[call.index("--encoding") + 1] == "utf-8" for call in runner.calls)
+
+
+@pytest.mark.asyncio
 async def test_ytdlp_retries_with_bounded_fallback_and_removes_orphaned_stream(
     tmp_path: Path,
 ) -> None:

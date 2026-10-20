@@ -12,13 +12,34 @@ from app.core.errors import PipelineError
 from app.db.session import SessionLocal
 from app.documents.editor import build_full_article_document
 from app.main import app
-from app.models import Task
+from app.models import Task, TaskStageRun
 from app.pipeline import real
 from app.services.manual_review import review_seed_path
 from app.services.tasks import TaskService
 from app.storage.workspace import read_json, write_json
 from tests.test_documents import sample_document
 from tests.test_task_management import _create_task
+
+
+def test_copy_audio_requires_current_validation_and_existing_workspace_file(tmp_path, monkeypatch):
+    task_id, workspace, _seed = seed_review(tmp_path)
+    client = TestClient(app)
+    route = f"/api/v1/tasks/{task_id}/audio/copy"
+    copied = []
+    monkeypatch.setattr("app.services.clipboard.copy_file", copied.append)
+    assert client.post(route).status_code == 409
+    audio = workspace / "01_extract/audio/normalized.wav"
+    audio.parent.mkdir(parents=True, exist_ok=True)
+    audio.write_bytes(b"RIFF" + b"0" * 100)
+    with SessionLocal() as session:
+        session.add(TaskStageRun(task_id=task_id, attempt=1, stage="AUDIO_VALIDATE",
+                                 status="COMPLETED", progress=100))
+        session.commit()
+    assert client.post(route).status_code == 200
+    assert copied == [audio.resolve()]
+    audio.unlink()
+    assert client.post(route).status_code == 404
+    assert len(copied) == 1
 
 
 def seed_review(tmp_path: Path):

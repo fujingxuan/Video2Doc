@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -87,15 +88,15 @@ async def ensure_managed_gateway(
         ]
         if runtime_kind == "asr":
             arguments.extend(["-Provider", runtime_provider, "-Port", str(port)])
+            device = str(settings.get("runtime_device") or "cuda").strip().lower()
+            if not re.fullmatch(r"cpu|cuda(?::\d+)?", device):
+                raise PipelineError("GATEWAY_RUNTIME_INVALID", "ASR 设备仅支持 cpu、cuda 或 cuda:N")
+            arguments.extend(["-Device", device])
             environment_root = str(
                 settings.get("environment_root")
                 or os.getenv("VIDEO2DOC_RUNTIME_ENVIRONMENT_ROOT")
                 or ""
             ).strip()
-            if not environment_root:
-                model_root_environment = Path(model_root) / "envs" / runtime_provider
-                if model_root_environment.is_dir():
-                    environment_root = model_root
             if environment_root:
                 arguments.extend(["-EnvironmentRoot", environment_root])
         else:

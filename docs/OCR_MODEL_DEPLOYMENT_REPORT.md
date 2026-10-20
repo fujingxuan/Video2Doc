@@ -149,8 +149,8 @@ D:\Models
 D:\Tools
 D:\Data（不存在）
 D:\Docker（不存在）
-C:\Users\Aaron 常见项目路径
-WSL /home/aaron 常见项目路径
+Windows 当前用户的常见项目路径
+WSL 当前用户的常见项目路径
 ```
 
 扫描时没有运行中或已停止的 PaddleOCR 容器，也没有活动 compose 项目。找到：

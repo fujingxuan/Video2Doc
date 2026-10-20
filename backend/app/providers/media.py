@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from app.core.config import get_settings
 from app.core.errors import PipelineError
 from app.providers.process import CancelCheck, ExternalProcessRunner
+from app.providers.ytdlp_options import authentication_options, translate_ytdlp_error
 from app.storage.workspace import WorkspacePaths, write_json
 
 
@@ -130,9 +131,10 @@ class LocalFileSource:
 
 
 class YtDlpSource:
-    def __init__(self, executable: str, runner: ExternalProcessRunner | None = None) -> None:
+    def __init__(self, executable: str, runner: ExternalProcessRunner | None = None, *, audio_only: bool = False) -> None:
         self.executable = executable
         self.runner = runner or ExternalProcessRunner()
+        self.audio_only = audio_only
 
     async def acquire(
         self,
@@ -146,7 +148,11 @@ class YtDlpSource:
         raw_metadata_path = paths.metadata / "ytdlp.json"
         try:
             metadata_result = await self.runner.run(
-                [self.executable, "--dump-single-json", "--no-playlist", "--no-warnings", source],
+                [
+                    self.executable, "--encoding", "utf-8", "--dump-single-json",
+                    "--no-playlist", "--no-warnings", "--socket-timeout", "20",
+                    "--extractor-retries", "3", *authentication_options(source), source,
+                ],
                 cwd=paths.root,
                 log_dir=paths.logs,
                 log_name="ytdlp_metadata",
@@ -185,11 +191,16 @@ class YtDlpSource:
             None,
             "bestvideo[height<=1080]+bestaudio[abr<=128]/best[height<=1080]/best",
         )
+        if self.audio_only:
+            # Preserve the best audio; avoid downloading video that ASR never consumes.
+            format_selectors = ("bestaudio/best", "bestaudio[abr<=128]/best")
         final_error: PipelineError | None = None
         for attempt, format_selector in enumerate(format_selectors, start=1):
             downloaded_path = None
             command = [
                 self.executable,
+                "--encoding",
+                "utf-8",
                 "--newline",
                 "--progress",
                 "--progress-delta",
@@ -205,6 +216,7 @@ class YtDlpSource:
                 "after_move:VIDEO2DOC_FILE:%(filepath)s",
                 "--output",
                 output_template,
+                *authentication_options(source),
             ]
             if format_selector:
                 command.extend(["--format", format_selector])
@@ -240,10 +252,17 @@ class YtDlpSource:
             raise _translate_tool_error(
                 final_error, "YTDLP_UNAVAILABLE", "MEDIA_DOWNLOAD_FAILED", "yt-dlp"
             ) from final_error
-        if not downloaded_path:
-            candidates = sorted(path for path in paths.media.glob("source.*") if path.is_file())
-            downloaded_path = str(candidates[0]) if candidates else None
         local_path = Path(downloaded_path) if downloaded_path else None
+        if local_path is None or not local_path.is_file():
+            # Older tools may emit a locale-encoded path. Only recover an unambiguous
+            # final output, never a partial download or an unmerged format stream.
+            candidates = [
+                path for path in paths.media.glob("source.*")
+                if path.is_file() and len(path.suffixes) == 1
+                and path.suffix not in {".part", ".ytdl", ".tmp"}
+                and path.stat().st_size > 0
+            ]
+            local_path = candidates[0] if len(candidates) == 1 else None
         if local_path is None or not local_path.is_file() or local_path.stat().st_size == 0:
             _cleanup_ytdlp_downloads(paths.media)
             raise PipelineError("MEDIA_DOWNLOAD_FAILED", "yt-dlp 未生成有效的媒体文件")
@@ -367,9 +386,9 @@ def _cleanup_ytdlp_downloads(media_dir: Path, *, keep: set[Path] | None = None) 
 
 
 class MediaSourceResolver:
-    def __init__(self, ytdlp_executable: str, runner: ExternalProcessRunner | None = None) -> None:
+    def __init__(self, ytdlp_executable: str, runner: ExternalProcessRunner | None = None, *, audio_only: bool = False) -> None:
         self.local = LocalFileSource()
-        self.remote = YtDlpSource(ytdlp_executable, runner)
+        self.remote = YtDlpSource(ytdlp_executable, runner, audio_only=audio_only)
 
     async def acquire(
         self,
@@ -608,6 +627,10 @@ async def _cancelled(cancel_check: CancelCheck) -> bool:
 def _translate_tool_error(
     exc: PipelineError, unavailable_code: str, failed_code: str, tool_name: str
 ) -> PipelineError:
+    if tool_name == "yt-dlp":
+        translated = translate_ytdlp_error(exc)
+        if translated is not None:
+            return translated
     if exc.code in {"PROCESS_CANCELLED", "PROCESS_TIMEOUT", "backend_shutdown"}:
         return PipelineError(
             exc.code,

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
+import { ManualReviewPage } from "./ManualReviewPage";
 import { api } from "../api/client";
 import { StateView } from "../components/StateView";
 import { StatusBadge } from "../components/StatusBadge";
@@ -40,10 +41,18 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
   const frameArtifacts = (task?.artifacts ?? []).filter(item =>
     /01_extract\/frames\/normalized\/.+\.(?:jpe?g|png|webp)$/i.test(item.path),
   ).slice(0, 12);
+  const audioReady = task?.stages.some(stage => stage.attempt === task.attempt && stage.stage === "AUDIO_VALIDATE" && stage.status === "COMPLETED");
+  const copyAudio = async () => {
+    if (!task) return;
+    try { setActionMessage((await api.copyAudio(task.id)).message); }
+    catch (reason) { setActionMessage(reason instanceof Error ? reason.message : "复制失败"); }
+  };
   const technicalError = task?.stages.find(stage => stage.technical_error)?.technical_error;
+  const wordPath = task?.exports.find(item => item.status === "COMPLETED"
+    && item.markdown_path === task.export_path && item.word_path)?.word_path;
 
   const operate = async (
-    action: "cancel" | "retry" | "workspace" | "export_directory" | "markdown",
+    action: "cancel" | "retry" | "workspace" | "export_directory" | "markdown" | "word",
   ) => {
     if (!task) return;
     setActionMessage(null);
@@ -82,7 +91,7 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
     <section className="panel action-bar">
       <div className="actions">
         {task.status === "WAITING_REVIEW" && (
-          <button className="primary" onClick={() => { window.location.hash = `/tasks/${task.id}/manual-review`; }}>校对初稿 / 完成任务</button>
+          <button className="primary" onClick={() => document.getElementById("manual-review")?.scrollIntoView({ behavior: "smooth" })}>校对初稿 / 完成任务</button>
         )}
         {task.document_path && !["QUEUED", "PROCESSING"].includes(task.status) && (
           <button onClick={() => { window.location.hash = `/tasks/${task.id}/review`; }}>审阅整理差异</button>
@@ -93,17 +102,24 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
         {["FAILED", "INTERRUPTED"].includes(task.status) && (
           <button className="primary" onClick={() => void operate("retry")}>重试并复用产物</button>
         )}
+        {audioReady && <button onClick={() => void copyAudio()}>复制音频文件</button>}
         {task.workspace_path && (
           <button onClick={() => void operate("workspace")}>打开任务工作区</button>
         )}
         {task.export_path && <>
           <button onClick={() => void operate("export_directory")}>打开导出目录</button>
           <button onClick={() => void operate("markdown")}>打开最终 Markdown</button>
+          {wordPath && <button onClick={() => void operate("word")}>打开最终 Word</button>}
         </>}
         {task.error_message && <button onClick={() => void copyError()}>复制错误信息</button>}
       </div>
       {actionMessage && <span>{actionMessage}</span>}
     </section>
+
+    {task.status === "WAITING_REVIEW" && <div id="manual-review">
+      {task.transcript_preview?.quality_warnings?.map(warning => <p className="state-card" role="alert" key={warning}>{warning}</p>)}
+      <ManualReviewPage key={`${task.id}-${task.attempt}`} taskId={task.id} embedded onSubmitted={() => void load()} />
+    </div>}
 
     <section className="detail-grid">
       <article className="panel">
@@ -115,6 +131,7 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
           <div><dt>开始时间</dt><dd>{formatDate(task.started_at)}</dd></div>
           <div><dt>工作区</dt><dd className="break">{task.workspace_path ?? "—"}</dd></div>
           <div><dt>最终笔记</dt><dd className="break">{task.export_path ?? "—"}</dd></div>
+          {wordPath && <div><dt>Word 文档</dt><dd className="break">{wordPath}</dd></div>}
         </dl>
         {task.error_message && <div className="state-card error">
           <strong>{task.error_code}</strong>
@@ -144,6 +161,7 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
           <span>分块：{task.transcript_preview.completed_chunks}/{task.transcript_preview.chunk_count}</span>
           <span>分段：{task.transcript_preview.segment_count}</span>
         </div>
+        {task.transcript_preview.quality_warnings?.map(warning => <p role="alert" key={warning}>{warning}</p>)}
         <pre className="transcript-preview">{task.transcript_preview.text}</pre>
         {task.transcript_preview.truncated && <small>预览已截断；完整结果保存在工作区。</small>}
       </> : <div className="state-card">ASR 或导入字幕文本尚未生成。</div>}
@@ -231,6 +249,10 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
                 ))}</div>
                 : <small>模型：未调用（本地工具或确定性处理）</small>}
               {stage.message && <p>{stage.message}</p>}
+              {stage.stage === "AUDIO_VALIDATE" && stage.attempt === task.attempt && stage.status === "COMPLETED" && <div className="actions">
+                <button onClick={() => void copyAudio()}>复制音频文件</button>
+                <a className="button-link" href={api.artifactUrl(task.id, "01_extract/audio/normalized.wav")}>下载音频</a>
+              </div>}
               {stage.log_path && <small className="break">日志：{stage.log_path}</small>}
             </div>
           </div>)}</div>

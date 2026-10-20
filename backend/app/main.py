@@ -40,7 +40,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Video2Doc API",
-    version="3.1.0",
+    version="3.4.1",
     description="Local faithful media-to-Obsidian application API.",
     lifespan=lifespan,
 )

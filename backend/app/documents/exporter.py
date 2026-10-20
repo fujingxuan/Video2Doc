@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.core.errors import PipelineCancelled, PipelineError
 from app.documents.ir import Document
 from app.documents.markdown import render_obsidian_markdown
+from app.documents.word import render_word_document
 from app.storage.workspace import safe_filename
 
 
@@ -58,6 +59,7 @@ class ExportConfig(BaseModel):
 @dataclass(frozen=True, slots=True)
 class ExportResult:
     markdown_path: str
+    word_path: str
     attachment_directory: str | None
     data_directory: str | None
     image_count: int
@@ -104,8 +106,11 @@ def export_document_bundle(
         title=document.title,
         cancel_check=cancel_check,
     )
-    markdown_name, attachments_name, data_name = _bundle_names(stem, document.title, config)
+    markdown_name, word_name, attachments_name, data_name = _bundle_names(
+        stem, document.title, config
+    )
     final_markdown = inbox / markdown_name
+    final_word = inbox / word_name
     final_attachments = inbox / attachments_name
     final_data = inbox / data_name
     stage = inbox / f".video2doc-export-{uuid.uuid4().hex}.tmp"
@@ -187,11 +192,13 @@ def export_document_bundle(
 
         markdown = render_obsidian_markdown(staged_document)
         _write_text_atomic(stage / final_markdown.name, markdown)
+        render_word_document(markdown, stage / word_name, asset_root=stage)
         _ensure_active(cancel_check)
 
         targets = [
             (stage / attachments_name, final_attachments),
             (stage / data_name, final_data),
+            (stage / word_name, final_word),
             (stage / final_markdown.name, final_markdown),
         ]
         if config.conflict_policy == "overwrite":
@@ -221,6 +228,7 @@ def export_document_bundle(
         raise
     return ExportResult(
         markdown_path=str(final_markdown),
+        word_path=str(final_word),
         attachment_directory=str(final_attachments) if image_count else None,
         data_directory=str(final_data) if sidecar_count else None,
         image_count=image_count,
@@ -268,9 +276,10 @@ def _resolve_stem(
         index += 1
 
 
-def _bundle_names(stem: str, title: str, config: ExportConfig) -> tuple[str, str, str]:
+def _bundle_names(stem: str, title: str, config: ExportConfig) -> tuple[str, str, str, str]:
     names = (
         f"{stem}.md",
+        f"{stem}.docx",
         safe_filename(
             config.attachment_directory_template.format(stem=stem, title=title),
             fallback=f"{stem}.assets",
@@ -283,7 +292,7 @@ def _bundle_names(stem: str, title: str, config: ExportConfig) -> tuple[str, str
     # Keep Windows filename semantics even when validating on another OS.
     if len({name.casefold() for name in names}) != len(names):
         raise PipelineError(
-            "EXPORT_PATH_INVALID", "Markdown、附件目录和追溯目录必须使用不同名称"
+            "EXPORT_PATH_INVALID", "Markdown、Word、附件目录和追溯目录必须使用不同名称"
         )
     return names
 

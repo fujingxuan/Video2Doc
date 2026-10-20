@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "../api/client";
+import { Icon } from "../components/Icon";
 import type {
   GatewayModel,
   ModelConfig,
@@ -289,13 +290,14 @@ export function NewTaskPage({
     <header className="page-header">
       <div>
         <p className="eyebrow">{editTaskId ? "仅限尚未开始的任务" : "视频 / 音频 / 网页 URL"}</p>
-        <h1>{editTaskId ? "编辑队列任务" : "新建完整转换任务"}</h1>
+        <h1>{editTaskId ? "编辑队列任务" : "新建转换任务"}</h1>
         <p>{editTaskId
           ? "保存后会更新输入来源和完整配置快照；任务一旦开始处理就不再允许修改。"
           : "自动沿用上一个任务的处理设置；只需填写新的输入来源即可加入队列。"}</p>
       </div>
     </header>
-    <section className="panel form-panel" aria-busy={initializing}>
+    <section className="panel form-panel new-task-form" aria-busy={initializing}>
+      <div className="form-section-heading"><span>01</span><div><h2>添加内容来源</h2><p>支持批量链接、本地视频与音频文件</p></div></div>
       {editTaskId && <label>任务标题
         <input
           maxLength={300}
@@ -354,6 +356,7 @@ export function NewTaskPage({
         <small>支持 WAV、MP3、M4A、FLAC 等格式。上传后会保留任务副本。</small>
         {uploadFiles.map((file, index) => <span key={index}>{file.name} · {(file.size / 1024 ** 2).toFixed(2)} MB</span>)}
       </label>}
+      <div className="form-section-heading"><span>02</span><div><h2>选择处理方式</h2><p>按内容需要配置转写、画面识别与文本整理</p></div></div>
       <fieldset>
         <legend>文本获取方式</legend>
         <div className="segmented">
@@ -541,10 +544,11 @@ export function NewTaskPage({
       {textEditEnabled && <label>文本模型
         <select value={textModelId} onChange={event => setTextModelId(event.target.value)}>
           <option value="">使用处理方案中的模型</option>
-          {textModels.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+          {textModels.map(item => <option key={item.id} value={item.id}>{item.display_name || item.name}</option>)}
         </select>
       </label>}
 
+      <div className="form-section-heading"><span>03</span><div><h2>保存你的文字材料</h2><p>同时导出 Markdown 和 Word，随时阅读与编辑</p></div></div>
       <fieldset>
         <legend>任务导出位置</legend>
         <div className="form-grid">
@@ -562,7 +566,7 @@ export function NewTaskPage({
         {!exportDirectory && <small>
           未指定时使用应用设置中的默认导出位置。
         </small>}
-        <small>成品 Markdown 默认不写入媒体时间戳；图片与追溯 sidecar 会放在同一目录。</small>
+        <small>同一目录保留同名的 Markdown 和 Word，默认不写入媒体时间戳；Word 内嵌相关画面。</small>
       </fieldset>
 
       <div className="notice">
@@ -572,7 +576,8 @@ export function NewTaskPage({
       {message && <p className="form-message">{message}</p>}
       <div className="actions">
         <button className="primary" disabled={busy || initializing} onClick={() => void submit()}>
-          {busy ? (editTaskId ? "正在保存…" : (sourceType === "UPLOAD" ? "正在上传音频…" : "正在创建…")) : (editTaskId ? "保存队列修改" : "加入串行队列")}
+          <Icon name="plus" width="17" height="17" />
+          {busy ? (editTaskId ? "正在保存…" : (sourceType === "UPLOAD" ? "正在上传音频…" : "正在创建…")) : (editTaskId ? "保存队列修改" : "加入处理队列")}
         </button>
         <button disabled={busy || (!sources && !uploadFiles.length)} onClick={() => { setSources(""); setUploadFiles([]); setUploadKey(value => value + 1); }}>清空输入</button>
         {editTaskId && <button onClick={() => { window.location.hash = "/queue"; }}>取消编辑</button>}

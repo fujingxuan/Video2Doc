@@ -22,6 +22,7 @@ from app.core.config import get_settings
 from app.core.errors import PipelineError
 from app.providers.asr import AsrSegment, format_srt_time
 from app.providers.process import CancelCheck, ExternalProcessRunner, process_registry
+from app.providers.ytdlp_options import authentication_options, translate_ytdlp_error
 from app.providers.gateways import trust_environment_proxy
 from app.providers.frames import (
     FrameExtractionConfig,
@@ -129,7 +130,7 @@ class YtDlpSubtitleSource:
                     "--sub-format", "srt/vtt/ass/json3/best",
                     "--retries", "3", "--extractor-retries", "3", "--socket-timeout", "20",
                     "--retry-sleep", "http:exp=1:4", "--retry-sleep", "extractor:exp=1:4",
-                    "--output", str(destination / "source.%(ext)s"), source,
+                    "--output", str(destination / "source.%(ext)s"), *authentication_options(source), source,
                 ], cwd=paths.root, log_dir=paths.logs, log_name=f"ytdlp_subtitles_{index}",
                     timeout_seconds=min(120, get_settings().media_process_timeout_seconds),
                     cancel_check=cancel_check,
@@ -194,6 +195,7 @@ class YtDlpSubtitleSource:
                     "--retry-sleep", "extractor:exp=1:4",
                     "--no-playlist",
                     "--no-warnings",
+                    *authentication_options(source),
                     source,
                 ],
                 cwd=paths.root,
@@ -203,6 +205,9 @@ class YtDlpSubtitleSource:
                 cancel_check=cancel_check,
             )
         except PipelineError as exc:
+            translated = translate_ytdlp_error(exc)
+            if translated is not None:
+                raise translated from exc
             if exc.code in {"PROCESS_CANCELLED", "PROCESS_TIMEOUT", "backend_shutdown"}:
                 raise
             code = "YTDLP_UNAVAILABLE" if exc.code == "PROCESS_UNAVAILABLE" else "SUBTITLE_FETCH_FAILED"
@@ -860,25 +865,6 @@ def _load_subtitle_acquisition(
         return None
 
 
-def _subtitle_candidate_rank(path: Path, metadata: dict[str, Any]) -> tuple[int, int, str]:
-    language = (_subtitle_language(path) or "").casefold()
-    priorities = {
-        "zh-hans": 0,
-        "zh-cn": 1,
-        "zh-hant": 2,
-        "zh-tw": 3,
-        "zh-hk": 4,
-        "zh": 5,
-        "en": 20,
-    }
-    language_rank = priorities.get(language)
-    if language_rank is None:
-        language_rank = 10 if language.startswith("zh") else 21 if language.startswith("en") else 99
-    source_kind = _subtitle_source_kind(language, metadata)
-    source_rank = {"manual": 0, "automatic": 1, "unknown": 2}.get(source_kind, 2)
-    return language_rank, source_rank, path.name.casefold()
-
-
 def _subtitle_tracks(metadata: dict, priorities: tuple[str, ...]) -> list[tuple[str, str]]:
     tracks = []
     order = {language.casefold(): index for index, language in enumerate(priorities)}
@@ -891,63 +877,6 @@ def _subtitle_tracks(metadata: dict, priorities: tuple[str, ...]) -> list[tuple[
                 tracks.extend((lang, kind) for lang in sorted(
                     candidates, key=lambda lang: (order.get(lang.casefold(), 99), lang.casefold())))
     return tracks
-
-
-def _select_available_language(
-    metadata: dict[str, Any],
-    priorities: tuple[str, ...] = DEFAULT_SUBTITLE_LANGUAGES,
-) -> str | None:
-    manual = metadata.get("subtitles")
-    automatic = metadata.get("automatic_captions")
-    manual_languages = set(manual) if isinstance(manual, dict) else set()
-    automatic_languages = set(automatic) if isinstance(automatic, dict) else set()
-    for candidates, prefix in (
-        (manual_languages, "zh"),
-        (automatic_languages, "zh"),
-        (manual_languages, "en"),
-        (automatic_languages, "en"),
-    ):
-        exact = next(
-            (
-                language
-                for preferred in priorities
-                for language in candidates
-                if language.casefold() == preferred.casefold()
-                and language.casefold().startswith(prefix)
-            ),
-            None,
-        )
-        if exact is not None:
-            return exact
-        fallback = next(
-            (
-                language
-                for language in sorted(candidates, key=str.casefold)
-                if language.casefold().startswith(prefix)
-            ),
-            None,
-        )
-        if fallback is not None:
-            return fallback
-    return None
-
-
-def _subtitle_language(path: Path) -> str | None:
-    prefix = "source."
-    stem = path.stem
-    return stem[len(prefix) :] if stem.casefold().startswith(prefix) else None
-
-
-def _subtitle_source_kind(language: str | None, metadata: dict[str, Any]) -> str:
-    if not language:
-        return "unknown"
-    subtitles = metadata.get("subtitles")
-    automatic = metadata.get("automatic_captions")
-    if isinstance(subtitles, dict) and language in subtitles:
-        return "manual"
-    if isinstance(automatic, dict) and language in automatic:
-        return "automatic"
-    return "unknown"
 
 
 def _source_kind_label(value: str) -> str:

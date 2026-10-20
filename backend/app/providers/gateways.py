@@ -121,12 +121,17 @@ async def probe_gateway(
         detail = "健康检查通过"
         if runtime is not None and "loaded_model" in runtime:
             loaded_model = str(runtime.get("loaded_model") or "").strip()
-            device = str(runtime.get("device") or "未知设备")
+            device = str(runtime.get("actual_device") or runtime.get("device") or "未知设备")
             detail = (
                 f"Gateway 在线；已加载 {loaded_model}；设备 {device}"
                 if loaded_model
                 else f"Gateway 在线；模型尚未加载；预定设备 {device}"
             )
+            if loaded_model and runtime.get("compute_type"):
+                detail += f"；精度 {runtime['compute_type']}"
+            metrics = runtime.get("last_metrics")
+            if isinstance(metrics, dict) and isinstance(metrics.get("inference_seconds"), (int, float)):
+                detail += f"；上次推理 {metrics['inference_seconds']:.2f} 秒"
         return GatewayProbeResult("HEALTHY", detail, checked_at, runtime)
     except (OSError, httpx.HTTPError, TimeoutError, ValueError) as exc:
         return GatewayProbeResult("UNREACHABLE", f"{type(exc).__name__}: {exc}", checked_at)

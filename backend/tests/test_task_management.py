@@ -122,9 +122,11 @@ def test_delete_task_removes_database_workspace_and_export_bundle(
         title="Delete me",
     )
     markdown = output_root / "Delete me.md"
+    word = output_root / "Delete me.docx"
     attachments = output_root / "Delete me.assets"
     sidecars = output_root / "Delete me.data"
     markdown.write_text("# generated", encoding="utf-8")
+    word.write_bytes(b"generated Word")
     attachments.mkdir()
     (attachments / "frame.jpg").write_bytes(b"frame")
     sidecars.mkdir()
@@ -143,7 +145,8 @@ def test_delete_task_removes_database_workspace_and_export_bundle(
                 markdown_path=str(markdown),
                 attachment_directory=str(attachments),
                 data_directory=str(sidecars),
-                config_json={"vault_path": str(output_root), "inbox_relative_path": "."},
+                config_json={"vault_path": str(output_root), "inbox_relative_path": ".",
+                             "word_path": str(word)},
             )
         )
         session.commit()
@@ -153,11 +156,13 @@ def test_delete_task_removes_database_workspace_and_export_bundle(
     assert response.status_code == 200, response.text
     assert response.json()["deleted_at"] is not None
     assert workspace.exists() and markdown.exists() and attachments.exists() and sidecars.exists()
+    assert word.exists()
     response = client.delete(f"/api/v1/tasks/{task_id}/permanent")
     assert response.status_code == 200, response.text
     assert response.json()["files_removed"] >= 4
     assert not workspace.exists()
     assert not markdown.exists()
+    assert not word.exists()
     assert not attachments.exists()
     assert not sidecars.exists()
     with SessionLocal() as session:

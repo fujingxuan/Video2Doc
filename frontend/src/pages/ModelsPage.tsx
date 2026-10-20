@@ -244,7 +244,7 @@ export function ModelsPage({
           ? <div className="state-card">尚未添加 LLM 模型。</div>
           : <div className="card-list">{textModels.map(model => <article className={!model.enabled ? "disabled-card" : ""} key={model.id}>
             <div>
-              <strong>{model.name}</strong>
+              <strong>{model.display_name || model.name}</strong>
               <small>{providerPresets.find(item => item.id === model.provider)?.label ?? model.provider ?? "自定义"} · {model.base_url || "未配置 Base URL"}</small>
               <small>密钥：{model.secret_source === "ENVIRONMENT" ? `${model.secret_env_name} (${model.secret_configured ? "已读取" : "未检测到"})` : model.secret_source === "DIRECT" ? `直接保存 (${model.secret_configured ? "可读取" : "不可读取"})` : "不需要"}</small>
               <small>连接：{modelHealthLabel(healthResults[model.id]?.status ?? "UNKNOWN")}{healthResults[model.id] ? ` · ${healthResults[model.id].detail} · ${healthResults[model.id].latency_ms} ms` : ""}</small>

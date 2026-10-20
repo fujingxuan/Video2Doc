@@ -162,7 +162,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="3.1.0",
+        version="3.4.1",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -455,6 +455,11 @@ def get_task_markdown(
         TaskService(session).markdown(task_id),
         media_type="text/markdown; charset=utf-8",
     )
+
+
+@router.post("/tasks/{task_id}/audio/copy", response_model=dict, tags=["tasks"])
+def copy_task_audio(task_id: int, session: Session = Depends(get_db)) -> dict[str, str]:
+    return TaskService(session).copy_audio(task_id)
 
 
 @router.post("/tasks/{task_id}/open/{target}", response_model=dict, tags=["tasks"])

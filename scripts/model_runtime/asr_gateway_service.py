@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -23,7 +24,7 @@ PROVIDER = os.getenv("VIDEO2DOC_ASR_PROVIDER", "mock").strip().lower()
 MODEL_ROOT = Path(os.getenv("VIDEO2DOC_MODEL_ROOT", "/mnt/d/Models/Video2Doc")).resolve()
 DEVICE = os.getenv("VIDEO2DOC_ASR_DEVICE", "cuda").strip().casefold()
 CUDA_DEVICE = DEVICE == "cuda" or DEVICE.startswith("cuda:")
-COMPUTE_TYPE = os.getenv("VIDEO2DOC_WHISPER_COMPUTE_TYPE", "float16")
+COMPUTE_TYPE = os.getenv("VIDEO2DOC_WHISPER_COMPUTE_TYPE", "float16" if CUDA_DEVICE else "int8")
 FIRERED_USE_HALF = os.getenv("VIDEO2DOC_FIRERED_USE_HALF", "1").strip().casefold() not in {
     "0",
     "false",
@@ -46,11 +47,18 @@ class ModelRuntime:
         self.loaded_model: Any = None
         self.loaded_at: float | None = None
         self.load_seconds: float | None = None
+        self.actual_device: str | None = None
+        self.actual_dtype: str | None = None
+        self.last_metrics: dict[str, Any] = {}
 
     def unload(self) -> None:
         self.loaded_model = None
         self.loaded_name = None
         self.loaded_at = None
+        self.load_seconds = None
+        self.actual_device = None
+        self.actual_dtype = None
+        self.last_metrics = {}
         gc.collect()
         try:
             import torch
@@ -130,15 +138,24 @@ class ModelRuntime:
                     eos_penalty=1.0,
                     return_timestamp=True,
                 )
-                self.loaded_model = FireRedAsr2.from_pretrained(
-                    "aed", str(FIRERED_MODEL), config
-                )
+                with _firered_fast_loader():
+                    self.loaded_model = FireRedAsr2.from_pretrained(
+                        "aed", str(FIRERED_MODEL), config
+                    )
                 _release_cpu_loader_memory()
             else:
                 raise ValueError(f"Unknown provider: {PROVIDER}")
             self.loaded_name = model_name
             self.loaded_at = time.time()
             self.load_seconds = time.perf_counter() - started
+            inner = getattr(self.loaded_model, "model", self.loaded_model)
+            if hasattr(inner, "parameters"):
+                parameter = next(inner.parameters())
+                self.actual_device = str(parameter.device)
+                self.actual_dtype = str(parameter.dtype).removeprefix("torch.")
+            elif PROVIDER == "whisper":
+                self.actual_device = str(getattr(inner, "device", DEVICE))
+                self.actual_dtype = str(getattr(inner, "compute_type", COMPUTE_TYPE))
             return self.loaded_model
 
 
@@ -148,17 +165,49 @@ cancelled_requests: set[str] = set()
 cancelled_requests_lock = Lock()
 
 
+@contextmanager
+def _firered_fast_loader():
+    """Avoid initializing/copying 1.15B random weights before loading the checkpoint.
+
+    Keep positional buffers on CPU because upstream computes scalar values there.
+    Scope the adapter to model loading; do not alter the installed vendor package.
+    """
+    from fireredasr2s.fireredasr2 import asr
+
+    original = asr.load_fireredasr_aed_model
+
+    def load(path: str) -> Any:
+        import torch
+        from accelerate import init_empty_weights
+
+        package = torch.load(path, map_location="cpu", weights_only=False, mmap=True)
+        with init_empty_weights(include_buffers=False):
+            model = asr.FireRedAsrAed.from_args(package["args"])
+        model.load_state_dict(package["model_state_dict"], strict=True, assign=True)
+        # assign=True replaces Parameter objects: restore upstream's tied embedding.
+        model.decoder.tgt_word_prj.weight = model.decoder.tgt_word_emb.weight
+        if any(p.is_meta for p in (*model.parameters(), *model.buffers())):
+            raise RuntimeError("FireRed checkpoint left uninitialized model tensors")
+        return model
+
+    asr.load_fireredasr_aed_model = load
+    try:
+        yield
+    finally:
+        asr.load_fireredasr_aed_model = original
+
+
 def supported_models() -> list[dict[str, Any]]:
     if PROVIDER == "whisper":
         return [
-            {"id": "large-v3", "display_name": "Whisper large-v3", "capabilities": _whisper_caps()},
-            {"id": "large-v3-turbo", "display_name": "Whisper large-v3-turbo", "capabilities": _whisper_caps()},
+            {"id": "large-v3", "display_name": "Whisper V3（多语·质量优先）", "capabilities": _whisper_caps()},
+            {"id": "large-v3-turbo", "display_name": "Whisper Turbo（多语·快速转写）", "capabilities": _whisper_caps()},
         ]
     if PROVIDER == "qwen":
         return [
             {
                 "id": "Qwen/Qwen3-ASR-1.7B",
-                "display_name": "Qwen3-ASR-1.7B + ForcedAligner",
+                "display_name": "Qwen3 1.7B（多语·词级时间戳）",
                 "capabilities": {
                     "segment_timestamps": True,
                     "word_timestamps": True,
@@ -172,7 +221,7 @@ def supported_models() -> list[dict[str, Any]]:
         return [
             {
                 "id": "FireRedTeam/FireRedASR2-AED",
-                "display_name": "FireRedASR2-AED",
+                "display_name": "FireRed 2（中文·方言）",
                 "capabilities": {
                     "segment_timestamps": True,
                     "word_timestamps": True,
@@ -201,11 +250,9 @@ def health() -> dict[str, Any]:
         "provider": PROVIDER,
         "device": DEVICE,
         "cuda_enabled": CUDA_DEVICE,
-        "compute_type": (
-            COMPUTE_TYPE
-            if PROVIDER == "whisper"
-            else ("bfloat16" if CUDA_DEVICE and PROVIDER in {"firered", "qwen"} else "float32")
-        ),
+        "compute_type": runtime.actual_dtype,
+        "actual_device": runtime.actual_device,
+        "last_metrics": runtime.last_metrics,
         "loaded_model": runtime.loaded_name,
         "loaded_at": runtime.loaded_at,
         "load_seconds": runtime.load_seconds,
@@ -296,7 +343,26 @@ async def transcribe(
 def _run_inference(call: Any, arguments: tuple[Any, ...]) -> dict[str, Any]:
     # Model switching and unloading must not overlap an active GPU inference.
     with runtime.inference_lock:
-        return call(*arguments)
+        cold = runtime.loaded_model is None or runtime.loaded_name != arguments[1]
+        started = time.perf_counter()
+        response = call(*arguments)
+        elapsed = time.perf_counter() - started
+        load_seconds = (runtime.load_seconds or 0.0) if cold else 0.0
+        runtime.last_metrics = {
+            "cold_start": cold,
+            "load_seconds": load_seconds,
+            "inference_seconds": max(0.0, elapsed - load_seconds),
+            "total_seconds": elapsed,
+            "actual_device": runtime.actual_device,
+            "compute_type": runtime.actual_dtype,
+        }
+        if CUDA_DEVICE and PROVIDER in {"firered", "qwen"}:
+            import torch
+
+            runtime.last_metrics["cuda_allocated_mib"] = torch.cuda.memory_allocated() / 1024**2
+            runtime.last_metrics["cuda_reserved_mib"] = torch.cuda.memory_reserved() / 1024**2
+        response["runtime_metrics"] = dict(runtime.last_metrics)
+        return response
 
 
 def _firered_alignment_log_probs(log_probs: Any, torch_module: Any) -> Any:

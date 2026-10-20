@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -33,9 +34,9 @@ ASR_LAUNCHER = (
 )
 MODEL_ROOT = Path(r"D:\Models\Video2Doc")
 FFMPEG = Path(
-    r"C:\Users\Aaron\AppData\Local\Microsoft\WinGet\Packages"
-    r"\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
-    r"\ffmpeg-8.1.2-full_build\bin\ffmpeg.exe"
+    os.environ.get("VIDEO2DOC_TEST_FFMPEG")
+    or shutil.which("ffmpeg")
+    or r"D:\Tools\ffmpeg\bin\ffmpeg.exe"
 )
 SOURCE_MEDIA = Path(r"D:\Video2Doc-Test\sample.mp4")
 TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED", "INTERRUPTED"}

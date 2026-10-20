@@ -765,7 +765,7 @@ def normalize_asr_response(
                     model=request.model,
                     chunk_index=request.chunk.index,
                     raw_response_reference=str(raw_path),
-                    words=tuple(_normalize_words(raw.get("words"))),
+                    words=_preserve_segment_punctuation(text, tuple(_normalize_words(raw.get("words")))),
                 )
             )
     elif optional_text(payload.get("text")):
@@ -781,7 +781,7 @@ def normalize_asr_response(
                 model=request.model,
                 chunk_index=request.chunk.index,
                 raw_response_reference=str(raw_path),
-                words=tuple(_normalize_words(payload.get("words"))),
+                words=_preserve_segment_punctuation(str(payload["text"]), tuple(_normalize_words(payload.get("words")))),
             )
         )
     explicit_no_speech = (
@@ -799,6 +799,30 @@ def normalize_asr_response(
         raw_response_reference=str(raw_path),
         segments=tuple(segments),
     )
+
+
+def _preserve_segment_punctuation(text: str, words: tuple[AsrWord, ...]) -> tuple[AsrWord, ...]:
+    """Some providers punctuate segment text but return unpunctuated word tokens.
+
+    Carry punctuation into aligned words before overlap trimming reconstructs text.
+    Only exact lexical alignment is eligible; never infer punctuation or wording.
+    """
+    if not words or any(not normalize_text_for_overlap(w.text) for w in words):
+        return words
+    if normalize_text_for_overlap("".join(w.text for w in words)) != normalize_text_for_overlap(text):
+        return words
+    positions = [index for index, char in enumerate(text) if normalize_text_for_overlap(char)]
+    if len(positions) != len(normalize_text_for_overlap(text)):
+        return words
+    consumed = 0
+    start = 0
+    aligned = []
+    for word in words:
+        consumed += len(normalize_text_for_overlap(word.text))
+        end = positions[consumed] if consumed < len(positions) else len(text)
+        aligned.append(replace(word, text=text[start:end].strip()))
+        start = end
+    return tuple(aligned)
 
 
 def _normalize_words(value: Any) -> list[AsrWord]:
@@ -1079,6 +1103,33 @@ def _deduplicate_boundary_segment(
                     }
                 )
 
+    # Segment-only providers often split the same overlapping speech differently.
+    # Trim only a long exact suffix/prefix with time overlap, keeping uncertain text.
+    if not candidate.words:
+        for prior in reversed(previous):
+            if not _time_ranges_overlap(candidate, prior, boundary_start, boundary_end):
+                continue
+            left = normalize_text_for_overlap(prior.text)
+            right = normalize_text_for_overlap(candidate.text)
+            size = next((n for n in range(min(len(left), len(right)), 11, -1)
+                         if left.endswith(right[:n])), 0)
+            if not size:
+                continue
+            end = 0
+            while end < len(candidate.text) and len(
+                normalize_text_for_overlap(candidate.text[:end])
+            ) < size:
+                end += 1
+            tail = candidate.text[end:].lstrip(" ，。！？、,.!?;；:：")
+            diagnostics.append({"type": "duplicate_removed", "chunk_index": chunk.index,
+                                "method": "timed_exact_suffix_prefix", "removed_text": candidate.text[:end]})
+            if not tail:
+                return None
+            # Keep the provider's coarse interval: clearing it would reorder the
+            # retained tail to the end of the entire transcript.
+            candidate = replace(candidate, text=tail)
+            break
+
     for prior in reversed(previous[-4:]):
         if not _time_ranges_overlap(candidate, prior, boundary_start, boundary_end):
             continue
@@ -1291,6 +1342,12 @@ def save_transcript_artifacts(
             "segment_count": len(segments),
             "text": preview_text[:20_000],
             "truncated": len(preview_text) > 20_000,
+            "quality_warnings": [
+                f"音频 {item['source_start_seconds']:.1f}–{item['source_end_seconds']:.1f} 秒"
+                "仍有疑似重复，请对照音频校对；原始内容已保留。"
+                for item in (merge_diagnostics or [])
+                if item.get("type") == "asr_repetition_detected" and not item.get("resolved")
+            ],
         },
     )
     return {

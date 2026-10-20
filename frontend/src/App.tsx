@@ -40,6 +40,8 @@ export default function App() {
     setModels(nextModels); setProfiles(nextProfiles); setGateways(nextGateways); setGatewayModels(nextGatewayModels);
   }, []);
 
+  useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: "auto" }); }, [path]);
+
   useEffect(() => {
     const onHashChange = () => setPath(currentPath());
     window.addEventListener("hashchange", onHashChange);
