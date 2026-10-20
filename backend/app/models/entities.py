@@ -37,6 +37,10 @@ class ModelConfig(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200), unique=True, index=True)
     notes: Mapped[str | None] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    provider: Mapped[str | None] = mapped_column(String(100))
+    base_url: Mapped[str | None] = mapped_column(Text)
+    secret_env_name: Mapped[str | None] = mapped_column(String(200))
+    secret_ciphertext: Mapped[str | None] = mapped_column(Text)
     capabilities: Mapped[list[ModelCapability]] = relationship(
         back_populates="model", cascade="all, delete-orphan", lazy="selectin"
     )
@@ -61,6 +65,7 @@ class GatewayConfig(TimestampMixin, Base):
     protocol: Mapped[str] = mapped_column(String(64), index=True)
     base_url: Mapped[str] = mapped_column(Text)
     secret_env_name: Mapped[str | None] = mapped_column(String(200))
+    secret_ciphertext: Mapped[str | None] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     health_status: Mapped[str] = mapped_column(String(32), default="UNKNOWN", index=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -128,7 +133,7 @@ class ProcessingProfile(TimestampMixin, Base):
     fix_sentences: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_paragraphs: Mapped[bool] = mapped_column(Boolean, default=True)
     generate_headings: Mapped[bool] = mapped_column(Boolean, default=True)
-    keep_timestamps: Mapped[bool] = mapped_column(Boolean, default=True)
+    keep_timestamps: Mapped[bool] = mapped_column(Boolean, default=False)
     keep_raw_transcript: Mapped[bool] = mapped_column(Boolean, default=True)
     keep_downloaded_media: Mapped[bool] = mapped_column(Boolean, default=False)
     ocr_frame_interval_seconds: Mapped[float] = mapped_column(Float, default=5.0)
@@ -166,13 +171,13 @@ class AppSetting(TimestampMixin, Base):
     default_markdown_template: Mapped[str | None] = mapped_column(Text)
     default_ocr_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     default_keep_raw_transcript: Mapped[bool] = mapped_column(Boolean, default=True)
-    default_keep_timestamps: Mapped[bool] = mapped_column(Boolean, default=True)
+    default_keep_timestamps: Mapped[bool] = mapped_column(Boolean, default=False)
     default_keep_downloaded_media: Mapped[bool] = mapped_column(Boolean, default=False)
     default_keep_frames: Mapped[bool] = mapped_column(Boolean, default=False)
     default_text_edit_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     default_text_model_name: Mapped[str | None] = mapped_column(String(300))
     text_prompt_version: Mapped[str] = mapped_column(
-        String(100), default="faithful-edit-v1"
+        String(100), default="faithful-article-v1"
     )
     faithfulness_min_length_ratio: Mapped[float] = mapped_column(Float, default=0.72)
     faithfulness_formula_symbol_ratio: Mapped[float] = mapped_column(Float, default=0.8)
@@ -196,14 +201,16 @@ class AppSetting(TimestampMixin, Base):
     export_keep_json_sidecar: Mapped[bool] = mapped_column(Boolean, default=True)
     export_copy_transcript: Mapped[bool] = mapped_column(Boolean, default=False)
     export_copy_subtitles: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_clear_task_cache: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Task(TimestampMixin, Base):
     __tablename__ = "tasks"
     __table_args__ = (
+        Index("ix_tasks_history_page", "deleted_at", "created_at", "id"),
         Index(
-            "uq_tasks_single_processing",
-            "status",
+            "uq_tasks_processing_lane",
+            "processing_lane",
             unique=True,
             sqlite_where=text("status = 'PROCESSING'"),
         ),
@@ -214,6 +221,7 @@ class Task(TimestampMixin, Base):
     source_type: Mapped[str] = mapped_column(String(32), index=True)
     title: Mapped[str] = mapped_column(String(300))
     status: Mapped[str] = mapped_column(String(32), index=True, default="QUEUED")
+    processing_lane: Mapped[str] = mapped_column(String(16), default="main", server_default="main")
     current_stage: Mapped[str] = mapped_column(String(64), default="QUEUED")
     progress: Mapped[int] = mapped_column(Integer, default=0)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -229,10 +237,13 @@ class Task(TimestampMixin, Base):
     fusion_timeline_path: Mapped[str | None] = mapped_column(Text)
     artifacts_index_path: Mapped[str | None] = mapped_column(Text)
     document_path: Mapped[str | None] = mapped_column(Text)
+    review_submission_path: Mapped[str | None] = mapped_column(Text)
     markdown_path: Mapped[str | None] = mapped_column(Text)
     export_path: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    trash_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     snapshot: Mapped[TaskConfigSnapshot] = relationship(
         back_populates="task", cascade="all, delete-orphan", uselist=False, lazy="selectin"
@@ -282,6 +293,7 @@ class TaskStageRun(Base):
     retryable: Mapped[bool | None] = mapped_column(Boolean)
     input_artifacts: Mapped[list[str] | None] = mapped_column(JSON)
     output_artifacts: Mapped[list[str] | None] = mapped_column(JSON)
+    model_usage: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     log_path: Mapped[str | None] = mapped_column(Text)
     task: Mapped[Task] = relationship(back_populates="stages")
 

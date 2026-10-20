@@ -157,19 +157,8 @@ export function SettingsPage() {
     </section>
 
     <section className="panel form-panel settings-form">
-      <h2>忠实文本整理</h2>
-      <div className="notice">
-        OneAPI：{settings.api_key_configured
-          ? "ONEAPI_API_KEY 环境变量已配置"
-          : "未配置；关闭整理时不影响完整转换"}
-      </div>
-      <label>OneAPI Base URL
-        <input
-          value={settings.oneapi_base_url ?? ""}
-          placeholder="https://oneapi.example/v1"
-          onChange={event => update("oneapi_base_url", event.target.value)}
-        />
-      </label>
+      <h2>忠实文本整理策略</h2>
+      <div className="notice">LLM 平台、Base URL、模型和密钥已移到独立的“LLM”页面；这里仅保留默认模型名与忠实性阈值。</div>
       <div className="form-grid">
         <label>默认文本模型名称
           <input
@@ -290,6 +279,17 @@ export function SettingsPage() {
       </div>
       <div className="notice">
         Gateway 生命周期以各 Gateway 的 managed_lifecycle 标记为准；应用不会停止用户独立管理的 Docker OCR 容器。
+      </div>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={settings.auto_clear_task_cache}
+          onChange={event => update("auto_clear_task_cache", event.target.checked)}
+        />
+        每个任务成功完成后，自动清除可重新生成的媒体、音频、分块和临时日志缓存
+      </label>
+      <div className="notice">
+        自动清理不会删除最终 Markdown、导出附件、标准化转写、OCR/融合时间线或任务记录。
       </div>
       {message && <p className="form-message">{message}</p>}
       <div className="actions">

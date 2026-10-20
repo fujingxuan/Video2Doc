@@ -8,8 +8,12 @@ from typing import Iterable
 from app.documents.ir import Document, DocumentBlock
 
 
-NUMBER_PATTERN = re.compile(r"(?<![\w.])[+-]?(?:\d+(?:[.,]\d+)*|\.\d+)%?")
-IDENTIFIER_PATTERN = re.compile(r"\b[A-Za-z][A-Za-z0-9_.:+/#-]{2,}\b")
+NUMBER_PATTERN = re.compile(r"(?<![A-Za-z0-9_.])[+-]?(?:\d+(?:[.,]\d+)*|\.\d+)%?")
+IDENTIFIER_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_.:+/#-])[A-Za-z][A-Za-z0-9_.:+/#-]{2,}"
+    r"(?![A-Za-z0-9_.:+/#-])"
+)
+IDENTIFIER_SIGNAL_PATTERN = re.compile(r"[A-Z0-9_.:+/#-]")
 CODE_SPAN_PATTERN = re.compile(r"`{1,3}[^`]+`{1,3}", re.DOTALL)
 FORMULA_SYMBOLS = set("=+-*/^_∑∫√≈≠≤≥<>[]{}()")
 
@@ -59,7 +63,9 @@ def validate_block_edit(
                 block.block_id,
             )
         )
-    missing_numbers = _missing_tokens(NUMBER_PATTERN.findall(original), edited)
+    missing_numbers = _missing_tokens(
+        NUMBER_PATTERN.findall(original), NUMBER_PATTERN.findall(edited)
+    )
     if missing_numbers:
         issues.append(
             FaithfulnessIssue(
@@ -68,8 +74,12 @@ def validate_block_edit(
                 block.block_id,
             )
         )
-    identifiers = IDENTIFIER_PATTERN.findall(original)
-    missing_identifiers = _missing_tokens(identifiers, edited, casefold=True)
+    identifiers = _technical_identifiers(original)
+    missing_identifiers = _missing_tokens(
+        (token.rstrip(".:") for token in identifiers),
+        (token.rstrip(".:") for token in IDENTIFIER_PATTERN.findall(edited)),
+        casefold=True,
+    )
     if missing_identifiers:
         issues.append(
             FaithfulnessIssue(
@@ -168,16 +178,27 @@ def _content_characters(value: str) -> str:
 
 def _missing_tokens(
     tokens: Iterable[str],
-    text: str,
+    observed_tokens: Iterable[str],
     *,
     casefold: bool = False,
 ) -> list[str]:
-    normalized_text = text.casefold() if casefold else text
-    normalized_tokens = [item.casefold() if casefold else item for item in tokens]
-    required = Counter(normalized_tokens)
-    missing: list[str] = []
-    for token, count in required.items():
-        present = normalized_text.count(token)
-        if present < count:
-            missing.extend([token] * (count - present))
-    return missing
+    required = Counter(item.casefold() if casefold else item for item in tokens)
+    observed = Counter(item.casefold() if casefold else item for item in observed_tokens)
+    return list((required - observed).elements())
+
+
+def _technical_identifiers(text: str) -> list[str]:
+    """Return tokens whose spelling carries an identifier-like signal.
+
+    Plain lowercase English words in an ASR transcript can be lyrics, filler,
+    or speech recognition noise. Treating every three-letter word as a proper
+    name made harmless cleanup such as removing ``uuuuu yeah`` fail the whole
+    article. Mixed-case names, acronyms, versions, model names, and tokens with
+    identifier punctuation remain protected.
+    """
+
+    return [
+        token
+        for token in IDENTIFIER_PATTERN.findall(text)
+        if IDENTIFIER_SIGNAL_PATTERN.search(token)
+    ]

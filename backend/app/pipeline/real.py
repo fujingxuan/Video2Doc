@@ -10,9 +10,15 @@ from sqlalchemy import select, update
 
 from app.core.config import get_settings
 from app.core.errors import PipelineCancelled, PipelineError, PipelineInterrupted
+from app.core.credentials import resolve_model_credential
+from app.core.secrets import SecretStorageError
 from app.db.session import SessionLocal
 from app.documents.builder import build_document
-from app.documents.editor import FaithfulTextEditor, PROMPT_VERSION
+from app.documents.editor import (
+    FaithfulTextEditor,
+    PROMPT_VERSION,
+    build_full_article_document,
+)
 from app.documents.exporter import ExportConfig, ExportResult, export_document_bundle
 from app.documents.faithfulness import validate_document_faithfulness
 from app.documents.ir import Document
@@ -24,6 +30,9 @@ from app.models import (
     TextEditRun,
 )
 from app.models.entities import utcnow
+from app.pipeline.model_usage import stage_model_usage
+from app.pipeline.admission import processing_admission
+from app.pipeline.asr_quality import recover_repetition
 from app.providers.asr import (
     AsrRequest,
     AsrResult,
@@ -50,8 +59,16 @@ from app.providers.media import (
     MediaSourceResolver,
     MediaStream,
     classify_input,
+    media_acquisition_from_ytdlp_metadata,
+    media_info_from_ytdlp_metadata,
 )
+from app.providers.managed_runtime import ensure_managed_gateway, release_managed_gateway
 from app.providers.process import process_registry
+from app.providers.subtitles import (
+    EmbeddedCaptionOcrSource,
+    YtDlpSubtitleSource,
+    import_subtitle,
+)
 from app.providers.ocr_timeline import (
     build_ocr_timeline,
     recognize_retained_frames,
@@ -76,10 +93,14 @@ STAGE_RANGES: dict[str, tuple[int, int]] = {
     "MEDIA_PROBE": (9, 14),
     "AUDIO_EXTRACT": (14, 23),
     "AUDIO_VALIDATE": (23, 25),
+    "AUDIO_READY": (25, 25),
     "AUDIO_CHUNK": (25, 29),
     "ASR_TRANSCRIBE": (29, 47),
     "ASR_COMBINE": (47, 51),
     "ASR_VALIDATE": (51, 54),
+    "SUBTITLE_IMPORT": (25, 47),
+    "SUBTITLE_NORMALIZE": (47, 51),
+    "SUBTITLE_VALIDATE": (51, 54),
     "FRAME_EXTRACT": (54, 63),
     "FRAME_DEDUP": (63, 67),
     "OCR_RECOGNIZE": (67, 79),
@@ -88,6 +109,7 @@ STAGE_RANGES: dict[str, tuple[int, int]] = {
     "FUSION_VALIDATE": (87, 89),
     "DOCUMENT_BUILD": (89, 92),
     "TEXT_EDIT": (92, 94),
+    "MANUAL_REVIEW": (94, 94),
     "MARKDOWN_RENDER": (94, 97),
     "OBSIDIAN_EXPORT": (97, 99),
     "FINALIZE": (99, 100),
@@ -95,9 +117,10 @@ STAGE_RANGES: dict[str, tuple[int, int]] = {
 
 
 class StageTracker:
-    def __init__(self, task_id: int, workspace: Path) -> None:
+    def __init__(self, task_id: int, workspace: Path, snapshot: dict) -> None:
         self.task_id = task_id
         self.workspace = workspace
+        self.snapshot = snapshot
         self.stage: str | None = None
         self.attempt: int | None = None
 
@@ -128,6 +151,7 @@ class StageTracker:
                 message=message,
                 started_at=utcnow(),
                 input_artifacts=input_artifacts,
+                model_usage=stage_model_usage(stage, self.snapshot),
                 log_path=log_path,
             )
             session.add(run)
@@ -219,16 +243,32 @@ async def run_real_pipeline(task_id: int) -> None:
         source = task.source
         source_type = task.source_type
         attempt = task.attempt
+        review_submission_path = task.review_submission_path
     paths = WorkspacePaths.from_root(workspace)
     paths.create()
-    tracker = StageTracker(task_id, workspace)
+    tracker = StageTracker(task_id, workspace, snapshot)
+    runtime_gateways = snapshot.get("gateways")
+    cleanup_asr_gateway = (
+        runtime_gateways.get("asr") if isinstance(runtime_gateways, dict) else None
+    )
+    cleanup_ocr_gateway = (
+        runtime_gateways.get("ocr") if isinstance(runtime_gateways, dict) else None
+    )
 
     def cancelled() -> bool:
         with SessionLocal() as session:
             task = session.get(Task, task_id)
             return task is None or task.cancel_requested
 
+    admitted = False
     try:
+        if review_submission_path or snapshot.get("processing", {}).get("text_source") == "SUBTITLE":
+            await processing_admission.acquire(task_id, cancelled)
+            admitted = True
+        if review_submission_path:
+            await _resume_manual_review(task_id, attempt, tracker, paths, snapshot,
+                                        review_submission_path, cancelled)
+            return
         tracker.start("INPUT_VALIDATE", message="正在验证输入来源")
         kind, normalized_source = classify_input(source, source_type)
         source_record = paths.metadata / "input.json"
@@ -246,48 +286,151 @@ async def run_real_pipeline(task_id: int) -> None:
         ffmpeg_executable = str(tools.get("ffmpeg") or "ffmpeg")
         ffprobe_executable = str(tools.get("ffprobe") or "ffprobe")
         ytdlp_executable = str(tools.get("ytdlp") or "yt-dlp")
+        processing = snapshot.get("processing", {})
+        subtitle_mode = str(processing.get("text_source") or "ASR") == "SUBTITLE"
+        asr_config = snapshot.get("asr") if isinstance(snapshot.get("asr"), dict) else {}
+        ocr_config = snapshot.get("ocr") if isinstance(snapshot.get("ocr"), dict) else {}
+        gateway_collection = snapshot.get("gateways")
+        asr_gateway = (
+            gateway_collection.get("asr") if isinstance(gateway_collection, dict) else None
+        )
+        ocr_gateway = (
+            gateway_collection.get("ocr") if isinstance(gateway_collection, dict) else None
+        )
+        subtitle_config = (
+            snapshot.get("subtitle") if isinstance(snapshot.get("subtitle"), dict) else {}
+        )
+        subtitle_path = str(subtitle_config.get("workspace_path") or "")
+        subtitle_language = str(subtitle_config.get("language") or "").strip() or None
+        subtitle_provider_name = "imported-subtitle"
+        subtitle_model = "not-applicable"
+        subtitle_fallback_message: str | None = None
+
         acquisition_path = paths.metadata / "media_acquisition.json"
         tracker.start(
             "MEDIA_ACQUIRE",
             message="正在获取媒体",
             input_artifacts=[str(source_record)],
         )
-        acquisition = _load_acquisition(acquisition_path)
-        if acquisition and Path(acquisition.local_media_path).is_file():
-            tracker.progress(1.0, "复用当前任务工作区中的已获取媒体")
+        preflight_acquisition: MediaAcquisitionResult | None = None
+        subtitle_preflight_error: PipelineError | None = None
+        if (
+            subtitle_mode
+            and not subtitle_path
+            and kind == "URL"
+        ):
+            try:
+                subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
+                    normalized_source,
+                    paths,
+                    cancel_check=cancelled,
+                    progress=tracker.progress,
+                )
+                subtitle_path = subtitle.path
+                subtitle_language = subtitle.language
+                subtitle_provider_name = subtitle.provider
+                metadata_path = paths.metadata / "ytdlp.json"
+                metadata = read_json(metadata_path)
+                if not isinstance(metadata, dict):
+                    raise PipelineError(
+                        "SUBTITLE_FETCH_FAILED",
+                        "字幕已获取，但缺少可追溯的媒体元数据",
+                    )
+                preflight_acquisition = media_acquisition_from_ytdlp_metadata(
+                    normalized_source,
+                    metadata,
+                    metadata_path,
+                )
+                if processing.get("ocr_enabled"):
+                    preflight_acquisition = None
+                    tracker.progress(None, "平台字幕已保存，继续获取画面供 OCR 使用")
+                else:
+                    tracker.progress(1.0, "平台字幕获取完成；已跳过完整视频下载")
+            except PipelineError as exc:
+                if exc.code in {"PROCESS_CANCELLED", "backend_shutdown"}:
+                    raise
+                subtitle_preflight_error = exc
+                append_task_log(workspace, f"平台字幕未获取成功：{exc.code}: {exc.user_message}")
+                tracker.progress(None, "平台字幕暂不可用，继续获取媒体以尝试内嵌字幕或语音识别")
+
+        acquisition = preflight_acquisition or _load_acquisition(acquisition_path)
+        reusable_acquisition = bool(
+            acquisition
+            and (
+                (
+                    acquisition.media_available
+                    and acquisition.local_media_path
+                    and Path(acquisition.local_media_path).is_file()
+                )
+                or (not acquisition.media_available and subtitle_mode and subtitle_path
+                    and not processing.get("ocr_enabled"))
+            )
+        )
+        if reusable_acquisition:
+            tracker.progress(
+                1.0,
+                (
+                    "复用已获取的平台字幕和媒体元数据"
+                    if acquisition and not acquisition.media_available
+                    else "复用当前任务工作区中的已获取媒体"
+                ),
+            )
         else:
-            acquisition = await MediaSourceResolver(ytdlp_executable).acquire(
+            acquisition = await MediaSourceResolver(
+                ytdlp_executable,
+                audio_only=not processing.get("ocr_enabled") and not subtitle_mode,
+            ).acquire(
                 normalized_source,
                 kind,
                 paths,
                 cancel_check=cancelled,
                 progress=tracker.progress,
             )
-            write_json(acquisition_path, acquisition.to_dict())
+        assert acquisition is not None
+        write_json(acquisition_path, acquisition.to_dict())
         if acquisition.title:
             with SessionLocal() as session:
                 db_task = session.get(Task, task_id)
                 if db_task and db_task.title in {source, Path(source).name, Path(source).stem}:
                     db_task.title = acquisition.title[:300]
                     session.commit()
-        tracker.complete(
-            message="媒体获取完成",
-            output_artifacts=[acquisition.local_media_path, acquisition.metadata_path, str(acquisition_path)],
-        )
+        acquisition_artifacts = [acquisition.metadata_path, str(acquisition_path)]
+        if acquisition.media_available and acquisition.local_media_path:
+            acquisition_artifacts.insert(0, acquisition.local_media_path)
+        tracker.complete(message="媒体获取完成", output_artifacts=acquisition_artifacts)
 
         ffprobe = FfprobeProvider(ffprobe_executable)
         media_info_path = paths.metadata / "media_info.json"
         tracker.start(
             "MEDIA_PROBE",
-            message="正在探测音视频流",
-            input_artifacts=[acquisition.local_media_path],
+            message=(
+                "正在探测音视频流" if acquisition.media_available else "正在读取平台媒体元数据"
+            ),
+            input_artifacts=(
+                [acquisition.local_media_path]
+                if acquisition.media_available and acquisition.local_media_path
+                else [acquisition.metadata_path]
+            ),
             log_path=str(paths.logs / "ffprobe.stderr.log"),
         )
         media_info = _load_media_info(media_info_path)
         if media_info is None:
-            media_info = await ffprobe.probe(
-                Path(acquisition.local_media_path), paths, cancel_check=cancelled
-            )
+            if acquisition.media_available:
+                media_info = await ffprobe.probe(
+                    Path(acquisition.local_media_path), paths, cancel_check=cancelled
+                )
+            else:
+                metadata = read_json(Path(acquisition.metadata_path))
+                if not isinstance(metadata, dict):
+                    raise PipelineError(
+                        "MEDIA_PROBE_FAILED",
+                        "平台媒体元数据缺失或损坏",
+                    )
+                media_info = media_info_from_ytdlp_metadata(
+                    metadata,
+                    Path(acquisition.metadata_path),
+                )
+                tracker.progress(1.0, "已从平台元数据读取媒体时长与流信息")
             media_payload = {**acquisition.to_dict(), **media_info.to_dict()}
             write_json(media_info_path, media_payload)
         else:
@@ -302,57 +445,144 @@ async def run_real_pipeline(task_id: int) -> None:
             output_artifacts=[media_info.raw_probe_path, str(media_info_path)],
         )
 
-        tracker.start(
-            "AUDIO_EXTRACT",
-            message="正在提取并标准化音频",
-            input_artifacts=[acquisition.local_media_path, str(media_info_path)],
-            log_path=str(paths.logs / "ffmpeg_audio.stderr.log"),
-        )
-        audio_path = paths.audio / "normalized.wav"
-        audio_info_path = paths.metadata / "audio_media_info.json"
-        audio_info = _load_media_info(audio_info_path)
-        if audio_path.is_file() and audio_info is not None:
-            tracker.progress(1.0, "复用已完成的标准化音频")
+        if subtitle_mode and not subtitle_path:
+            if kind != "URL":
+                raise PipelineError(
+                    "SUBTITLE_CONFIG_INVALID",
+                    "从视频链接抓取字幕仅支持 URL 输入",
+                )
+
+            def subtitle_probe_progress(_fraction: float | None, message: str) -> None:
+                append_task_log(workspace, message)
+
+            try:
+                try:
+                    if subtitle_preflight_error is not None:
+                        raise subtitle_preflight_error
+                    subtitle = await YtDlpSubtitleSource(ytdlp_executable).acquire(
+                        normalized_source,
+                        paths,
+                        cancel_check=cancelled,
+                        progress=subtitle_probe_progress,
+                    )
+                except PipelineError as exc:
+                    embedded_fallback = bool(subtitle_config.get("embedded_ocr_fallback"))
+                    if exc.code not in {"SUBTITLE_NOT_FOUND", "SUBTITLE_FETCH_FAILED", "SUBTITLE_EMPTY", "PROCESS_TIMEOUT", "YTDLP_UNAVAILABLE"} or not embedded_fallback:
+                        raise
+                    if not ocr_config:
+                        raise PipelineError(
+                            "EMBEDDED_SUBTITLE_OCR_REQUIRED",
+                            "视频没有平台字幕；识别画面下方内嵌字幕需要选择 OCR 模型",
+                        ) from exc
+                    if isinstance(ocr_gateway, dict):
+                        await ensure_managed_gateway(ocr_gateway, log_dir=paths.logs)
+                    subtitle = await EmbeddedCaptionOcrSource().acquire(
+                        Path(acquisition.local_media_path),
+                        source=normalized_source,
+                        duration=float(media_info.duration or 0.0),
+                        ffmpeg_executable=ffmpeg_executable,
+                        ocr_config=ocr_config,
+                        attempt=attempt,
+                        paths=paths,
+                        cancel_check=cancelled,
+                        progress=subtitle_probe_progress,
+                        interval_seconds=float(
+                            subtitle_config.get("embedded_ocr_interval_seconds", 1.0)
+                        ),
+                    )
+                    await _release_gateway_safely(
+                        ocr_gateway,
+                        paths=paths,
+                        workspace=workspace,
+                    )
+                subtitle_path = subtitle.path
+                subtitle_language = subtitle.language
+                subtitle_provider_name = subtitle.provider
+                if subtitle.provider == "embedded-caption-ocr":
+                    subtitle_model = str(ocr_config.get("model") or subtitle_model)
+            except PipelineError as exc:
+                if exc.code not in {
+                    "SUBTITLE_NOT_FOUND",
+                    "EMBEDDED_SUBTITLE_NOT_FOUND",
+                    "SUBTITLE_FETCH_FAILED", "SUBTITLE_EMPTY", "PROCESS_TIMEOUT", "YTDLP_UNAVAILABLE",
+                }:
+                    raise
+                if not asr_config:
+                    raise PipelineError(
+                        "ASR_FALLBACK_UNAVAILABLE",
+                        "视频没有可用字幕，且处理方案未配置 ASR 模型",
+                        technical_detail=exc.technical_detail or exc.user_message,
+                    ) from exc
+                subtitle_mode = False
+                subtitle_fallback_message = "未发现可用字幕，已自动切换到处理方案中的 ASR 模型"
+                append_task_log(workspace, subtitle_fallback_message)
+
+        if subtitle_mode:
+            audio_path = Path(subtitle_path)
+            audio_info = media_info
         else:
-            audio_path, audio_info = await FfmpegProvider(
-                ffmpeg_executable, ffprobe
-            ).normalize_audio(
-                Path(acquisition.local_media_path),
-                media_info,
-                paths,
-                cancel_check=cancelled,
-                progress=tracker.progress,
+            tracker.start(
+                "AUDIO_EXTRACT",
+                message="正在提取并标准化音频",
+                input_artifacts=[acquisition.local_media_path, str(media_info_path)],
+                log_path=str(paths.logs / "ffmpeg_audio.stderr.log"),
             )
-            write_json(audio_info_path, audio_info.to_dict())
-        tracker.complete(
-            message="已生成 PCM 16kHz 单声道 WAV",
-            output_artifacts=[str(audio_path), str(audio_info_path)],
-        )
+            audio_path = paths.audio / "normalized.wav"
+            audio_info_path = paths.metadata / "audio_media_info.json"
+            audio_info = _load_media_info(audio_info_path)
+            if audio_path.is_file() and audio_info is not None:
+                tracker.progress(1.0, "复用已完成的标准化音频")
+            else:
+                audio_path, audio_info = await FfmpegProvider(
+                    ffmpeg_executable, ffprobe
+                ).normalize_audio(
+                    Path(acquisition.local_media_path),
+                    media_info,
+                    paths,
+                    cancel_check=cancelled,
+                    progress=tracker.progress,
+                )
+                write_json(audio_info_path, audio_info.to_dict())
+            tracker.complete(
+                message="已生成 PCM 16kHz 单声道 WAV",
+                output_artifacts=[str(audio_path), str(audio_info_path)],
+            )
 
-        tracker.start(
-            "AUDIO_VALIDATE",
-            message="正在验证标准化音频",
-            input_artifacts=[str(audio_path), str(audio_info_path)],
-        )
-        if (
-            not audio_path.is_file()
-            or audio_path.stat().st_size <= 44
-            or not audio_info.has_audio
-            or not audio_info.audio_streams
-            or audio_info.audio_streams[0].sample_rate != 16000
-            or audio_info.audio_streams[0].channels != 1
-        ):
-            raise PipelineError("AUDIO_EXTRACTION_FAILED", "标准化音频完整性检查失败")
-        tracker.complete(message="标准化音频有效", output_artifacts=[str(audio_path)])
+            tracker.start(
+                "AUDIO_VALIDATE",
+                message="正在验证标准化音频",
+                input_artifacts=[str(audio_path), str(audio_info_path)],
+            )
+            if (
+                not audio_path.is_file()
+                or audio_path.stat().st_size <= 44
+                or not audio_info.has_audio
+                or not audio_info.audio_streams
+                or audio_info.audio_streams[0].sample_rate != 16000
+                or audio_info.audio_streams[0].channels != 1
+            ):
+                raise PipelineError("AUDIO_EXTRACTION_FAILED", "标准化音频完整性检查失败")
+            tracker.complete(message="标准化音频有效", output_artifacts=[str(audio_path)])
 
-        asr_config = snapshot.get("asr") if isinstance(snapshot.get("asr"), dict) else {}
-        protocol = str(asr_config.get("provider") or "oneapi-openai-compatible")
-        if protocol == "oneapi-openai-compatible":
-            base_url, api_key, model = load_asr_credentials(snapshot)
+        if not admitted:
+            tracker.start("AUDIO_READY", message="音频已就绪，可复制音频；等待前一个任务释放转写资源")
+            await processing_admission.acquire(task_id, cancelled)
+            admitted = True
+            tracker.complete(message="已取得转写资源", output_artifacts=[str(audio_path)])
+
+        if subtitle_mode:
+            protocol = subtitle_provider_name
+            base_url = ""
+            api_key = ""
+            model = subtitle_model
         else:
-            asr_config, api_key = load_asr_gateway_credentials(snapshot)
-            base_url = str(asr_config["base_url"])
-            model = str(asr_config["model"])
+            protocol = str(asr_config.get("provider") or "oneapi-openai-compatible")
+            if protocol == "oneapi-openai-compatible":
+                base_url, api_key, model = load_asr_credentials(snapshot)
+            else:
+                asr_config, api_key = load_asr_gateway_credentials(snapshot)
+                base_url = str(asr_config["base_url"])
+                model = str(asr_config["model"])
         continuous_stream = bool(
             protocol == "dashscope-fun-asr-websocket" and asr_config.get("streaming")
         )
@@ -360,68 +590,90 @@ async def run_real_pipeline(task_id: int) -> None:
             "audio_chunk_seconds", get_settings().audio_chunk_seconds
         )
         chunk_seconds = None if continuous_stream else float(raw_chunk_seconds)
-        tracker.start(
-            "AUDIO_CHUNK",
-            message=("Fun-ASR 将使用单个连续音频流" if continuous_stream else "正在为长音频生成稳定分块"),
-            input_artifacts=[str(audio_path)],
+        overlap_seconds = (
+            0.0 if continuous_stream else float(asr_config.get("overlap_seconds", 5.0))
         )
-        overlap_seconds = 0.0 if continuous_stream else float(asr_config.get("overlap_seconds", 5.0))
-        if continuous_stream:
-            if audio_info.duration is None:
-                raise PipelineError("AUDIO_EXTRACTION_FAILED", "无法确定连续音频流时长")
+        if subtitle_mode:
             chunks = [
                 AudioChunk(
                     0,
                     0.0,
-                    audio_info.duration,
+                    audio_info.duration or 0.0,
                     str(audio_path),
                     provider=protocol,
                     model=model,
                     attempt=attempt,
                 )
             ]
-            write_json(
-                paths.chunks / "manifest.json",
-                {
-                    "schema_version": 2,
-                    "strategy": "continuous_stream_no_overlap",
-                    "chunk_seconds": None,
-                    "step_seconds": None,
-                    "overlap_seconds": 0.0,
-                    "chunks": [chunks[0].to_manifest_dict()],
-                },
-            )
-            tracker.progress(1.0, "连续流不重复发送音频，不创建人为重叠分块")
         else:
-            chunks = _load_chunks(
-                paths.chunks / "manifest.json",
-                expected_chunk_seconds=chunk_seconds,
-                expected_overlap_seconds=overlap_seconds,
+            tracker.start(
+                "AUDIO_CHUNK",
+                message=(
+                    "Fun-ASR 将使用单个连续音频流"
+                    if continuous_stream
+                    else "正在为长音频生成稳定分块"
+                ),
+                input_artifacts=[str(audio_path)],
             )
-            if not chunks or any(not Path(chunk.path).is_file() for chunk in chunks):
-                chunks = await AudioChunker(ffmpeg_executable).split(
-                    audio_path,
-                    audio_info.duration,
-                    paths,
-                    chunk_seconds=chunk_seconds,
-                    overlap_seconds=overlap_seconds,
-                    provider=protocol,
-                    model=model,
-                    attempt=attempt,
-                    cancel_check=cancelled,
-                    progress=tracker.progress,
+            if continuous_stream:
+                if audio_info.duration is None:
+                    raise PipelineError("AUDIO_EXTRACTION_FAILED", "无法确定连续音频流时长")
+                chunks = [
+                    AudioChunk(
+                        0,
+                        0.0,
+                        audio_info.duration,
+                        str(audio_path),
+                        provider=protocol,
+                        model=model,
+                        attempt=attempt,
+                    )
+                ]
+                write_json(
+                    paths.chunks / "manifest.json",
+                    {
+                        "schema_version": 2,
+                        "strategy": "continuous_stream_no_overlap",
+                        "chunk_seconds": None,
+                        "step_seconds": None,
+                        "overlap_seconds": 0.0,
+                        "chunks": [chunks[0].to_manifest_dict()],
+                    },
                 )
+                tracker.progress(1.0, "连续流不重复发送音频，不创建人为重叠分块")
             else:
-                tracker.progress(1.0, f"复用 {len(chunks)} 个现有音频分块")
-        tracker.complete(
-            message=f"音频分块完成，共 {len(chunks)} 块",
-            output_artifacts=[chunk.path for chunk in chunks] + [str(paths.chunks / "manifest.json")],
-        )
+                chunks = _load_chunks(
+                    paths.chunks / "manifest.json",
+                    expected_chunk_seconds=chunk_seconds,
+                    expected_overlap_seconds=overlap_seconds,
+                )
+                if not chunks or any(not Path(chunk.path).is_file() for chunk in chunks):
+                    chunks = await AudioChunker(ffmpeg_executable).split(
+                        audio_path,
+                        audio_info.duration,
+                        paths,
+                        chunk_seconds=chunk_seconds,
+                        overlap_seconds=overlap_seconds,
+                        provider=protocol,
+                        model=model,
+                        attempt=attempt,
+                        cancel_check=cancelled,
+                        progress=tracker.progress,
+                    )
+                else:
+                    tracker.progress(1.0, f"复用 {len(chunks)} 个现有音频分块")
+            tracker.complete(
+                message=f"音频分块完成，共 {len(chunks)} 块",
+                output_artifacts=[chunk.path for chunk in chunks]
+                + [str(paths.chunks / "manifest.json")],
+            )
 
         attempt_raw = paths.asr_raw / f"attempt_{attempt:04d}"
         attempt_paths = replace(paths, asr_raw=attempt_raw)
         attempt_paths.asr_raw.mkdir(parents=True, exist_ok=True)
-        provider: OpenAICompatibleAsrProvider | UnifiedAsrGatewayProvider | DashScopeFunAsrProvider
+        provider: (
+            OpenAICompatibleAsrProvider | UnifiedAsrGatewayProvider | DashScopeFunAsrProvider | None
+        ) = None
         provider_options = {
             "base_url": base_url,
             "api_key": api_key,
@@ -430,7 +682,9 @@ async def run_real_pipeline(task_id: int) -> None:
             ),
             "max_retries": int(asr_config.get("max_retries", get_settings().asr_max_retries)),
         }
-        if protocol == "dashscope-fun-asr-websocket":
+        if subtitle_mode:
+            provider_name = "imported-subtitle"
+        elif protocol == "dashscope-fun-asr-websocket":
             provider = DashScopeFunAsrProvider(
                 **provider_options,
                 workspace_id=os.getenv("DASHSCOPE_WORKSPACE_ID", "").strip() or None,
@@ -441,17 +695,60 @@ async def run_real_pipeline(task_id: int) -> None:
             provider = OpenAICompatibleAsrProvider(**provider_options)
         else:
             raise PipelineError("ASR_CONFIG_INVALID", f"不支持的 ASR Gateway 协议：{protocol}")
+        if provider is not None:
+            provider_name = provider.name
         tracker.start(
-            "ASR_TRANSCRIBE",
-            message="正在提交 ASR 分块",
-            input_artifacts=[chunk.path for chunk in chunks],
+            "SUBTITLE_IMPORT" if subtitle_mode else "ASR_TRANSCRIBE",
+            message=(
+                "正在从视频链接抓取字幕并跳过 ASR"
+                if subtitle_mode
+                else subtitle_fallback_message or "正在提交 ASR 分块"
+            ),
+            input_artifacts=(
+                (
+                    [subtitle_path]
+                    if subtitle_path
+                    else [str(source_record), acquisition.metadata_path]
+                )
+                if subtitle_mode
+                else [chunk.path for chunk in chunks]
+            ),
         )
+        if not subtitle_mode and isinstance(asr_gateway, dict):
+            started = await ensure_managed_gateway(asr_gateway, log_dir=paths.logs)
+            if started:
+                tracker.progress(None, "本地 ASR Gateway 已按需启动，正在提交音频")
         results: list[AsrResult] = []
+        quality_diagnostics: list[dict] = []
         language = asr_config.get("language")
         timestamp_granularity = (
-            snapshot.get("gateways", {}).get("asr", {}).get("timestamp_strategy") or "segment"
-        )
-        if continuous_stream:
+            asr_gateway.get("timestamp_strategy") if isinstance(asr_gateway, dict) else None
+        ) or "segment"
+        if subtitle_mode:
+            provider_name = subtitle_provider_name
+            imported = import_subtitle(
+                Path(subtitle_path),
+                language=subtitle_language or "zh",
+                provider=provider_name,
+            )
+            results.append(
+                AsrResult(
+                    provider=provider_name,
+                    model=model,
+                    language=subtitle_language or "zh",
+                    chunk_index=0,
+                    raw_response_reference=subtitle_path,
+                    segments=tuple(imported.segments),
+                )
+            )
+            tracker.progress(
+                1.0,
+                f"已从链接抓取并导入 {len(imported.segments)} 条字幕"
+                f"（{subtitle_language or '未知语言'} / "
+                f"{imported.subtitle_format.upper()} / {imported.encoding}）",
+            )
+        elif continuous_stream:
+            assert provider is not None
             reusable = _find_reusable_asr_response(paths.asr_raw, attempt, 0)
             request = AsrRequest(chunks[0], model, language, timestamp_granularity)
             if reusable:
@@ -470,8 +767,9 @@ async def run_real_pipeline(task_id: int) -> None:
             _update_chunk_manifest_status(paths.chunks / "manifest.json", 0, "COMPLETED", attempt)
             tracker.progress(1.0, "Fun-ASR 连续音频流识别完成")
         for index, chunk in enumerate(chunks):
-            if continuous_stream:
+            if subtitle_mode or continuous_stream:
                 break
+            assert provider is not None
             request = AsrRequest(
                 chunk=chunk,
                 model=model,
@@ -485,29 +783,55 @@ async def run_real_pipeline(task_id: int) -> None:
                 result = normalize_asr_response(payload or {}, request, reusable, provider.name)
             else:
                 result = await provider.transcribe(request, attempt_paths, cancel_check=cancelled)
+            result, quality = await recover_repetition(
+                result, request, attempt_paths, provider, ffmpeg_executable,
+                cancelled, tracker.progress,
+            )
+            quality_diagnostics.extend(quality)
             results.append(result)
             _update_chunk_manifest_status(
                 paths.chunks / "manifest.json", chunk.index, "COMPLETED", attempt
             )
             tracker.progress(
-                (index + 1) / len(chunks), f"ASR 已完成 {index + 1}/{len(chunks)} 个分块"
+                (index + 1) / len(chunks),
+                f"ASR 已完成 {index + 1}/{len(chunks)} 个分块"
+                + ("（未检测到语音）" if not result.segments else ""),
             )
+        no_speech_chunks = sum(not item.segments for item in results)
         tracker.complete(
-            message=f"ASR 分块识别完成，共 {len(results)} 块",
+            message=(
+                f"链接字幕导入完成，共 {len(results[0].segments)} 条"
+                if subtitle_mode
+                else f"ASR 分块识别完成，共 {len(results)} 块"
+                + (f"，其中 {no_speech_chunks} 块未检测到语音" if no_speech_chunks else "")
+            ),
             output_artifacts=[result.raw_response_reference for result in results],
         )
+        await _release_gateway_safely(
+            asr_gateway,
+            paths=paths,
+            workspace=workspace,
+        )
 
-        tracker.start("ASR_COMBINE", message="正在映射全局时间轴并合并结果")
-        merge_diagnostics: list[dict] = []
+        tracker.start(
+            "SUBTITLE_NORMALIZE" if subtitle_mode else "ASR_COMBINE",
+            message=(
+                "正在规范化字幕并保留原始时间轴"
+                if subtitle_mode
+                else "正在映射全局时间轴并合并结果"
+            ),
+        )
+        merge_diagnostics: list[dict] = list(quality_diagnostics)
         segments = combine_asr_results(results, chunks, diagnostics=merge_diagnostics)
         artifacts = save_transcript_artifacts(
             paths,
             segments,
-            provider=provider.name,
+            provider=provider_name,
             model=model,
             language=next((item.language for item in results if item.language), None),
             chunk_count=len(chunks),
             merge_diagnostics=merge_diagnostics,
+            provider_responses=[item.raw_response_reference for item in results],
         )
         tracker.complete(
             message=f"已按原媒体时间轴合并 {len(segments)} 个分段",
@@ -515,12 +839,13 @@ async def run_real_pipeline(task_id: int) -> None:
         )
 
         tracker.start(
-            "ASR_VALIDATE",
-            message="正在验证标准化转写结果",
+            "SUBTITLE_VALIDATE" if subtitle_mode else "ASR_VALIDATE",
+            message=(
+                "正在验证导入字幕的正文与时间顺序" if subtitle_mode else "正在验证标准化转写结果"
+            ),
             input_artifacts=[artifacts["normalized"]],
         )
         validate_segments(segments)
-        processing = snapshot.get("processing", {})
         ocr_enabled = bool(snapshot.get("processing", {}).get("ocr_enabled"))
         if not ocr_enabled:
             tracker.complete(
@@ -555,9 +880,7 @@ async def run_real_pipeline(task_id: int) -> None:
                 {"events": []},
                 {"frames": []},
                 media_duration=media_info.duration,
-                association_window_seconds=float(
-                    processing.get("fusion_window_seconds", 8.0)
-                ),
+                association_window_seconds=float(processing.get("fusion_window_seconds", 8.0)),
             )
             fusion_artifacts = save_fusion_artifacts(
                 paths,
@@ -609,26 +932,18 @@ async def run_real_pipeline(task_id: int) -> None:
             )
         frame_config = FrameExtractionConfig(
             strategy=str(processing.get("frame_sampling_strategy") or "hybrid"),
-            interval_seconds=float(
-                processing.get("ocr_frame_interval_seconds", 15.0)
-            ),
-            scene_change_threshold=float(
-                processing.get("scene_change_threshold", 0.35)
-            ),
+            interval_seconds=float(processing.get("ocr_frame_interval_seconds", 15.0)),
+            scene_change_threshold=float(processing.get("scene_change_threshold", 0.35)),
             scene_min_gap_seconds=float(processing.get("scene_min_gap_seconds", 1.5)),
             max_candidate_frames=int(processing.get("max_candidate_frames", 240)),
-            normalized_max_width=int(
-                processing.get("frame_normalized_max_width", 1600)
-            ),
+            normalized_max_width=int(processing.get("frame_normalized_max_width", 1600)),
             perceptual_hamming_threshold=int(
                 processing.get("frame_similarity_hamming_threshold", 4)
             ),
             visual_difference_threshold=float(
                 processing.get("frame_similarity_difference_threshold", 0.025)
             ),
-            transition_burst_seconds=float(
-                processing.get("frame_transition_burst_seconds", 3.0)
-            ),
+            transition_burst_seconds=float(processing.get("frame_transition_burst_seconds", 3.0)),
         )
         tracker.start(
             "FRAME_EXTRACT",
@@ -671,21 +986,20 @@ async def run_real_pipeline(task_id: int) -> None:
         tracker.complete(
             message=f"画面去重完成：保留 {len(frame_result.kept)}，"
             f"丢弃 {frame_result.dropped_count}",
-            output_artifacts=[
-                item.normalized_image_path for item in frame_result.kept
-            ],
+            output_artifacts=[item.normalized_image_path for item in frame_result.kept],
         )
 
-        ocr_config = snapshot.get("ocr")
-        if not isinstance(ocr_config, dict):
+        if not ocr_config:
             raise PipelineError("OCR_CONFIG_INVALID", "任务快照中没有 OCR Gateway 配置")
         tracker.start(
             "OCR_RECOGNIZE",
             message="正在通过独立 OCR Gateway 识别保留帧",
-            input_artifacts=[
-                item.normalized_image_path for item in frame_result.kept
-            ],
+            input_artifacts=[item.normalized_image_path for item in frame_result.kept],
         )
+        if isinstance(ocr_gateway, dict):
+            started = await ensure_managed_gateway(ocr_gateway, log_dir=paths.logs)
+            if started:
+                tracker.progress(None, "本地 OCR Gateway 已按需启动，正在识别画面")
         ocr_run = await recognize_retained_frames(
             frame_result,
             ocr_config=ocr_config,
@@ -694,9 +1008,13 @@ async def run_real_pipeline(task_id: int) -> None:
             cancel_check=cancelled,
             progress=tracker.progress,
         )
+        await _release_gateway_safely(
+            ocr_gateway,
+            paths=paths,
+            workspace=workspace,
+        )
         tracker.complete(
-            message=f"OCR 完成 {ocr_run.processed_count} 帧，"
-            f"复用 {ocr_run.reused_count} 帧",
+            message=f"OCR 完成 {ocr_run.processed_count} 帧，复用 {ocr_run.reused_count} 帧",
             output_artifacts=[
                 ocr_run.raw_index_path,
                 ocr_run.normalized_path,
@@ -712,15 +1030,11 @@ async def run_real_pipeline(task_id: int) -> None:
         ocr_timeline = build_ocr_timeline(
             ocr_run.results,
             frame_result,
-            text_similarity_threshold=float(
-                processing.get("ocr_text_similarity_threshold", 0.88)
-            ),
+            text_similarity_threshold=float(processing.get("ocr_text_similarity_threshold", 0.88)),
             incremental_similarity_threshold=float(
                 processing.get("ocr_incremental_similarity_threshold", 0.55)
             ),
-            max_event_gap_seconds=float(
-                processing.get("ocr_event_gap_seconds", 20.0)
-            ),
+            max_event_gap_seconds=float(processing.get("ocr_event_gap_seconds", 20.0)),
         )
         ocr_timeline_path = save_ocr_timeline(paths, ocr_timeline)
         with SessionLocal() as session:
@@ -753,9 +1067,7 @@ async def run_real_pipeline(task_id: int) -> None:
             ocr_timeline,
             frame_payload,
             media_duration=media_info.duration,
-            association_window_seconds=float(
-                processing.get("fusion_window_seconds", 8.0)
-            ),
+            association_window_seconds=float(processing.get("fusion_window_seconds", 8.0)),
         )
         fusion_artifacts = save_fusion_artifacts(
             paths,
@@ -805,8 +1117,10 @@ async def run_real_pipeline(task_id: int) -> None:
     except PipelineError as exc:
         if not exc.stage:
             exc.stage = tracker.stage
-        status = "CANCELLED" if exc.code == "PROCESS_CANCELLED" else (
-            "INTERRUPTED" if exc.code == "backend_shutdown" else "FAILED"
+        status = (
+            "CANCELLED"
+            if exc.code == "PROCESS_CANCELLED"
+            else ("INTERRUPTED" if exc.code == "backend_shutdown" else "FAILED")
         )
         tracker.fail(exc, status)
         _finish_task(task_id, status, exc)
@@ -830,6 +1144,33 @@ async def run_real_pipeline(task_id: int) -> None:
         )
         tracker.fail(failure, "FAILED")
         _finish_task(task_id, "FAILED", failure)
+    finally:
+        if admitted:
+            try:
+                await _release_gateway_safely(cleanup_asr_gateway, paths=paths, workspace=workspace)
+                await _release_gateway_safely(cleanup_ocr_gateway, paths=paths, workspace=workspace)
+            finally:
+                processing_admission.release()
+
+
+
+async def _release_gateway_safely(
+    gateway: dict | None,
+    *,
+    paths: WorkspacePaths,
+    workspace: Path,
+) -> None:
+    try:
+        released = await release_managed_gateway(gateway, log_dir=paths.logs)
+    except PipelineError as exc:
+        append_task_log(
+            workspace,
+            f"Managed Gateway cleanup warning [{exc.code}]: {exc.user_message}; "
+            f"technical={exc.technical_detail or '-'}",
+        )
+        return
+    if released:
+        append_task_log(workspace, "Managed Gateway process stopped; model memory released")
 
 
 async def _run_document_pipeline(
@@ -877,16 +1218,8 @@ async def _run_document_pipeline(
         artifact_references={
             "transcript": transcript_artifacts["normalized"],
             "fusion_timeline": fusion_artifacts["timeline"],
-            **(
-                {"frames_manifest": frames_manifest_path}
-                if frames_manifest_path
-                else {}
-            ),
-            **(
-                {"ocr_timeline": ocr_timeline_path}
-                if ocr_timeline_path
-                else {}
-            ),
+            **({"frames_manifest": frames_manifest_path} if frames_manifest_path else {}),
+            **({"ocr_timeline": ocr_timeline_path} if ocr_timeline_path else {}),
         },
         document_id=f"task-{task_id:06d}-attempt-{attempt:04d}",
         image_min_gap_seconds=float(processing.get("image_min_gap_seconds", 8.0)),
@@ -894,8 +1227,7 @@ async def _run_document_pipeline(
     write_json(original_document_path, document.model_dump(mode="json"))
     tracker.progress(
         1.0,
-        f"结构化文档包含 {len(document.sections)} 节、"
-        f"{len(document.all_blocks())} 个块",
+        f"结构化文档包含 {len(document.sections)} 节、{len(document.all_blocks())} 个块",
     )
     tracker.complete(
         message="结构化文档原始版本已生成，所有块均保留来源引用",
@@ -904,7 +1236,7 @@ async def _run_document_pipeline(
 
     tracker.start(
         "TEXT_EDIT",
-        message="正在执行受约束的忠实文本整理或无模型回退",
+        message="正在把完整正文作为单次请求执行忠实文章整理",
         input_artifacts=[str(original_document_path)],
     )
     text_config = snapshot.get("text_processing")
@@ -915,44 +1247,55 @@ async def _run_document_pipeline(
     if edit_enabled:
         base_url = str(text_config.get("base_url") or "").strip()
         model = str(text_config.get("model") or "").strip()
-        secret_env_name = str(
-            text_config.get("secret_env_name") or "ONEAPI_API_KEY"
-        )
-        api_key = os.getenv(secret_env_name, "").strip()
+        secret_env_name = str(text_config.get("secret_env_name") or "")
+        model_config_id = text_config.get("model_config_id")
+        try:
+            api_key = (
+                resolve_model_credential(int(model_config_id))
+                if model_config_id is not None
+                else os.getenv(secret_env_name or "ONEAPI_API_KEY", "").strip()
+            )
+        except (SecretStorageError, TypeError, ValueError) as exc:
+            raise PipelineError(
+                "TEXT_GATEWAY_SECRET_MISSING",
+                "无法读取 LLM 密钥",
+                technical_detail=str(exc),
+            ) from exc
         if not base_url or not model:
             raise PipelineError(
                 "TEXT_CONFIG_INVALID",
                 "任务快照启用了文本整理，但缺少 Gateway Base URL 或模型",
             )
-        if not api_key:
+        if text_config.get("secret_source") != "NONE" and not api_key:
             raise PipelineError(
                 "TEXT_GATEWAY_SECRET_MISSING",
-                f"缺少文本整理 Gateway 密钥环境变量 {secret_env_name}",
+                (
+                    f"缺少 LLM 密钥环境变量 {secret_env_name}"
+                    if secret_env_name
+                    else "LLM 密钥未配置"
+                ),
             )
-        edit_raw_path = (
-            paths.output
-            / "text_edit"
-            / f"attempt_{attempt:04d}_provider_raw.json"
+        edit_raw_path = paths.output / "text_edit" / f"attempt_{attempt:04d}_provider_raw.json"
+        text_timeout_seconds = max(
+            get_settings().text_request_timeout_seconds,
+            float(text_config.get("timeout_seconds") or 0.0),
         )
         document, edit_run = await FaithfulTextEditor(
             base_url=base_url,
             api_key=api_key,
             model=model,
+            timeout_seconds=text_timeout_seconds,
         ).edit(
             document,
             raw_path=edit_raw_path,
-            minimum_length_ratio=float(
-                text_config.get("minimum_length_ratio", 0.72)
-            ),
-            formula_symbol_ratio=float(
-                text_config.get("formula_symbol_ratio", 0.8)
-            ),
+            minimum_length_ratio=float(text_config.get("minimum_length_ratio", 0.72)),
+            formula_symbol_ratio=float(text_config.get("formula_symbol_ratio", 0.8)),
             cancel_check=cancelled,
         )
-        edit_run["provider"] = str(
-            text_config.get("provider") or "oneapi-openai-compatible"
-        )
+        edit_run["provider"] = str(text_config.get("provider") or "oneapi-openai-compatible")
+        edit_run["timeout_seconds"] = text_timeout_seconds
     else:
+        document = build_full_article_document(document)
         edit_run = {
             "schema_version": 1,
             "provider": "none",
@@ -966,18 +1309,15 @@ async def _run_document_pipeline(
             "accepted": True,
             "fallback_used": False,
             "reason": "no_model_mode",
+            "mode": "full_article",
             "elapsed_seconds": 0.0,
             "block_runs": [],
         }
     document.edit_metadata = edit_run
     report = validate_document_faithfulness(
         document,
-        minimum_length_ratio=float(
-            text_config.get("minimum_length_ratio", 0.72)
-        ),
-        formula_symbol_ratio=float(
-            text_config.get("formula_symbol_ratio", 0.8)
-        ),
+        minimum_length_ratio=float(text_config.get("minimum_length_ratio", 0.72)),
+        formula_symbol_ratio=float(text_config.get("formula_symbol_ratio", 0.8)),
     )
     if not report.accepted:
         raise PipelineError(
@@ -988,9 +1328,7 @@ async def _run_document_pipeline(
             ),
         )
     document_path = paths.output / "document.json"
-    validation_path = paths.output / "text_edit" / (
-        f"attempt_{attempt:04d}_validation.json"
-    )
+    validation_path = paths.output / "text_edit" / (f"attempt_{attempt:04d}_validation.json")
     write_json(document_path, document.model_dump(mode="json"))
     write_json(
         validation_path,
@@ -1020,16 +1358,15 @@ async def _run_document_pipeline(
         edit_raw_path,
         edit_run,
     )
+    if edit_enabled and edit_run.get("accepted"):
+        edit_message = "完整文章整理已通过忠实性校验"
+    elif edit_enabled:
+        reason = str(edit_run.get("reason") or "未知原因").strip()
+        edit_message = f"完整文章整理未被接受，已回退到连续原文文章：{reason[:300]}"
+    else:
+        edit_message = "未启用文本模型，已生成连续原文文章"
     tracker.complete(
-        message=(
-            "文本整理已通过忠实性校验"
-            if edit_enabled and edit_run.get("accepted")
-            else (
-                "文本模型响应被拒绝，已忠实回退到未整理文本"
-                if edit_enabled
-                else "未启用文本模型，已使用确定性忠实整理"
-            )
-        ),
+        message=edit_message,
         output_artifacts=[
             str(document_path),
             str(validation_path),
@@ -1037,6 +1374,90 @@ async def _run_document_pipeline(
         ],
     )
 
+    if not edit_enabled and processing.get("manual_review_enabled"):
+        from app.services.manual_review import review_seed_path
+
+        seed_path = review_seed_path(paths.root, attempt)
+        write_json(seed_path, {
+            "document": document.model_dump(mode="json"),
+            "context": {
+                "transcript_artifacts": transcript_artifacts,
+                "fusion_payload": fusion_payload, "fusion_artifacts": fusion_artifacts,
+                "frames_manifest_path": frames_manifest_path,
+                "ocr_timeline_path": ocr_timeline_path,
+            },
+        })
+        tracker.start("MANUAL_REVIEW", message="初稿已生成，等待用户确认或提交修改稿",
+                      input_artifacts=[str(seed_path)])
+        with SessionLocal() as session:
+            result = session.execute(update(Task).where(
+                Task.id == task_id, Task.status == "PROCESSING", Task.cancel_requested.is_(False),
+                Task.deleted_at.is_(None), Task.attempt == attempt,
+            ).values(status="WAITING_REVIEW", current_stage="MANUAL_REVIEW", progress=94,
+                     transcript_path=transcript_artifacts["normalized"],
+                     fusion_timeline_path=fusion_artifacts["timeline"],
+                     frames_manifest_path=frames_manifest_path, ocr_timeline_path=ocr_timeline_path))
+            if result.rowcount != 1:
+                session.rollback()
+                raise PipelineCancelled(stage="MANUAL_REVIEW")
+            run = _current_stage(session, task_id, attempt, "MANUAL_REVIEW")
+            if run:
+                run.status = "WAITING_REVIEW"
+            session.commit()
+        write_artifact_index(paths.root)
+        tracker._write_state("待人工校对：可提交修改稿，或直接使用初稿完成")
+        return
+
+    await _render_document_outputs(
+        task_id, attempt=attempt, tracker=tracker, paths=paths, snapshot=snapshot,
+        document=document, document_path=document_path,
+        transcript_artifacts=transcript_artifacts, fusion_payload=fusion_payload,
+        fusion_artifacts=fusion_artifacts, cancelled=cancelled,
+        frames_manifest_path=frames_manifest_path, ocr_timeline_path=ocr_timeline_path,
+    )
+
+
+async def _resume_manual_review(task_id, attempt, tracker, paths, snapshot, submission, cancelled):
+    from app.services.tasks import TaskService
+
+    with SessionLocal() as session:
+        relative = Path(submission).resolve().relative_to(paths.root.resolve()).as_posix()
+        submission_path = TaskService(session).artifact_path(task_id, relative)
+    payload = read_json(submission_path)
+    if not isinstance(payload, dict):
+        raise PipelineError("MANUAL_REVIEW_INVALID", "已确认稿件缺失或损坏")
+    document = Document.model_validate(payload["document"])
+    # A retry may use a new attempt; its immutable decision still references the same source.
+    with SessionLocal() as session:
+        run = _current_stage(session, task_id, attempt, "MANUAL_REVIEW")
+        if run is None:
+            run = TaskStageRun(task_id=task_id, attempt=attempt, stage="MANUAL_REVIEW",
+                               started_at=utcnow(), input_artifacts=[str(submission_path)])
+            session.add(run)
+        run.status = "COMPLETED"
+        run.progress = 100
+        run.finished_at = utcnow()
+        run.message = "用户已确认稿件，继续导出，无需重新转写"
+        session.commit()
+    document_path = paths.output / "document.json"
+    validation_path = paths.output / "text_edit" / f"attempt_{attempt:04d}_validation.json"
+    write_json(document_path, document.model_dump(mode="json"))
+    write_json(validation_path, {"edit_run": document.edit_metadata,
+                                 "faithfulness": payload["faithfulness"]})
+    _record_document_and_edit(task_id, attempt, document, document_path,
+                              validation_path, submission_path, document.edit_metadata)
+    await _render_document_outputs(
+        task_id, attempt=attempt, tracker=tracker, paths=paths, snapshot=snapshot,
+        document=document, document_path=document_path, cancelled=cancelled,
+        **payload["context"],
+    )
+
+
+async def _render_document_outputs(
+    task_id, *, attempt, tracker, paths, snapshot, document, document_path,
+    transcript_artifacts, fusion_payload, fusion_artifacts, cancelled,
+    frames_manifest_path=None, ocr_timeline_path=None,
+):
     source_sidecar = {
         "schema_version": 1,
         "document_id": document.document_id,
@@ -1053,13 +1474,11 @@ async def _run_document_pipeline(
     additional_files: dict[str, Path] = {}
     export_snapshot = _export_snapshot(snapshot)
     if export_snapshot.copy_transcript:
-        additional_files["transcript.normalized.json"] = Path(
-            transcript_artifacts["normalized"]
-        )
+        additional_files["transcript.normalized.json"] = Path(transcript_artifacts["normalized"])
 
     tracker.start(
         "MARKDOWN_RENDER",
-        message="正在渲染工作区 Markdown 并复制相对路径附件",
+        message="正在生成工作区 Markdown 和 Word 并复制附件",
         input_artifacts=[str(document_path)],
     )
     workspace_config = export_snapshot.model_copy(
@@ -1092,26 +1511,23 @@ async def _run_document_pipeline(
             task.markdown_path = workspace_result.markdown_path
             session.commit()
     tracker.complete(
-        message=f"工作区 Markdown 已生成，包含 {workspace_result.image_count} 张图片",
+        message=f"工作区 Markdown 和 Word 已生成，包含 {workspace_result.image_count} 张图片",
         output_artifacts=[
             workspace_result.markdown_path,
+            workspace_result.word_path,
             *(
                 [workspace_result.attachment_directory]
                 if workspace_result.attachment_directory
                 else []
             ),
-            *(
-                [workspace_result.data_directory]
-                if workspace_result.data_directory
-                else []
-            ),
+            *([workspace_result.data_directory] if workspace_result.data_directory else []),
         ],
     )
 
     tracker.start(
         "OBSIDIAN_EXPORT",
-        message="正在原子导出 Markdown、附件和追溯 sidecar 到 Obsidian Inbox",
-        input_artifacts=[workspace_result.markdown_path],
+        message="正在原子导出 Markdown、Word、附件和追溯 sidecar",
+        input_artifacts=[workspace_result.markdown_path, workspace_result.word_path],
     )
     try:
         export_result = export_document_bundle(
@@ -1146,21 +1562,14 @@ async def _run_document_pipeline(
             session.commit()
     tracker.complete(
         message=(
-            f"Obsidian 导出完成：图片 {export_result.image_count}，"
+            f"Markdown 和 Word 导出完成：图片 {export_result.image_count}，"
             f"sidecar/原始产物 {export_result.sidecar_count}"
         ),
         output_artifacts=[
             export_result.markdown_path,
-            *(
-                [export_result.attachment_directory]
-                if export_result.attachment_directory
-                else []
-            ),
-            *(
-                [export_result.data_directory]
-                if export_result.data_directory
-                else []
-            ),
+            export_result.word_path,
+            *([export_result.attachment_directory] if export_result.attachment_directory else []),
+            *([export_result.data_directory] if export_result.data_directory else []),
         ],
     )
 
@@ -1171,6 +1580,8 @@ async def _run_document_pipeline(
             document_path.as_posix(),
             workspace_result.markdown_path,
             export_result.markdown_path,
+            workspace_result.word_path,
+            export_result.word_path,
         ],
     )
     artifact_index = write_artifact_index(paths.root)
@@ -1216,34 +1627,28 @@ def _record_document_and_edit(
     edit_run: dict,
 ) -> None:
     with SessionLocal() as session:
-        session.add(
-            DocumentArtifact(
-                task_id=task_id,
-                attempt=attempt,
-                schema_version=document.schema_version,
-                document_path=str(document_path),
-                block_count=len(document.all_blocks()),
-                source_reference_count=len(document.source_ids()),
-            )
-        )
-        session.add(
-            TextEditRun(
-                task_id=task_id,
-                attempt=attempt,
-                provider=str(edit_run.get("provider") or "none"),
-                model=(
-                    str(edit_run["model"])
-                    if edit_run.get("model") is not None
-                    else None
-                ),
-                prompt_version=str(edit_run.get("prompt_version") or PROMPT_VERSION),
-                accepted=bool(edit_run.get("accepted")),
-                fallback_used=bool(edit_run.get("fallback_used")),
-                raw_response_path=str(edit_raw_path) if edit_raw_path else None,
-                validation_path=str(validation_path),
-                elapsed_seconds=float(edit_run.get("elapsed_seconds") or 0.0),
-            )
-        )
+        artifact = session.scalar(select(DocumentArtifact).where(
+            DocumentArtifact.task_id == task_id, DocumentArtifact.attempt == attempt))
+        if artifact is None:
+            artifact = DocumentArtifact(task_id=task_id, attempt=attempt)
+            session.add(artifact)
+        artifact.schema_version = document.schema_version
+        artifact.document_path = str(document_path)
+        artifact.block_count = len(document.all_blocks())
+        artifact.source_reference_count = len(document.source_ids())
+        edit = session.scalar(select(TextEditRun).where(
+            TextEditRun.task_id == task_id, TextEditRun.attempt == attempt))
+        if edit is None:
+            edit = TextEditRun(task_id=task_id, attempt=attempt)
+            session.add(edit)
+        edit.provider = str(edit_run.get("provider") or "none")
+        edit.model = str(edit_run["model"]) if edit_run.get("model") is not None else None
+        edit.prompt_version = str(edit_run.get("prompt_version") or PROMPT_VERSION)
+        edit.accepted = bool(edit_run.get("accepted"))
+        edit.fallback_used = bool(edit_run.get("fallback_used"))
+        edit.raw_response_path = str(edit_raw_path) if edit_raw_path else None
+        edit.validation_path = str(validation_path)
+        edit.elapsed_seconds = float(edit_run.get("elapsed_seconds") or 0.0)
         task = session.get(Task, task_id)
         if task:
             task.document_path = str(document_path)
@@ -1268,11 +1673,10 @@ def _record_export(
                 target_type=target_type,
                 status=status,
                 markdown_path=result.markdown_path if result else None,
-                attachment_directory=(
-                    result.attachment_directory if result else None
-                ),
+                attachment_directory=(result.attachment_directory if result else None),
                 data_directory=result.data_directory if result else None,
-                config_json=config.model_dump(mode="json"),
+                config_json={**config.model_dump(mode="json"),
+                             **({"word_path": result.word_path} if result else {})},
                 image_count=result.image_count if result else 0,
                 sidecar_count=result.sidecar_count if result else 0,
                 error_message=error_message,
@@ -1293,9 +1697,7 @@ def _validate_rendered_markdown(path: Path, document: Document) -> None:
     if not markdown.startswith("---\n") or "\n---\n" not in markdown[4:]:
         raise PipelineError("MARKDOWN_INVALID", "Markdown YAML frontmatter 不完整")
     transcript_text = [
-        block.display_text
-        for block in document.all_blocks()
-        if block.block_type == "transcript"
+        block.display_text for block in document.all_blocks() if block.block_type == "transcript"
     ]
     if not transcript_text or not all(text in markdown for text in transcript_text):
         raise PipelineError("MARKDOWN_TRANSCRIPT_LOST", "Markdown 未完整保留转写正文")
@@ -1331,7 +1733,9 @@ def _complete_task(
     with SessionLocal() as session:
         result = session.execute(
             update(Task)
-            .where(Task.id == task_id, Task.status == "PROCESSING", Task.cancel_requested.is_(False))
+            .where(
+                Task.id == task_id, Task.status == "PROCESSING", Task.cancel_requested.is_(False)
+            )
             .values(
                 status="COMPLETED",
                 current_stage="COMPLETED",
@@ -1426,13 +1830,15 @@ def _load_chunks(
     payload = read_json(path)
     if not payload or not isinstance(payload.get("chunks"), list):
         return []
-    if expected_chunk_seconds is not None and abs(
-        float(payload.get("chunk_seconds", -1)) - expected_chunk_seconds
-    ) > 0.001:
+    if (
+        expected_chunk_seconds is not None
+        and abs(float(payload.get("chunk_seconds", -1)) - expected_chunk_seconds) > 0.001
+    ):
         return []
-    if expected_overlap_seconds is not None and abs(
-        float(payload.get("overlap_seconds", -1)) - expected_overlap_seconds
-    ) > 0.001:
+    if (
+        expected_overlap_seconds is not None
+        and abs(float(payload.get("overlap_seconds", -1)) - expected_overlap_seconds) > 0.001
+    ):
         return []
     try:
         chunks: list[AudioChunk] = []

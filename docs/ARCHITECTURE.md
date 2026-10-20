@@ -36,6 +36,7 @@ Pipeline dispatcher
          ├── FfmpegProvider
          ├── AudioChunker
          ├── StructuredOverlapMerger
+         ├── SubtitleImporter ── SRT / VTT / ASS / SSA / TXT
          ├── DashScopeFunAsrProvider ── DashScope WebSocket
          ├── UnifiedAsrGatewayProvider
          │      ├── FireRedASR2-AED :8101
@@ -61,7 +62,7 @@ Windows launcher
    ├── Alembic upgrade
    ├── 端口和依赖检查
    ├── FastAPI + 已构建 React 静态资源
-   ├── 系统浏览器
+   ├── Edge 独立应用窗口
    └── 只清理由本进程启动的子进程
 
 OneAPI ── 仅可选的受约束文本轻度编辑
@@ -71,12 +72,14 @@ OneAPI ── 仅可选的受约束文本轻度编辑
 
 ## 3. 输入与媒体来源
 
-`MediaSourceResolver` 是唯一输入分类边界：
+`MediaSourceResolver` 是媒体输入分类边界；`SubtitleImporter` 是可选文本来源边界：
 
 - URL 只允许 HTTP/HTTPS，拒绝内嵌用户名和密码，交给 yt-dlp。
 - 本地文件必须是存在的绝对文件路径，拒绝目录和 NUL 字符。
 - 本地文件采用只读引用策略，工作区记录规范化路径和大小，不复制原文件。
 - URL 下载到 `00_source/media`。
+- 字幕模式仅接受视频网页 URL；Worker 使用 yt-dlp 抓取人工/自动字幕，按中文优先选择，写入 `00_source/subtitles` 并记录 SHA-256。重试会复用已验证的抓取清单和字幕文件。
+- 字幕模式跳过音频提取、分块与 ASR Provider，解析结果仍进入统一的 normalized transcript、融合和 Document IR。
 - 扩展名仅作界面提示；最终媒体有效性、音视频流和容器以 ffprobe 为准。
 
 统一 `MediaAcquisitionResult` 包含 `source_type`、`original_input`、`local_media_path`、`title`、`duration`、`container`、`has_audio`、`has_video`、`metadata_path` 和 `provider`。
@@ -195,13 +198,17 @@ OCR/帧事件按可配置时间窗口关联附近 ASR segment，所有事件按�
 
 `Document`、`DocumentSection`、`DocumentBlock`、`TimestampAnchor` 和 `SourceReference` 构成版本化中间表示。块类型包括 transcript、visual_text、image、code 和 quote。每个块至少有一个来源引用，来源可定位到 ASR segment、OCR event、frame、原始响应和媒体时间。
 
-无文本模型时，Builder 仍按时间构建自然段和描述性分节，并列保留语音、画面文字与关联图片。可选 `FaithfulTextEditor` 按块发送严格 JSON，请求温度为 0，要求返回完整 block_id、source_ids 和 edited_text，不允许自由生成整篇文章。
+Builder 先按时间构建带完整来源引用的原始块，并把这一版本保存为 `document.original.json`。可选 `FaithfulTextEditor` 随后把全部可编辑文本按原始顺序合并为一个 `source_text`，在单次、非分批请求中交给文本模型；模型只返回一个 `article_markdown`，形成可直接阅读的连续完整文章。无文本模型或模型回退时，也会把完整原文聚合为连续文章，而不是逐 ASR segment 渲染。
 
-验证器检查来源集合、数字、专有词形、代码标记、公式符号、文本长度和块顺序。响应缺块、增块、来源丢失、结构错误或明显压缩时，整个编辑响应被拒绝，Document 保留原文；原文、候选文本、模型、提示词版本、diff、验证指标、原始响应引用和回退原因写入 `text_edit.json`。
+文章整理请求使用流式 Chat Completions，并用 600 秒默认墙钟上限避免兼容网关持续占用队列。GLM 4.5 及以上的默认 Thinking 会在该确定性转换任务中显式关闭；输出 token 上限按正文长度估算并限制在 4096 到 32768。流式接收器只保存最终正文以及事件数、思考字符数、完成原因和用量等诊断元数据，不保存模型思维链。JSON 对象、JSON 围栏和直接 Markdown 都可形成候选文章。
+
+最终文章块由应用确定性继承所有原始文本块的来源引用；模型无需回显成千上万个 block/source ID。验证器对完整原文与完整候选文章检查数字、专有词形、代码标记、公式符号和文本长度。响应为空、结构无法恢复或内容明显压缩时，整个编辑响应被拒绝，Document 使用连续原文文章；原文、候选文章、原始 block/source 映射、模型、提示词版本、diff、验证指标、原始响应引用和回退原因写入文本整理产物。
 
 ## 11. Markdown 与 Obsidian 导出
 
-Renderer 从 Document IR 生成 YAML frontmatter、媒体来源、模型/配置、按时间正文、说话内容、画面文字、相对图片、来源引用和可折叠追溯附录。URL 时间戳仅在来源平台支持时生成跳转；本地文件只显示时间戳和结构化来源，不伪造协议链接。
+Renderer 从 Document IR 生成 YAML frontmatter、媒体来源、模型/配置、连续完整正文、相对图片和可折叠追溯附录。正文不再插入逐 segment 的“讲者内容”标签或来源注释；原始分块、时间戳和 source_id 保留在 `document.original.json`、最终 Document 聚合来源以及 sidecar 中。URL 时间戳仅在追溯信息需要且来源平台支持时生成跳转；本地文件不伪造协议链接。
+
+任务详情使用经净化的 GFM 渲染器显示 Markdown。YAML frontmatter 不作为正文显示；相对图片只有在任务产物清单中存在时才会映射到受工作区边界保护的产物 API，外部链接保持普通浏览器链接，原始 HTML 在渲染前经过白名单净化。
 
 Exporter 先在 Inbox 内创建隐藏临时目录，复制并重命名图片，生成 Markdown、document/timeline/sources sidecar 和可选字幕/转写；全部成功后才把同一 bundle 提交到最终路径。取消或失败删除 stage，并在 overwrite 模式下恢复备份。冲突策略为 rename、fail 或 overwrite，默认 rename。最终 Markdown 不引用任务临时绝对路径。
 
@@ -274,15 +281,20 @@ FINALIZE (99-100)
 - `text_edit_runs`：Provider、模型、提示词、接受/回退和原始响应
 - `markdown_exports`：模板、最终路径、图片与 sidecar 计数
 
-旧迁移没有修改。新快照版本为 5，除版本 4 内容外，还冻结文本 Gateway/模型、提示词版本、忠实性阈值、Markdown 模板、图片策略、Vault/Inbox 语义、附件/数据目录模板、冲突策略和 sidecar/字幕复制选项。数据库与快照都只保存密钥环境变量名称。
+`0008_v2_traceable_inputs` 在 `0007` 之后新增：
+
+- `task_stage_runs.model_usage`：阶段实际使用的 Gateway、协议、能力和模型显示名
+- 现有方案与应用设置迁移到“成品不写入时间戳”的默认值
+
+旧迁移没有修改。新快照版本为 6，除版本 5 内容外，还冻结 ASR/字幕文本来源、链接字幕 Provider 与语言优先级、任务级直接导出目录和无时间戳策略。抓取后的字幕文件与 SHA-256 记录在任务产物清单中。数据库与快照都只保存密钥环境变量名称。
 
 ## 16. API、前端与 Windows 启动器
 
-原任务 API 保持兼容。真实任务选择 `asr_gateway_model_id`，处理方案分别引用 ASR/OCR Gateway 模型；模拟模式仍供显式自动化兼容测试。
+任务创建、读取与处理配置 API 保持兼容；2026-09-10 扩展将 DELETE 任务改为移入回收站，物理清理由新增 permanent API 执行。真实任务选择 `asr_gateway_model_id`，处理方案分别引用 ASR/OCR Gateway 模型；模拟模式仍供显式自动化兼容测试。
 
-新增帧、OCR、融合、文档、Markdown、系统状态、原生媒体选择和受边界约束的打开/产物 API。前端新建任务页配置 ASR/OCR/文本处理和导出目标；详情页显示 attempt、错误、阶段进度、统计、融合、Document、Markdown 和导出位置，并提供取消、重试、打开与复制错误。SSE 和 REST 回退没有改变。
+新增帧、OCR、融合、文档、Markdown、系统状态、原生媒体/目录选择和受边界约束的打开/产物 API。前端新建任务页配置 ASR 或链接字幕、OCR、文本处理和直接导出目录；处理方案显示完整模型名称；详情页显示 attempt、错误、阶段进度及逐阶段模型、统计、融合、Document、Markdown 和导出位置，并提供取消、重试、打开、差异审阅与复制错误。当前页 SSE 与 REST 回退见第 19 节。
 
-`video2doc_launcher.py` 是 Windows 单入口。它在独立 app-home 中设置数据库、数据和默认 Inbox，执行 Alembic upgrade，拒绝占用端口，启动单个 Uvicorn/FastAPI 进程并由后端托管前端。退出 API 只在 launcher 注入回调时可用；应用不控制外部管理的 Docker OCR。
+`video2doc_launcher.py` 是 Windows 单入口。它在独立 app-home 中设置数据库、数据和默认 Inbox，执行 Alembic upgrade，拒绝占用端口，启动单个 Uvicorn/FastAPI 进程并由后端托管前端；默认使用隔离 Edge profile 的应用模式窗口。命名互斥锁阻止第二个主进程，重复启动只唤醒标题精确匹配的已有窗口；主进程按真实顶层窗口句柄监控生命周期，窗口关闭后停止受管后端。退出 API 只在 launcher 注入回调时可用；应用不控制外部管理的 Docker OCR。
 
 ## 17. 安全边界
 
@@ -293,18 +305,41 @@ FINALIZE (99-100)
 - 前端不显示完整敏感日志；任务 API 只返回产物相对路径和大小。
 - 原始 ASR/OCR 响应保存前递归隐藏常见 token/key 字段。
 - 单文件产物 API 对规范化绝对路径执行 `is_relative_to(workspace)` 校验，拒绝路径穿越。
-- Vault 必须是已存在绝对目录，Inbox 必须是 Vault 内相对路径；导出文件名经 Windows 安全清理。
+- 任务级导出目录必须是已存在绝对目录；兼容 Vault/Inbox 时 Inbox 必须在 Vault 内；导出文件名经 Windows 安全清理。
 - 文本模型响应必须保留 source_id，失败时回退原文；提示词和原始响应可审计。
 
 ## 18. 已知边界
 
 - 固定时长分块尚未做静音边界检测。
-- 当前只支持一个后端实例和单任务执行。
+- 当前只支持一个后端实例；真实 ASR 任务使用音频准备和主处理两个槽位，各最多一个任务。主处理覆盖转写、OCR、文档及导出，音频准备到 AUDIO_READY 后等待。SQLite 按 processing_lane 的 PROCESSING 唯一索引和进程内锁共同约束，锁在 Gateway 清理完成后释放。
 - Windows 本机使用 WinForms 选择媒体；非 Windows 环境仍使用路径输入。
 - SSE 不是可重放事件日志。
 - URL 下载成功仍依赖站点和本机 yt-dlp 版本。
 - PP-OCRv5 server 当前在 CPU 单请求串行执行；优先质量和稳定性，不追求批量吞吐。
 - 视觉去重不是语义模型，阈值边缘按保留优先。
 - OCR 读取顺序使用 Provider 返回顺序；复杂图文关系只形成时间文档块，尚未重建像素级版面。
-- 发行形态是便携目录/ZIP和系统浏览器，不是 MSI、自动更新器或独立 WebView。
+- 发行形态是便携目录/ZIP和 Edge 应用模式窗口，不是 MSI、自动更新器或内嵌 WebView。
 - 本地大模型是否可运行取决于 GPU 显存、驱动、WSL 内存与具体依赖，按需单模型驻留。
+
+## 19. 历史分页、增量订阅、审阅与回收站（2026-09-10）
+
+`0012_task_trash` 新增 `tasks.deleted_at`、`trash_expires_at`，并建立 `(deleted_at, created_at, id)` 历史索引。现有任务与快照保持原值；新增列初始为 NULL。升级/降级在含历史任务和快照的独立数据库中验证。
+
+`GET /tasks/page` 返回 `{items, total, offset, limit}`，使用相同筛选分别查询计数与当前页 Task 列，不加载历史关系。活动与回收站列表分别过滤 deleted_at，按 `created_at DESC, id DESC` 稳定排序，越界 offset 收敛到最后一页。搜索按标题/来源文本字面匹配，转义 SQL LIKE 的 `%`/`_`。limit 上限 200；带前置通配的包含搜索和总数查询仍可能扫描历史表，没有宣称全文索引或恒定耗时。
+
+`GET /events/pages` 接受相同查询参数。每个连接首次发送 `event: page`，数据为 `{page, queue}`；每秒在线程中读取当前页与全局队列计数，随后只发送 `event: delta`，字段包括 `upserts`、`removed_ids`、`order`、`total`、`offset`、`limit`、`queue`。无变化时发送 SSE 注释 keep-alive。每连接最多保留一页状态，重连必须从新快照开始，不提供持久重放日志。旧 `/tasks` 和 `/events` 保留全量接口兼容，当前前端不再使用它们。
+
+前端请求结果绑定完整查询键，防止前一页/筛选的异步结果覆盖当前页。页面切换会取消旧 REST 请求、关闭旧订阅；增量协议无法合并时重建订阅。断线期间每 2 秒 REST 回退。当前页虚拟列表按固定 112 px 行高和上下各 4 行额外渲染，表头固定；总览只请求最近 6 条。
+
+审阅读取当前 attempt 记录的标准 `05_output/document.json`。缺失、旧 attempt、无效格式或工作区外产物不会作为当前结果展示。原文和 `display_text` 形成完整文本，使用确定性逐行差异；元数据来自已保存的 edit_metadata。输出被拒绝时展示采用的回退正文，不展示未接受候选稿。审阅不修改文件、不调用模型、不插入导出前确认。前端按纯文本呈现，正文中的 HTML/脚本不会执行。
+
+软删除以带状态条件的 UPDATE 设置删除时间与 30 天保留期，不移动文件、不改写快照。队列领取、取消、编辑、重试均带原状态/未删除条件，避免软删除竞态。普通查询、计数与缓存清理排除回收站任务；恢复清除删除时间，原状态为 QUEUED 的任务重新可被领取。
+
+永久删除只接受回收站记录，先以状态和删除时间条件领取为 DELETING，再预检全部输出路径、工作区身份、原始输入、其他任务的输入/生成物以及目录链接。失败保留回收站记录；文件系统错误标记为 FAILED/delete_failed。启动时把中断的 DELETING 标记为 FAILED/delete_interrupted，不静默重放删除。完成文件清理后删除任务及级联记录。过期任务仅在用户明确操作后分批清理（最多 100 项），领取时再次核对到期时间，避免恢复并重新移入回收站的任务被旧扫描结果误清理。跨文件系统删除无法提供回滚；中断提示明确说明部分文件可能不完整。
+
+
+## 3.1.0 音频上传、人工确认与字幕恢复
+
+已实现音频 multipart 上传、工作区自有副本及哈希；新增迁移 `0013_manual_review` 持久化人工决定路径。新建无文本模型的真实任务在 `TEXT_EDIT` 后以 `WAITING_REVIEW / MANUAL_REVIEW` 释放 worker，用户提交使用初稿或修改稿后 CAS 入队，管线从独立的文档导出函数继续；重试沿用决定文件，不重新推理。编辑稿保存与提交均校验初稿版本和任务状态，保留原始 Document、来源引用与校验警告。
+
+字幕抓取增加字幕优先预检、按语言/来源逐项降级、JSON3 解析、隔离下载目录及缓存验证。B 站备用接口、短链接/av 解析、错误分 P 拒绝、限次重试和可取消 HTTP 请求均纳入回归验证。

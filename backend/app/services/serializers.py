@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from app.models import AppSetting, ModelConfig, ProcessingProfile, Task
+from app.core.credentials import credential_is_configured, credential_source
 from app.schemas.api import (
     ModelRead,
     ProfileRead,
+    ProfileModelSelection,
     SettingsRead,
     SnapshotRead,
     StageRead,
     TaskDetail,
     TaskRead,
 )
+from app.pipeline.model_usage import stage_model_usage
 from app.storage.workspace import list_artifacts, read_json
 from pathlib import Path
 
@@ -18,18 +21,72 @@ def model_read(item: ModelConfig) -> ModelRead:
     return ModelRead(
         id=item.id,
         name=item.name,
+        display_name=_model_label(item.name, [cap.capability for cap in item.capabilities]),
         capabilities=[cap.capability for cap in item.capabilities],
         notes=item.notes,
         enabled=item.enabled,
+        provider=item.provider,
+        base_url=item.base_url,
+        secret_env_name=item.secret_env_name,
+        secret_source=credential_source(item),
+        secret_configured=credential_is_configured(item),
         created_at=item.created_at,
         updated_at=item.updated_at,
     )
 
 
 def profile_read(item: ProcessingProfile) -> ProfileRead:
+    values = {
+        column.name: getattr(item, column.name) for column in item.__table__.columns
+    }
     return ProfileRead.model_validate(
-        {column.name: getattr(item, column.name) for column in item.__table__.columns}
+        {
+            **values,
+            "asr_selection": _profile_selection(
+                "ASR", item.asr_gateway_model, item.asr_model
+            ),
+            "ocr_selection": _profile_selection(
+                "OCR", item.ocr_gateway_model, item.ocr_model
+            ),
+            "text_selection": _profile_selection(
+                "TEXT_PROCESSING", None, item.text_model
+            ),
+        }
     )
+
+
+def _profile_selection(
+    capability: str,
+    gateway_model,
+    model,
+) -> ProfileModelSelection | None:
+    if gateway_model is not None:
+        return ProfileModelSelection(
+            capability=capability,
+            source="GATEWAY",
+            model_id=gateway_model.id,
+            model_name=gateway_model.model_name,
+            display_name=gateway_model.display_name,
+            gateway_id=gateway_model.gateway_id,
+            gateway_name=gateway_model.gateway.name,
+            protocol=gateway_model.gateway.protocol,
+        )
+    if model is not None:
+        return ProfileModelSelection(
+            capability=capability,
+            source="MODEL_CONFIG",
+            model_id=model.id,
+            model_name=model.name,
+            display_name=_model_label(model.name, [capability]),
+        )
+    return None
+
+
+def _model_label(name: str, capabilities: list[str]) -> str:
+    scenarios = {"TEXT_PROCESSING": "全文校对", "ASR": "语音转写", "OCR": "画面识别"}
+    scenario = "·".join(scenarios[cap] for cap in capabilities if cap in scenarios)
+    short_name = name.rsplit("/", 1)[-1]
+    return f"{short_name}（{scenario or '文本处理'}）"
 
 
 def settings_read(item: AppSetting) -> SettingsRead:
@@ -66,6 +123,7 @@ def settings_read(item: AppSetting) -> SettingsRead:
         export_keep_json_sidecar=item.export_keep_json_sidecar,
         export_copy_transcript=item.export_copy_transcript,
         export_copy_subtitles=item.export_copy_subtitles,
+        auto_clear_task_cache=item.auto_clear_task_cache,
         updated_at=item.updated_at,
     )
 
@@ -132,6 +190,7 @@ def task_detail(item: Task) -> TaskDetail:
             "target_type": export.target_type,
             "status": export.status,
             "markdown_path": export.markdown_path,
+            "word_path": (export.config_json or {}).get("word_path"),
             "attachment_directory": export.attachment_directory,
             "data_directory": export.data_directory,
             "image_count": export.image_count,
@@ -148,7 +207,19 @@ def task_detail(item: Task) -> TaskDetail:
             snapshot_json=item.snapshot.snapshot_json,
             created_at=item.snapshot.created_at,
         ),
-        stages=[StageRead.model_validate(stage) for stage in item.stages],
+        stages=[
+            StageRead.model_validate(
+                {
+                    column.name: getattr(stage, column.name)
+                    for column in stage.__table__.columns
+                }
+                | {
+                    "model_usage": stage.model_usage
+                    or stage_model_usage(stage.stage, item.snapshot.snapshot_json)
+                }
+            )
+            for stage in item.stages
+        ],
         media_info=media_info,
         transcript_preview=transcript_preview,
         frame_summary=frame_summary,

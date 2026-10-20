@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
+import { ManualReviewPage } from "./ManualReviewPage";
 import { api } from "../api/client";
 import { StateView } from "../components/StateView";
 import { StatusBadge } from "../components/StatusBadge";
 import type { TaskDetail } from "../types";
-import { formatDate } from "../utils/status";
+import { formatDate, formatDuration } from "../utils/status";
 
-function duration(start: string | null, end: string | null): string {
-  if (!start) return "—";
-  const seconds = ((end ? Date.parse(end) : Date.now()) - Date.parse(start)) / 1000;
-  return Number.isFinite(seconds) ? `${Math.max(0, seconds).toFixed(1)} 秒` : "—";
-}
+const MarkdownPreview = lazy(() =>
+  import("../components/MarkdownPreview").then(module => ({
+    default: module.MarkdownPreview,
+  })),
+);
 
 export function TaskDetailPage({ taskId }: { taskId: number }) {
   const [task, setTask] = useState<TaskDetail | null>(null);
@@ -40,10 +41,18 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
   const frameArtifacts = (task?.artifacts ?? []).filter(item =>
     /01_extract\/frames\/normalized\/.+\.(?:jpe?g|png|webp)$/i.test(item.path),
   ).slice(0, 12);
+  const audioReady = task?.stages.some(stage => stage.attempt === task.attempt && stage.stage === "AUDIO_VALIDATE" && stage.status === "COMPLETED");
+  const copyAudio = async () => {
+    if (!task) return;
+    try { setActionMessage((await api.copyAudio(task.id)).message); }
+    catch (reason) { setActionMessage(reason instanceof Error ? reason.message : "复制失败"); }
+  };
   const technicalError = task?.stages.find(stage => stage.technical_error)?.technical_error;
+  const wordPath = task?.exports.find(item => item.status === "COMPLETED"
+    && item.markdown_path === task.export_path && item.word_path)?.word_path;
 
   const operate = async (
-    action: "cancel" | "retry" | "workspace" | "export_directory" | "markdown",
+    action: "cancel" | "retry" | "workspace" | "export_directory" | "markdown" | "word",
   ) => {
     if (!task) return;
     setActionMessage(null);
@@ -81,23 +90,36 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
 
     <section className="panel action-bar">
       <div className="actions">
-        {["QUEUED", "PROCESSING"].includes(task.status) && (
+        {task.status === "WAITING_REVIEW" && (
+          <button className="primary" onClick={() => document.getElementById("manual-review")?.scrollIntoView({ behavior: "smooth" })}>校对初稿 / 完成任务</button>
+        )}
+        {task.document_path && !["QUEUED", "PROCESSING"].includes(task.status) && (
+          <button onClick={() => { window.location.hash = `/tasks/${task.id}/review`; }}>审阅整理差异</button>
+        )}
+        {["QUEUED", "PROCESSING", "WAITING_REVIEW"].includes(task.status) && (
           <button onClick={() => void operate("cancel")}>取消任务</button>
         )}
         {["FAILED", "INTERRUPTED"].includes(task.status) && (
           <button className="primary" onClick={() => void operate("retry")}>重试并复用产物</button>
         )}
+        {audioReady && <button onClick={() => void copyAudio()}>复制音频文件</button>}
         {task.workspace_path && (
           <button onClick={() => void operate("workspace")}>打开任务工作区</button>
         )}
         {task.export_path && <>
           <button onClick={() => void operate("export_directory")}>打开导出目录</button>
           <button onClick={() => void operate("markdown")}>打开最终 Markdown</button>
+          {wordPath && <button onClick={() => void operate("word")}>打开最终 Word</button>}
         </>}
         {task.error_message && <button onClick={() => void copyError()}>复制错误信息</button>}
       </div>
       {actionMessage && <span>{actionMessage}</span>}
     </section>
+
+    {task.status === "WAITING_REVIEW" && <div id="manual-review">
+      {task.transcript_preview?.quality_warnings?.map(warning => <p className="state-card" role="alert" key={warning}>{warning}</p>)}
+      <ManualReviewPage key={`${task.id}-${task.attempt}`} taskId={task.id} embedded onSubmitted={() => void load()} />
+    </div>}
 
     <section className="detail-grid">
       <article className="panel">
@@ -109,6 +131,7 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
           <div><dt>开始时间</dt><dd>{formatDate(task.started_at)}</dd></div>
           <div><dt>工作区</dt><dd className="break">{task.workspace_path ?? "—"}</dd></div>
           <div><dt>最终笔记</dt><dd className="break">{task.export_path ?? "—"}</dd></div>
+          {wordPath && <div><dt>Word 文档</dt><dd className="break">{wordPath}</dd></div>}
         </dl>
         {task.error_message && <div className="state-card error">
           <strong>{task.error_code}</strong>
@@ -128,17 +151,20 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
     </section>
 
     <section className="panel">
-      <h2>转写预览</h2>
+      <h2>文本预览</h2>
       {task.transcript_preview ? <>
         <div className="preview-meta">
           <span>Provider：{task.transcript_preview.provider}</span>
-          <span>模型：{task.transcript_preview.model}</span>
+          {task.transcript_preview.model !== "not-applicable" && (
+            <span>模型：{task.transcript_preview.model}</span>
+          )}
           <span>分块：{task.transcript_preview.completed_chunks}/{task.transcript_preview.chunk_count}</span>
           <span>分段：{task.transcript_preview.segment_count}</span>
         </div>
+        {task.transcript_preview.quality_warnings?.map(warning => <p role="alert" key={warning}>{warning}</p>)}
         <pre className="transcript-preview">{task.transcript_preview.text}</pre>
         {task.transcript_preview.truncated && <small>预览已截断；完整结果保存在工作区。</small>}
-      </> : <div className="state-card">ASR 结果尚未生成。</div>}
+      </> : <div className="state-card">ASR 或导入字幕文本尚未生成。</div>}
     </section>
 
     <section className="detail-grid">
@@ -187,7 +213,13 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
         <span>{task.export_path ?? "尚未导出"}</span>
       </div>
       {task.markdown_preview
-        ? <pre className="markdown-preview">{task.markdown_preview}</pre>
+        ? <Suspense fallback={<div className="state-card">正在渲染 Markdown…</div>}>
+            <MarkdownPreview
+              markdown={task.markdown_preview}
+              taskId={task.id}
+              artifactPaths={task.artifacts.map(item => item.path)}
+            />
+          </Suspense>
         : <div className="state-card">Markdown 尚未生成。</div>}
       {task.exports.length > 0 && <div className="export-list">
         {task.exports.map(item => <article key={item.id}>
@@ -207,8 +239,20 @@ export function TaskDetailPage({ taskId }: { taskId: number }) {
             <span className={`dot ${stage.status.toLowerCase()}`} />
             <div>
               <strong>{stage.stage}</strong>
-              <small>{stage.status} · 阶段进度 {stage.progress}% · 耗时 {duration(stage.started_at, stage.finished_at)}</small>
+              <small>{stage.status} · 阶段进度 {stage.progress}% · 耗时 {formatDuration(stage.started_at, stage.finished_at)}</small>
+              {stage.model_usage.length > 0
+                ? <div className="tags">{stage.model_usage.map((usage, index) => (
+                  <span key={`${usage.capability}-${index}`}>
+                    {usage.capability}：{usage.gateway_name ? `${usage.gateway_name} / ` : ""}
+                    {usage.display_name}
+                  </span>
+                ))}</div>
+                : <small>模型：未调用（本地工具或确定性处理）</small>}
               {stage.message && <p>{stage.message}</p>}
+              {stage.stage === "AUDIO_VALIDATE" && stage.attempt === task.attempt && stage.status === "COMPLETED" && <div className="actions">
+                <button onClick={() => void copyAudio()}>复制音频文件</button>
+                <a className="button-link" href={api.artifactUrl(task.id, "01_extract/audio/normalized.wav")}>下载音频</a>
+              </div>}
               {stage.log_path && <small className="break">日志：{stage.log_path}</small>}
             </div>
           </div>)}</div>

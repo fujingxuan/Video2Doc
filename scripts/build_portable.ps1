@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [switch]$SkipInstall
+    [switch]$SkipInstall,
+    [string]$DistRoot = "",
+    # Opt in only after preparing the bundled binary's license and source materials.
+    [switch]$BundleYtDlp
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,10 +13,38 @@ $backend = Join-Path $repoRoot "backend"
 $frontend = Join-Path $repoRoot "frontend"
 $python = Join-Path $backend ".venv\Scripts\python.exe"
 $pyinstaller = Join-Path $backend ".venv\Scripts\pyinstaller.exe"
-$distRoot = Join-Path $repoRoot "dist"
+$distRoot = if ([string]::IsNullOrWhiteSpace($DistRoot)) {
+    Join-Path $repoRoot "dist"
+}
+elseif ([IO.Path]::IsPathRooted($DistRoot)) {
+    [IO.Path]::GetFullPath($DistRoot)
+}
+else {
+    [IO.Path]::GetFullPath((Join-Path $repoRoot $DistRoot))
+}
 $portable = Join-Path $distRoot "Video2Doc-Portable"
 $pyinstallerOutput = Join-Path $distRoot "Video2Doc"
 $work = Join-Path $repoRoot "build\pyinstaller"
+$license = Join-Path $repoRoot "LICENSE"
+$thirdPartyNotices = Join-Path $repoRoot "THIRD_PARTY_NOTICES.md"
+$thirdPartyLicenses = Join-Path $repoRoot "third_party_licenses"
+foreach ($requiredFile in @($license, $thirdPartyNotices)) {
+    if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+        throw "Required release license material is missing: $requiredFile"
+    }
+}
+if (-not (Test-Path -LiteralPath $thirdPartyLicenses -PathType Container)) {
+    throw "Required third-party license directory is missing: $thirdPartyLicenses"
+}
+$downloaderArgs = @()
+if ($BundleYtDlp) {
+    $downloader = Join-Path $repoRoot "tools\media\yt-dlp.exe"
+    if (-not (Test-Path -LiteralPath $downloader -PathType Leaf)) {
+        throw "Bundled yt-dlp is missing. Run scripts\update_media_tools.ps1 first."
+    }
+    Write-Warning "Bundling yt-dlp requires its applicable license and corresponding source materials. This switch does not prepare or verify those materials."
+    $downloaderArgs = @("--add-data", "$downloader$([IO.Path]::PathSeparator)tools")
+}
 
 if (-not (Test-Path -LiteralPath $python)) {
     throw "Backend virtual environment is missing. Run scripts\setup.ps1 first."
@@ -26,14 +57,32 @@ if (-not $SkipInstall) {
     }
     finally { Pop-Location }
 }
+else {
+    Push-Location $backend
+    try {
+        & $python -m pip install --no-build-isolation --no-deps -e "."
+        if ($LASTEXITCODE -ne 0) { throw "Backend package metadata refresh failed." }
+    }
+    finally { Pop-Location }
+}
 if (-not (Test-Path -LiteralPath $pyinstaller)) {
     throw "PyInstaller is missing from the backend virtual environment."
 }
 
 Push-Location $frontend
 try {
-    pnpm build
-    if ($LASTEXITCODE -ne 0) { throw "Frontend production build failed." }
+    $tsc = Join-Path $frontend "node_modules\.bin\tsc.cmd"
+    $vite = Join-Path $frontend "node_modules\.bin\vite.cmd"
+    if ((Test-Path -LiteralPath $tsc) -and (Test-Path -LiteralPath $vite)) {
+        & $tsc --noEmit
+        if ($LASTEXITCODE -ne 0) { throw "Frontend typecheck failed." }
+        & $vite build
+        if ($LASTEXITCODE -ne 0) { throw "Frontend production build failed." }
+    }
+    else {
+        pnpm build
+        if ($LASTEXITCODE -ne 0) { throw "Frontend production build failed." }
+    }
 }
 finally { Pop-Location }
 
@@ -58,8 +107,13 @@ New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 $separator = [IO.Path]::PathSeparator
 $addFrontend = "$frontend\dist${separator}frontend_dist"
+$appIcon = Join-Path $frontend 'public\video2doc.ico'
+& $python (Join-Path $repoRoot 'scripts\create_app_icon.py')
+if ($LASTEXITCODE -ne 0) { throw 'Application icon generation failed.' }
 $addMigrations = "$backend\migrations${separator}migrations"
 $addAlembic = "$backend\alembic.ini${separator}."
+$addModelRuntime = "$repoRoot\scripts\model_runtime${separator}model_runtime"
+$addPrompts = "$backend\app\prompts${separator}app\prompts"
 
 Push-Location $repoRoot
 try {
@@ -67,8 +121,9 @@ try {
         --noconfirm `
         --clean `
         --onedir `
-        --console `
+        --windowed `
         --name Video2Doc `
+        --icon $appIcon `
         --distpath $distRoot `
         --workpath $work `
         --specpath $work `
@@ -76,11 +131,15 @@ try {
         --add-data $addFrontend `
         --add-data $addMigrations `
         --add-data $addAlembic `
+        --add-data $addModelRuntime `
+        --add-data $addPrompts `
+        @downloaderArgs `
         --hidden-import uvicorn.logging `
         --hidden-import uvicorn.loops.auto `
         --hidden-import uvicorn.protocols.http.auto `
         --hidden-import uvicorn.protocols.websockets.auto `
         --hidden-import uvicorn.lifespan.on `
+        --hidden-import python_multipart `
         (Join-Path $backend "video2doc_launcher.py")
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed." }
 }
@@ -89,21 +148,64 @@ finally { Pop-Location }
 if (-not (Test-Path -LiteralPath $pyinstallerOutput)) {
     throw "PyInstaller did not create the expected Video2Doc directory."
 }
-Move-Item -LiteralPath $pyinstallerOutput -Destination $portable
+$resolvedDist = (Resolve-Path -LiteralPath $distRoot).Path
+$resolvedOutput = (Resolve-Path -LiteralPath $pyinstallerOutput).Path
+$absolutePortable = [IO.Path]::GetFullPath($portable)
+if (-not $resolvedOutput.StartsWith($resolvedDist + "\", [System.StringComparison]::OrdinalIgnoreCase) -or
+    -not $absolutePortable.StartsWith($resolvedDist + "\", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to move a portable build outside its distribution directory."
+}
+Move-Item -LiteralPath $resolvedOutput -Destination $absolutePortable
+
+# Data directories must contain source resources, not stale local bytecode caches.
+foreach ($resource in @("_internal\migrations", "_internal\model_runtime")) {
+    $resourceRoot = Join-Path $absolutePortable $resource
+    $caches = @(Get-ChildItem -LiteralPath $resourceRoot -Directory -Recurse -Filter "__pycache__")
+    foreach ($cache in $caches) {
+        $resolvedCache = (Resolve-Path -LiteralPath $cache.FullName).Path
+        if (-not $resolvedCache.StartsWith($absolutePortable + "\", [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove a bytecode cache outside the generated package."
+        }
+        Remove-Item -LiteralPath $resolvedCache -Recurse -Force
+    }
+}
+
+$packagedPrompt = Join-Path $portable "_internal\app\prompts\faithful_article_v1.txt"
+if (-not (Test-Path -LiteralPath $packagedPrompt -PathType Leaf)) {
+    throw "Portable package is missing the faithful text-edit prompt."
+}
+Copy-Item -LiteralPath $license -Destination $portable
+Copy-Item -LiteralPath $thirdPartyNotices -Destination $portable
+Copy-Item -LiteralPath $thirdPartyLicenses -Destination $portable -Recurse
+
+$downloaderReadme = if ($BundleYtDlp) {
+    "yt-dlp is bundled. Its separate license and source requirements apply; the build switch does not prepare or verify the required materials."
+}
+else {
+    "yt-dlp is not bundled. Install it from https://github.com/yt-dlp/yt-dlp/releases and add it to PATH or set its executable path in application settings."
+}
 
 $readme = @"
 Video2Doc Portable
 ==================
 
 1. Double-click Video2Doc.exe.
-2. The local web interface opens automatically.
-3. Closing the launcher console or pressing Ctrl+C stops Video2Doc-managed processes.
+2. A standalone Video2Doc window opens automatically.
+3. Close that window with X to stop the Video2Doc backend started by it.
+4. Starting Video2Doc again while it is running does not open another window.
 
 Application data:
   %LOCALAPPDATA%\Video2Doc
 
+Startup log:
+  %LOCALAPPDATA%\Video2Doc\logs\launcher.log
+
 External requirements for real tasks:
-  FFmpeg, ffprobe, yt-dlp, and the selected ASR/OCR Gateway.
+  FFmpeg, ffprobe, and the selected ASR/OCR Gateway.
+  $downloaderReadme
+
+License materials:
+  LICENSE, THIRD_PARTY_NOTICES.md, and third_party_licenses/.
 
 The application never stops independently managed Docker OCR containers.
 "@

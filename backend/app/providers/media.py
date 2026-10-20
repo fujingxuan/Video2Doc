@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from app.core.config import get_settings
 from app.core.errors import PipelineError
 from app.providers.process import CancelCheck, ExternalProcessRunner
+from app.providers.ytdlp_options import authentication_options, translate_ytdlp_error
 from app.storage.workspace import WorkspacePaths, write_json
 
 
@@ -57,6 +58,7 @@ class MediaAcquisitionResult:
     has_video: bool | None
     metadata_path: str
     provider: str
+    media_available: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -129,9 +131,10 @@ class LocalFileSource:
 
 
 class YtDlpSource:
-    def __init__(self, executable: str, runner: ExternalProcessRunner | None = None) -> None:
+    def __init__(self, executable: str, runner: ExternalProcessRunner | None = None, *, audio_only: bool = False) -> None:
         self.executable = executable
         self.runner = runner or ExternalProcessRunner()
+        self.audio_only = audio_only
 
     async def acquire(
         self,
@@ -145,7 +148,11 @@ class YtDlpSource:
         raw_metadata_path = paths.metadata / "ytdlp.json"
         try:
             metadata_result = await self.runner.run(
-                [self.executable, "--dump-single-json", "--no-playlist", "--no-warnings", source],
+                [
+                    self.executable, "--encoding", "utf-8", "--dump-single-json",
+                    "--no-playlist", "--no-warnings", "--socket-timeout", "20",
+                    "--extractor-retries", "3", *authentication_options(source), source,
+                ],
                 cwd=paths.root,
                 log_dir=paths.logs,
                 log_name="ytdlp_metadata",
@@ -172,42 +179,94 @@ class YtDlpSource:
             parsed = parse_ytdlp_progress(line)
             if parsed is not None:
                 progress(parsed, line[:300])
+            elif any(
+                marker in line.casefold()
+                for marker in ("retry", "timed out", "timeout", "error")
+            ):
+                progress(None, line[:300])
             if line.startswith("VIDEO2DOC_FILE:"):
                 downloaded_path = line.removeprefix("VIDEO2DOC_FILE:").strip()
 
-        try:
-            await self.runner.run(
-                [
-                    self.executable,
-                    "--newline",
-                    "--no-playlist",
-                    "--no-warnings",
-                    "--print",
-                    "after_move:VIDEO2DOC_FILE:%(filepath)s",
-                    "--output",
-                    output_template,
-                    source,
-                ],
-                cwd=paths.root,
-                log_dir=paths.logs,
-                log_name="ytdlp_download",
-                timeout_seconds=get_settings().media_process_timeout_seconds,
-                cancel_check=cancel_check,
-                stdout_callback=parse_line,
-                stderr_callback=parse_line,
-            )
-        except PipelineError as exc:
-            for partial in paths.media.glob("*.part"):
-                partial.unlink(missing_ok=True)
+        format_selectors: tuple[str | None, ...] = (
+            None,
+            "bestvideo[height<=1080]+bestaudio[abr<=128]/best[height<=1080]/best",
+        )
+        if self.audio_only:
+            # Preserve the best audio; avoid downloading video that ASR never consumes.
+            format_selectors = ("bestaudio/best", "bestaudio[abr<=128]/best")
+        final_error: PipelineError | None = None
+        for attempt, format_selector in enumerate(format_selectors, start=1):
+            downloaded_path = None
+            command = [
+                self.executable,
+                "--encoding",
+                "utf-8",
+                "--newline",
+                "--progress",
+                "--progress-delta",
+                "1",
+                "--no-playlist",
+                "--socket-timeout",
+                "15",
+                "--retries",
+                "3",
+                "--fragment-retries",
+                "3",
+                "--print",
+                "after_move:VIDEO2DOC_FILE:%(filepath)s",
+                "--output",
+                output_template,
+                *authentication_options(source),
+            ]
+            if format_selector:
+                command.extend(["--format", format_selector])
+            command.append(source)
+            try:
+                await self.runner.run(
+                    command,
+                    cwd=paths.root,
+                    log_dir=paths.logs,
+                    log_name=(
+                        "ytdlp_download"
+                        if attempt == 1
+                        else "ytdlp_download_fallback"
+                    ),
+                    timeout_seconds=get_settings().media_process_timeout_seconds,
+                    cancel_check=cancel_check,
+                    stdout_callback=parse_line,
+                    stderr_callback=parse_line,
+                )
+                final_error = None
+                break
+            except PipelineError as exc:
+                final_error = exc
+                if attempt == 1 and _retryable_ytdlp_download_error(exc):
+                    progress(
+                        None,
+                        "首选 B 站媒体节点下载失败，正在刷新地址并改用备用音频格式",
+                    )
+                    continue
+                break
+        if final_error is not None:
+            _cleanup_ytdlp_downloads(paths.media)
             raise _translate_tool_error(
-                exc, "YTDLP_UNAVAILABLE", "MEDIA_DOWNLOAD_FAILED", "yt-dlp"
-            ) from exc
-        if not downloaded_path:
-            candidates = sorted(path for path in paths.media.glob("source.*") if path.is_file())
-            downloaded_path = str(candidates[0]) if candidates else None
+                final_error, "YTDLP_UNAVAILABLE", "MEDIA_DOWNLOAD_FAILED", "yt-dlp"
+            ) from final_error
         local_path = Path(downloaded_path) if downloaded_path else None
+        if local_path is None or not local_path.is_file():
+            # Older tools may emit a locale-encoded path. Only recover an unambiguous
+            # final output, never a partial download or an unmerged format stream.
+            candidates = [
+                path for path in paths.media.glob("source.*")
+                if path.is_file() and len(path.suffixes) == 1
+                and path.suffix not in {".part", ".ytdl", ".tmp"}
+                and path.stat().st_size > 0
+            ]
+            local_path = candidates[0] if len(candidates) == 1 else None
         if local_path is None or not local_path.is_file() or local_path.stat().st_size == 0:
+            _cleanup_ytdlp_downloads(paths.media)
             raise PipelineError("MEDIA_DOWNLOAD_FAILED", "yt-dlp 未生成有效的媒体文件")
+        _cleanup_ytdlp_downloads(paths.media, keep={local_path.resolve()})
         progress(1.0, "媒体下载完成")
         return MediaAcquisitionResult(
             source_type="URL",
@@ -223,10 +282,113 @@ class YtDlpSource:
         )
 
 
+def media_acquisition_from_ytdlp_metadata(
+    source: str,
+    metadata: dict[str, Any],
+    metadata_path: Path,
+) -> MediaAcquisitionResult:
+    """Build a traceable URL acquisition without downloading media bytes."""
+    return MediaAcquisitionResult(
+        source_type="URL",
+        original_input=source,
+        local_media_path="",
+        title=_optional_text(metadata.get("title")),
+        duration=_float_or_none(metadata.get("duration")),
+        container=_optional_text(metadata.get("ext")),
+        has_audio=_ytdlp_has_stream(metadata, "audio"),
+        has_video=_ytdlp_has_stream(metadata, "video"),
+        metadata_path=str(metadata_path),
+        provider="yt-dlp-metadata",
+        media_available=False,
+    )
+
+
+def media_info_from_ytdlp_metadata(
+    metadata: dict[str, Any],
+    metadata_path: Path,
+) -> MediaInfo:
+    """Normalize yt-dlp metadata for subtitle-only tasks that skip media download."""
+    duration = _float_or_none(metadata.get("duration"))
+    requested = metadata.get("requested_formats")
+    raw_streams = requested if isinstance(requested, list) and requested else [metadata]
+    audio: list[MediaStream] = []
+    video: list[MediaStream] = []
+    for raw in raw_streams:
+        if not isinstance(raw, dict):
+            continue
+        stream_duration = _float_or_none(raw.get("duration")) or duration
+        if _codec_present(raw.get("acodec")):
+            audio.append(
+                MediaStream(
+                    index=len(audio),
+                    type="audio",
+                    codec=_optional_text(raw.get("acodec")),
+                    duration=stream_duration,
+                    sample_rate=_int_or_none(raw.get("asr")),
+                    channels=_int_or_none(raw.get("audio_channels")),
+                )
+            )
+        if _codec_present(raw.get("vcodec")):
+            video.append(
+                MediaStream(
+                    index=len(video),
+                    type="video",
+                    codec=_optional_text(raw.get("vcodec")),
+                    duration=stream_duration,
+                    width=_int_or_none(raw.get("width")),
+                    height=_int_or_none(raw.get("height")),
+                    frame_rate=_float_or_none(raw.get("fps")),
+                )
+            )
+    return MediaInfo(
+        container=_optional_text(metadata.get("ext")),
+        duration=duration,
+        has_audio=bool(audio),
+        has_video=bool(video),
+        selected_audio_stream=audio[0].index if audio else None,
+        audio_streams=tuple(audio),
+        video_streams=tuple(video),
+        raw_probe_path=str(metadata_path),
+    )
+
+
+def _ytdlp_has_stream(metadata: dict[str, Any], kind: str) -> bool:
+    requested = metadata.get("requested_formats")
+    raw_streams = requested if isinstance(requested, list) and requested else [metadata]
+    key = "acodec" if kind == "audio" else "vcodec"
+    return any(isinstance(item, dict) and _codec_present(item.get(key)) for item in raw_streams)
+
+
+def _codec_present(value: Any) -> bool:
+    return bool(value and str(value).casefold() != "none")
+
+
+def _retryable_ytdlp_download_error(exc: PipelineError) -> bool:
+    detail = str(exc.technical_detail or "").casefold()
+    return any(
+        marker in detail
+        for marker in (
+            "timed out",
+            "timeout",
+            "connection reset",
+            "connection aborted",
+            "remote end closed",
+            "temporary failure",
+        )
+    )
+
+
+def _cleanup_ytdlp_downloads(media_dir: Path, *, keep: set[Path] | None = None) -> None:
+    retained = keep or set()
+    for path in media_dir.iterdir():
+        if path.is_file() and path.resolve() not in retained:
+            path.unlink(missing_ok=True)
+
+
 class MediaSourceResolver:
-    def __init__(self, ytdlp_executable: str, runner: ExternalProcessRunner | None = None) -> None:
+    def __init__(self, ytdlp_executable: str, runner: ExternalProcessRunner | None = None, *, audio_only: bool = False) -> None:
         self.local = LocalFileSource()
-        self.remote = YtDlpSource(ytdlp_executable, runner)
+        self.remote = YtDlpSource(ytdlp_executable, runner, audio_only=audio_only)
 
     async def acquire(
         self,
@@ -465,6 +627,10 @@ async def _cancelled(cancel_check: CancelCheck) -> bool:
 def _translate_tool_error(
     exc: PipelineError, unavailable_code: str, failed_code: str, tool_name: str
 ) -> PipelineError:
+    if tool_name == "yt-dlp":
+        translated = translate_ytdlp_error(exc)
+        if translated is not None:
+            return translated
     if exc.code in {"PROCESS_CANCELLED", "PROCESS_TIMEOUT", "backend_shutdown"}:
         return PipelineError(
             exc.code,

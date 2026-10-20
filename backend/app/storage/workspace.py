@@ -107,7 +107,9 @@ def create_workspace(data_root: Path, *, task_id: int, title: str, snapshot: dic
     paths.create()
     ocr_dir = workspace / "03_ocr"
     ocr_dir.mkdir(parents=True, exist_ok=True)
-    if not snapshot["processing"]["ocr_enabled"]:
+    if not snapshot["processing"]["ocr_enabled"] and not snapshot["processing"].get(
+        "embedded_subtitle_ocr_fallback"
+    ):
         (ocr_dir / "DISABLED.txt").write_text(
             "OCR is disabled for this task snapshot. No OCR processing was performed.\n",
             encoding="utf-8",
@@ -151,7 +153,6 @@ def write_simulated_markdown(
 ) -> tuple[Path, Path]:
     display_title = re.sub(r"[\r\n]+", " ", title).strip() or "Untitled"
     safe_title = safe_filename(display_title)
-    created_at = datetime.now(timezone.utc).isoformat()
     model_config = snapshot.get("models", {})
     processing = snapshot.get("processing", {})
     source_url = source if source_type == "URL" else ""
@@ -167,7 +168,6 @@ channel:
 published_date:
 duration:
 language:
-created_at: {created_at}
 video2doc_version: v0.1-bootstrap
 models:
   asr: "{model_config.get('asr', '') or ''}"

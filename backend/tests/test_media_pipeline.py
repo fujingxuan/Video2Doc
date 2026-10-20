@@ -13,6 +13,8 @@ from app.providers.media import (
     MediaStream,
     YtDlpSource,
     classify_input,
+    media_acquisition_from_ytdlp_metadata,
+    media_info_from_ytdlp_metadata,
     normalize_ffprobe,
     parse_ffmpeg_progress,
     parse_ytdlp_progress,
@@ -20,6 +22,7 @@ from app.providers.media import (
 from app.providers.process import (
     ExternalProcessRunner,
     ProcessResult,
+    _windows_creation_flags,
     process_registry,
     redact_command,
 )
@@ -51,6 +54,66 @@ class FakeProcessRunner:
             lines = ("out_time_us=3000000", "progress=end")
         else:
             lines = ()
+        stdout_log.write_text("\n".join(lines), encoding="utf-8")
+        callback = kwargs.get("stdout_callback")
+        if callback:
+            for line in lines:
+                callback(line)
+        return ProcessResult(normalized, 0, lines, (), 0.01, stdout_log, stderr_log)
+
+
+class RetryingYtDlpRunner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+        self.download_attempts = 0
+
+    async def run(self, args, **kwargs) -> ProcessResult:  # type: ignore[no-untyped-def]
+        normalized = tuple(str(item) for item in args)
+        self.calls.append(normalized)
+        log_dir = Path(kwargs["log_dir"])
+        log_dir.mkdir(parents=True, exist_ok=True)
+        stdout_log = log_dir / f"{kwargs['log_name']}.stdout.log"
+        stderr_log = log_dir / f"{kwargs['log_name']}.stderr.log"
+        stdout_log.write_text("", encoding="utf-8")
+        stderr_log.write_text("", encoding="utf-8")
+        if "--dump-single-json" in normalized:
+            payload = {
+                "title": "Retry lesson",
+                "duration": 12.5,
+                "ext": "mp4",
+                "requested_formats": [
+                    {
+                        "vcodec": "avc1.640028",
+                        "acodec": "none",
+                        "width": 1920,
+                        "height": 1080,
+                        "fps": 30,
+                    },
+                    {
+                        "vcodec": "none",
+                        "acodec": "mp4a.40.2",
+                        "asr": 48000,
+                        "audio_channels": 2,
+                    },
+                ],
+            }
+            lines = (json.dumps(payload),)
+        else:
+            self.download_attempts += 1
+            media_dir = WorkspacePaths.from_root(Path(kwargs["cwd"])).media
+            if self.download_attempts == 1:
+                (media_dir / "source.f100026.mp4").write_bytes(b"orphan-video")
+                raise PipelineError(
+                    "PROCESS_FAILED",
+                    "外部程序执行失败",
+                    technical_detail="Read timed out after 3 retries",
+                )
+            destination = media_dir / "source.mp4"
+            destination.write_bytes(b"fallback-media")
+            lines = (
+                "[download] 100.0% of 14B",
+                f"VIDEO2DOC_FILE:{destination}",
+            )
         stdout_log.write_text("\n".join(lines), encoding="utf-8")
         callback = kwargs.get("stdout_callback")
         if callback:
@@ -164,7 +227,9 @@ async def test_ytdlp_and_ffmpeg_providers_create_traceable_artifacts(tmp_path: P
         raw_probe_path=str(paths.metadata / "ffprobe.json"),
     )
     audio_path, normalized = await FfmpegProvider(
-        "fake-ffmpeg", StubProbe(), fake  # type: ignore[arg-type]
+        "fake-ffmpeg",
+        StubProbe(),
+        fake,  # type: ignore[arg-type]
     ).normalize_audio(
         Path(acquired.local_media_path),
         media_info,
@@ -176,6 +241,103 @@ async def test_ytdlp_and_ffmpeg_providers_create_traceable_artifacts(tmp_path: P
     assert audio_path.stat().st_size > 44
     assert normalized.audio_streams[0].sample_rate == 16000
     assert not (paths.audio / "normalized.part.wav").exists()
+
+
+@pytest.mark.asyncio
+async def test_ytdlp_recovers_final_file_when_printed_chinese_path_is_garbled(
+    tmp_path: Path,
+) -> None:
+    paths = WorkspacePaths.from_root(tmp_path / "中文任务")
+    paths.create()
+
+    class GarbledPathRunner(FakeProcessRunner):
+        async def run(self, args, **kwargs):  # type: ignore[no-untyped-def]
+            result = await super().run(args, **kwargs)
+            if "--dump-single-json" not in args:
+                (paths.media / "source.mp4.part").write_bytes(b"partial")
+                (paths.media / "source.f100026.mp4").write_bytes(b"unmerged")
+                kwargs["stdout_callback"]("VIDEO2DOC_FILE:" + str(paths.media / "missing.mp4"))
+            return result
+
+    runner = GarbledPathRunner()
+    acquired = await YtDlpSource("fake-ytdlp", runner).acquire(
+        "https://example.com/watch?v=chinese",
+        paths,
+        cancel_check=lambda: False,
+        progress=lambda *_args: None,
+    )
+    assert Path(acquired.local_media_path) == (paths.media / "source.mp4").resolve()
+    assert Path(acquired.local_media_path).read_bytes() == b"media"
+    assert all(call[call.index("--encoding") + 1] == "utf-8" for call in runner.calls)
+
+
+@pytest.mark.asyncio
+async def test_ytdlp_retries_with_bounded_fallback_and_removes_orphaned_stream(
+    tmp_path: Path,
+) -> None:
+    paths = WorkspacePaths.from_root(tmp_path / "retry-task")
+    paths.create()
+    runner = RetryingYtDlpRunner()
+    updates: list[tuple[float | None, str]] = []
+
+    acquired = await YtDlpSource("fake-ytdlp", runner).acquire(
+        "https://example.com/watch?v=retry",
+        paths,
+        cancel_check=lambda: False,
+        progress=lambda fraction, message: updates.append((fraction, message)),
+    )
+
+    download_calls = [call for call in runner.calls if "--dump-single-json" not in call]
+    assert runner.download_attempts == 2
+    assert download_calls[0][download_calls[0].index("--socket-timeout") + 1] == "15"
+    assert "--format" not in download_calls[0]
+    assert "--format" in download_calls[1]
+    assert "bestaudio[abr<=128]" in download_calls[1][download_calls[1].index("--format") + 1]
+    assert Path(acquired.local_media_path).read_bytes() == b"fallback-media"
+    assert not (paths.media / "source.f100026.mp4").exists()
+    assert any("备用音频格式" in message for _fraction, message in updates)
+    assert updates[-1] == (1.0, "媒体下载完成")
+
+
+def test_ytdlp_metadata_supports_subtitle_only_media_probe(tmp_path: Path) -> None:
+    metadata_path = tmp_path / "ytdlp.json"
+    metadata = {
+        "title": "Subtitle only lesson",
+        "duration": 18.25,
+        "ext": "mp4",
+        "requested_formats": [
+            {
+                "vcodec": "avc1.640028",
+                "acodec": "none",
+                "width": 1920,
+                "height": 1080,
+                "fps": 30,
+            },
+            {
+                "vcodec": "none",
+                "acodec": "mp4a.40.2",
+                "asr": 48000,
+                "audio_channels": 2,
+            },
+        ],
+    }
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    acquisition = media_acquisition_from_ytdlp_metadata(
+        "https://example.com/watch?v=subtitle",
+        metadata,
+        metadata_path,
+    )
+    media_info = media_info_from_ytdlp_metadata(metadata, metadata_path)
+
+    assert acquisition.media_available is False
+    assert acquisition.local_media_path == ""
+    assert acquisition.has_audio is True
+    assert acquisition.has_video is True
+    assert media_info.duration == 18.25
+    assert media_info.selected_audio_stream == 0
+    assert media_info.audio_streams[0].sample_rate == 48000
+    assert media_info.video_streams[0].height == 1080
 
 
 @pytest.mark.asyncio
@@ -196,7 +358,11 @@ async def test_external_process_streams_output_and_checks_return_code(tmp_path: 
 
     with pytest.raises(PipelineError) as failed:
         await runner.run(
-            [sys.executable, "-c", "import sys; print('safe detail', file=sys.stderr); sys.exit(7)"],
+            [
+                sys.executable,
+                "-c",
+                "import sys; print('safe detail', file=sys.stderr); sys.exit(7)",
+            ],
             cwd=tmp_path,
             log_dir=tmp_path / "logs",
             log_name="failure",
@@ -241,3 +407,15 @@ def test_sensitive_command_values_are_redacted() -> None:
     assert "user:pass" not in rendered
     assert "token" not in rendered
     assert "***" in rendered
+
+
+def test_windows_external_processes_are_created_without_console_windows() -> None:
+    if sys.platform != "win32":
+        pytest.skip("Windows creation flags are only available on Windows")
+    import subprocess
+
+    regular = _windows_creation_flags()
+    grouped = _windows_creation_flags(new_process_group=True)
+    assert regular & subprocess.CREATE_NO_WINDOW
+    assert grouped & subprocess.CREATE_NO_WINDOW
+    assert grouped & subprocess.CREATE_NEW_PROCESS_GROUP

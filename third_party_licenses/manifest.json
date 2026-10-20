@@ -1,0 +1,3381 @@
+[
+  {
+    "ecosystem": "Python",
+    "name": "alembic",
+    "version": "1.18.5",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://alembic.sqlalchemy.org",
+    "files": [
+      "third_party_licenses/python/alembic-1.18.5/alembic-1.18.5.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/alembic-1.18.5/alembic-1.18.5.dist-info/licenses/LICENSE": "6e68d94a03a0e3e327ddf3e86d1ebedc14eece3922022618fc246a36296fd0cc"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "altgraph",
+    "version": "0.17.5",
+    "scope": "build tool / bootloader exception",
+    "license": "MIT",
+    "source": "https://altgraph.readthedocs.io",
+    "files": [
+      "third_party_licenses/python/altgraph-0.17.5/altgraph-0.17.5.dist-info/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/altgraph-0.17.5/altgraph-0.17.5.dist-info/LICENSE": "6c194d6db0c64d45535d10c95142b9b0cda7b7dcc7f1ddee302b3d536f3dbe46"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "annotated-doc",
+    "version": "0.0.4",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://github.com/fastapi/annotated-doc",
+    "files": [
+      "third_party_licenses/python/annotated-doc-0.0.4/annotated_doc-0.0.4.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/annotated-doc-0.0.4/annotated_doc-0.0.4.dist-info/licenses/LICENSE": "fff170779a6acbf65abdb405c087f1cee1786691e4a96a4034517e4a504a0cdf"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "annotated-types",
+    "version": "0.7.0",
+    "scope": "runtime",
+    "license": "See license files",
+    "source": "https://github.com/annotated-types/annotated-types",
+    "files": [
+      "third_party_licenses/python/annotated-types-0.7.0/annotated_types-0.7.0.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/annotated-types-0.7.0/annotated_types-0.7.0.dist-info/licenses/LICENSE": "fe1049884b1a0d9342901e88e07f32925d24b3121d9972b6a6805fb9824b095d"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "anyio",
+    "version": "4.14.2",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://anyio.readthedocs.io/en/latest/",
+    "files": [
+      "third_party_licenses/python/anyio-4.14.2/anyio-4.14.2.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/anyio-4.14.2/anyio-4.14.2.dist-info/licenses/LICENSE": "5361ac9dc58f2ef5fd2e9b09c68297c17f04950909bbc8023bdb82eacf22c2b0"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "certifi",
+    "version": "2026.6.17",
+    "scope": "runtime",
+    "license": "MPL-2.0",
+    "source": "https://github.com/certifi/python-certifi",
+    "files": [
+      "third_party_licenses/python/certifi-2026.6.17/certifi-2026.6.17.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/certifi-2026.6.17/certifi-2026.6.17.dist-info/licenses/LICENSE": "e93716da6b9c0d5a4a1df60fe695b370f0695603d21f6f83f053e42cfc10caf7"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "click",
+    "version": "8.4.2",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://click.palletsprojects.com/page/changes/",
+    "files": [
+      "third_party_licenses/python/click-8.4.2/click-8.4.2.dist-info/licenses/LICENSE.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/python/click-8.4.2/click-8.4.2.dist-info/licenses/LICENSE.txt": "9a8ad106a394e853bfe21f42f4e72d592819a22805d991b5f3275029292b658d"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "colorama",
+    "version": "0.4.6",
+    "scope": "optional _pytest modules retained by PyInstaller",
+    "license": "See license files",
+    "source": "https://github.com/tartley/colorama",
+    "files": [
+      "third_party_licenses/python/colorama-0.4.6/colorama-0.4.6.dist-info/licenses/LICENSE.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/python/colorama-0.4.6/colorama-0.4.6.dist-info/licenses/LICENSE.txt": "cac35c02686e5d04a5a7140bfb3b36e73aed496656e891102e428886d7930318"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "fastapi",
+    "version": "0.139.2",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://github.com/fastapi/fastapi",
+    "files": [
+      "third_party_licenses/python/fastapi-0.139.2/fastapi-0.139.2.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/fastapi-0.139.2/fastapi-0.139.2.dist-info/licenses/LICENSE": "4ec89ffc81485b97fec584b2d4a961032eeffe834453894fd9c1274906cc744e"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "greenlet",
+    "version": "3.5.3",
+    "scope": "runtime",
+    "license": "MIT AND PSF-2.0",
+    "source": "https://greenlet.readthedocs.io",
+    "files": [
+      "third_party_licenses/python/greenlet-3.5.3/greenlet-3.5.3.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/greenlet-3.5.3/greenlet-3.5.3.dist-info/licenses/LICENSE.PSF"
+    ],
+    "sha256": {
+      "third_party_licenses/python/greenlet-3.5.3/greenlet-3.5.3.dist-info/licenses/LICENSE": "ab977b654605670319509481ece49198f405a129372ac38c96f51cd96c2f452e",
+      "third_party_licenses/python/greenlet-3.5.3/greenlet-3.5.3.dist-info/licenses/LICENSE.PSF": "69efa689cc7aec7736236d3039c1d665e4b0c734a5bfea5abf633023abb2fff4"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "h11",
+    "version": "0.16.0",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://github.com/python-hyper/h11",
+    "files": [
+      "third_party_licenses/python/h11-0.16.0/h11-0.16.0.dist-info/licenses/LICENSE.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/python/h11-0.16.0/h11-0.16.0.dist-info/licenses/LICENSE.txt": "37db5bb85926db28a427a25867f10b1232003aea1be69ccb851138adb8e6f361"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "httpcore",
+    "version": "1.0.9",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://www.encode.io/httpcore",
+    "files": [
+      "third_party_licenses/python/httpcore-1.0.9/httpcore-1.0.9.dist-info/licenses/LICENSE.md"
+    ],
+    "sha256": {
+      "third_party_licenses/python/httpcore-1.0.9/httpcore-1.0.9.dist-info/licenses/LICENSE.md": "fdcb59154c74cbaba16a11242f7740bea9f23d6feb5547917d8c5f94a80392a5"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "httptools",
+    "version": "0.8.0",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://github.com/MagicStack/httptools",
+    "files": [
+      "third_party_licenses/python/httptools-0.8.0/httptools-0.8.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/httptools-0.8.0/httptools-0.8.0.dist-info/licenses/vendor/http-parser/LICENSE-MIT",
+      "third_party_licenses/python/httptools-0.8.0/httptools-0.8.0.dist-info/licenses/vendor/llhttp/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/httptools-0.8.0/httptools-0.8.0.dist-info/licenses/LICENSE": "1c028b059d7a58e14ccda38cabced698c591fe614ffbe4f721430446e86c8d69",
+      "third_party_licenses/python/httptools-0.8.0/httptools-0.8.0.dist-info/licenses/vendor/http-parser/LICENSE-MIT": "5cd1b682c0ccbac0cb31b86a9a1104c3e2e7b1377a282b8169d2694b400db7c2",
+      "third_party_licenses/python/httptools-0.8.0/httptools-0.8.0.dist-info/licenses/vendor/llhttp/LICENSE": "279012e02a10acfd59a3f2d8f13a497332535d871c2b27c89988985b06a3a438"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "httpx",
+    "version": "0.28.1",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/encode/httpx/blob/master/CHANGELOG.md",
+    "files": [
+      "third_party_licenses/python/httpx-0.28.1/httpx-0.28.1.dist-info/licenses/LICENSE.md"
+    ],
+    "sha256": {
+      "third_party_licenses/python/httpx-0.28.1/httpx-0.28.1.dist-info/licenses/LICENSE.md": "4ec59d544f12b5f539a3a716fd321ac58ccd8030b465221f2c880200cdf28d8d"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "idna",
+    "version": "3.18",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/kjd/idna/blob/master/HISTORY.md",
+    "files": [
+      "third_party_licenses/python/idna-3.18/idna-3.18.dist-info/licenses/LICENSE.md"
+    ],
+    "sha256": {
+      "third_party_licenses/python/idna-3.18/idna-3.18.dist-info/licenses/LICENSE.md": "1a9a4f0e3d479a27240ddd59a9137a66ab4a0f9dfdc8ca6188cc0bfd85187f04"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "iniconfig",
+    "version": "2.3.0",
+    "scope": "optional _pytest modules retained by PyInstaller",
+    "license": "MIT",
+    "source": "https://github.com/pytest-dev/iniconfig",
+    "files": [
+      "third_party_licenses/python/iniconfig-2.3.0/iniconfig-2.3.0.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/iniconfig-2.3.0/iniconfig-2.3.0.dist-info/licenses/LICENSE": "3409fa91f7ace557894632676656e32264fe5ef7581535725dc9a23774551bd4"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "lxml",
+    "version": "6.1.3",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://lxml.de/",
+    "files": [
+      "third_party_licenses/python/lxml-6.1.3/lxml-6.1.3.dist-info/licenses/LICENSE.txt",
+      "third_party_licenses/python/lxml-6.1.3/lxml-6.1.3.dist-info/licenses/LICENSES.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/python/lxml-6.1.3/lxml-6.1.3.dist-info/licenses/LICENSE.txt": "e7c3ce8d76331b0101cc46790ab43958ea90a364bcf962ed8763d5a818340e69",
+      "third_party_licenses/python/lxml-6.1.3/lxml-6.1.3.dist-info/licenses/LICENSES.txt": "df682c668de65321677b5e4861dca4128a8bad8067f230956e9da3f985b3d398"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "Mako",
+    "version": "1.3.12",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://www.makotemplates.org/",
+    "files": [
+      "third_party_licenses/python/mako-1.3.12/mako-1.3.12.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/mako-1.3.12/mako-1.3.12.dist-info/licenses/LICENSE": "68d7064e53e3ffa8e9f420a9e604bd2e2059d9c330492fa6ebd4eb3d48111689"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "markdown-it-py",
+    "version": "4.2.0",
+    "scope": "runtime",
+    "license": "See license files",
+    "source": "https://markdown-it-py.readthedocs.io",
+    "files": [
+      "third_party_licenses/python/markdown-it-py-4.2.0/markdown_it_py-4.2.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/markdown-it-py-4.2.0/markdown_it_py-4.2.0.dist-info/licenses/LICENSE.markdown-it"
+    ],
+    "sha256": {
+      "third_party_licenses/python/markdown-it-py-4.2.0/markdown_it_py-4.2.0.dist-info/licenses/LICENSE": "4a2260d6e2cd0f5a151a1e86dbfe7d3ed552b1e2beabf9941c1ba5c49cbce484",
+      "third_party_licenses/python/markdown-it-py-4.2.0/markdown_it_py-4.2.0.dist-info/licenses/LICENSE.markdown-it": "792c48c5a849a15fdf9e37e8bcf9e6d1dd13b32b46c642a748a0a46a9919d473"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "MarkupSafe",
+    "version": "3.0.3",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://palletsprojects.com/donate",
+    "files": [
+      "third_party_licenses/python/markupsafe-3.0.3/markupsafe-3.0.3.dist-info/licenses/LICENSE.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/python/markupsafe-3.0.3/markupsafe-3.0.3.dist-info/licenses/LICENSE.txt": "4631ec0db5fd90a547e336817264c6798214338146f8ac94b4a57f96ee8c9ec4"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "mdurl",
+    "version": "0.1.2",
+    "scope": "runtime",
+    "license": "See license files",
+    "source": "https://github.com/executablebooks/mdurl",
+    "files": [
+      "third_party_licenses/python/mdurl-0.1.2/mdurl-0.1.2.dist-info/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/mdurl-0.1.2/mdurl-0.1.2.dist-info/LICENSE": "7c605df6e28667a9603118e98274f64a49ce3eed0d26fccce9534a345e0ef955"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "packaging",
+    "version": "26.2",
+    "scope": "build tool / bootloader exception",
+    "license": "Apache-2.0 OR BSD-2-Clause",
+    "source": "https://packaging.pypa.io/",
+    "files": [
+      "third_party_licenses/python/packaging-26.2/packaging-26.2.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/packaging-26.2/packaging-26.2.dist-info/licenses/LICENSE.APACHE",
+      "third_party_licenses/python/packaging-26.2/packaging-26.2.dist-info/licenses/LICENSE.BSD"
+    ],
+    "sha256": {
+      "third_party_licenses/python/packaging-26.2/packaging-26.2.dist-info/licenses/LICENSE": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48",
+      "third_party_licenses/python/packaging-26.2/packaging-26.2.dist-info/licenses/LICENSE.APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "third_party_licenses/python/packaging-26.2/packaging-26.2.dist-info/licenses/LICENSE.BSD": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "pefile",
+    "version": "2024.8.26",
+    "scope": "build tool / bootloader exception",
+    "license": "MIT",
+    "source": "https://github.com/erocarrera/pefile",
+    "files": [
+      "third_party_licenses/python/pefile-2024.8.26/pefile-2024.8.26.dist-info/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pefile-2024.8.26/pefile-2024.8.26.dist-info/LICENSE": "b44409c067c6da52bfb54bb6624fb11a7b52157c3a13ae1400232f8196e86ad3"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "pillow",
+    "version": "12.3.0",
+    "scope": "runtime",
+    "license": "MIT-CMU",
+    "source": "https://pillow.readthedocs.io/en/stable/releasenotes/index.html",
+    "files": [
+      "third_party_licenses/python/pillow-12.3.0/pillow-12.3.0.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pillow-12.3.0/pillow-12.3.0.dist-info/licenses/LICENSE": "4f7866a74802c6326f81faff59a56546b6aec2b10b91973e0e9308de95e79857"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "pluggy",
+    "version": "1.6.0",
+    "scope": "optional _pytest modules retained by PyInstaller",
+    "license": "MIT",
+    "source": "https://pypi.org/project/pluggy/1.6.0/",
+    "files": [
+      "third_party_licenses/python/pluggy-1.6.0/pluggy-1.6.0.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pluggy-1.6.0/pluggy-1.6.0.dist-info/licenses/LICENSE": "d6b65e6c213a5d0b577911d34d6e5949b9f59d76c238c5071a2f3fc16cfb2606"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "pydantic",
+    "version": "2.13.4",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://github.com/pydantic/pydantic",
+    "files": [
+      "third_party_licenses/python/pydantic-2.13.4/pydantic-2.13.4.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pydantic-2.13.4/pydantic-2.13.4.dist-info/licenses/LICENSE": "a9e186f3ca16b5eef84318e7a701721351a00cb7b8ae3a4394b67b49e3529ef3"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "pydantic_core",
+    "version": "2.46.4",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://github.com/pydantic/pydantic",
+    "files": [
+      "third_party_licenses/python/pydantic-core-2.46.4/pydantic_core-2.46.4.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pydantic-core-2.46.4/pydantic_core-2.46.4.dist-info/licenses/LICENSE": "fbe7f615f18d135c07000e5a86325db27f42c7729699ef166ac1f7a3f4586bf4"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "Pygments",
+    "version": "2.20.0",
+    "scope": "PyInstaller Mako hook dependency",
+    "license": "BSD-2-Clause",
+    "source": "https://pygments.org",
+    "files": [
+      "third_party_licenses/python/pygments-2.20.0/pygments-2.20.0.dist-info/licenses/AUTHORS",
+      "third_party_licenses/python/pygments-2.20.0/pygments-2.20.0.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pygments-2.20.0/pygments-2.20.0.dist-info/licenses/AUTHORS": "0db603a5f4499f690c4425477ff664c166da325d3acc3b5a8d4de3db072443d0",
+      "third_party_licenses/python/pygments-2.20.0/pygments-2.20.0.dist-info/licenses/LICENSE": "a9d66f1d526df02e29dce73436d34e56e8632f46c275bbdffc70569e882f9f17"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "pyinstaller",
+    "version": "6.21.0",
+    "scope": "build tool / bootloader exception",
+    "license": "GPLv2-or-later with a special exception which allows to use PyInstaller to build and distribute non-free programs (including commercial ones)",
+    "source": "https://pyinstaller.org",
+    "files": [
+      "third_party_licenses/python/pyinstaller-6.21.0/pyinstaller-6.21.0.dist-info/licenses/COPYING.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pyinstaller-6.21.0/pyinstaller-6.21.0.dist-info/licenses/COPYING.txt": "dcf75fdb959db1e3b41c0f8505069d2ece781b5ec6b3d0a4d30975cfc6580245"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "pyinstaller-hooks-contrib",
+    "version": "2026.6",
+    "scope": "build tool / bootloader exception",
+    "license": "See license files",
+    "source": "https://github.com/pyinstaller/pyinstaller-hooks-contrib",
+    "files": [
+      "third_party_licenses/python/pyinstaller-hooks-contrib-2026.6/pyinstaller_hooks_contrib-2026.6.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pyinstaller-hooks-contrib-2026.6/pyinstaller_hooks_contrib-2026.6.dist-info/licenses/LICENSE": "91d0baaff00773038e72c0a1fc9d5d2d38706b7a2b9c04f34296608f931b9cd0"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "pytest",
+    "version": "8.4.2",
+    "scope": "optional _pytest modules retained by PyInstaller",
+    "license": "MIT",
+    "source": "https://docs.pytest.org/en/stable/changelog.html",
+    "files": [
+      "third_party_licenses/python/pytest-8.4.2/pytest-8.4.2.dist-info/licenses/AUTHORS",
+      "third_party_licenses/python/pytest-8.4.2/pytest-8.4.2.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pytest-8.4.2/pytest-8.4.2.dist-info/licenses/AUTHORS": "c2017d6288262cf9c39aecc8e51df3422a9f2bbca1e4b55d28491022070c7577",
+      "third_party_licenses/python/pytest-8.4.2/pytest-8.4.2.dist-info/licenses/LICENSE": "ca836a5f9ecca3b2f350230faa20a48fb8b145653b5568d784862df864706b9b"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "python-docx",
+    "version": "1.2.0",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://github.com/python-openxml/python-docx/blob/master/HISTORY.rst",
+    "files": [
+      "third_party_licenses/python/python-docx-1.2.0/python_docx-1.2.0.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/python-docx-1.2.0/python_docx-1.2.0.dist-info/licenses/LICENSE": "7652f271e46d0d533e9dc463f3b5fcbdcacf4d6a9c8d6b554d15efd0f37f6132"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "python-dotenv",
+    "version": "1.2.2",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/theskumar/python-dotenv",
+    "files": [
+      "third_party_licenses/python/python-dotenv-1.2.2/python_dotenv-1.2.2.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/python-dotenv-1.2.2/python_dotenv-1.2.2.dist-info/licenses/LICENSE": "80619b7049f08c81683ad0e01f08f257a840652dd71ee83146d36658c7d2c2b9"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "python-multipart",
+    "version": "0.0.32",
+    "scope": "runtime",
+    "license": "Apache-2.0",
+    "source": "https://github.com/Kludex/python-multipart",
+    "files": [
+      "third_party_licenses/python/python-multipart-0.0.32/python_multipart-0.0.32.dist-info/licenses/LICENSE.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/python/python-multipart-0.0.32/python_multipart-0.0.32.dist-info/licenses/LICENSE.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "pywin32-ctypes",
+    "version": "0.2.3",
+    "scope": "build tool / bootloader exception",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/enthought/pywin32-ctypes",
+    "files": [
+      "third_party_licenses/python/pywin32-ctypes-0.2.3/pywin32_ctypes-0.2.3.dist-info/LICENSE.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pywin32-ctypes-0.2.3/pywin32_ctypes-0.2.3.dist-info/LICENSE.txt": "dfa83b3e2709adfcdb838d9ad55823ca674abb780e60563d9dd9544ccbf785e9"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "PyYAML",
+    "version": "6.0.3",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://pyyaml.org/",
+    "files": [
+      "third_party_licenses/python/pyyaml-6.0.3/pyyaml-6.0.3.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/pyyaml-6.0.3/pyyaml-6.0.3.dist-info/licenses/LICENSE": "8d3928f9dc4490fd635707cb88eb26bd764102a7282954307d3e5167a577e8a4"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "setuptools",
+    "version": "83.0.0",
+    "scope": "build tool / bootloader exception",
+    "license": "MIT",
+    "source": "https://github.com/pypa/setuptools",
+    "files": [
+      "third_party_licenses/python/setuptools-83.0.0/setuptools-83.0.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/autocommand-2.2.2.dist-info/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/backports.tarfile-1.2.0.dist-info/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/jaraco.text-4.0.0.dist-info/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/jaraco_context-6.1.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/jaraco_functools-4.4.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/more_itertools-10.8.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.APACHE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.BSD",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/platformdirs-4.4.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/tomli-2.4.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/wheel-0.46.3.dist-info/licenses/LICENSE.txt",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/zipp-3.23.0.dist-info/licenses/LICENSE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/config/NOTICE",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/config/_validate_pyproject/NOTICE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/setuptools-83.0.0/setuptools-83.0.0.dist-info/licenses/LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/autocommand-2.2.2.dist-info/LICENSE": "ade78d04982d69972d444a8e14a94f87a2334dd3855cc80348ea8e240aa0df2d",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/backports.tarfile-1.2.0.dist-info/LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/importlib_metadata-8.7.1.dist-info/licenses/LICENSE": "458502e12d97bbf64438606a20044aa85eb05fb0a8a807bb35dbec253fd1fc04",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/jaraco.text-4.0.0.dist-info/LICENSE": "86da0f01aeae46348a3c3d465195dc1ceccde79f79e87769a64b8da04b2a4741",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/jaraco_context-6.1.0.dist-info/licenses/LICENSE": "9755a18519666e5f0f4cae3daad3d7012bcae48a600b31237d75e9fe134e6683",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/jaraco_functools-4.4.0.dist-info/licenses/LICENSE": "5a57cb4db85e2a2dd88c290628908add57e3451449e0a9a71fdfb38776fd759d",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/more_itertools-10.8.0.dist-info/licenses/LICENSE": "09f1c8c9e941af3e584d59641ea9b87d83c0cb0fd007eb5ef391a7e2643c1a46",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.APACHE": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/packaging-26.0.dist-info/licenses/LICENSE.BSD": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/platformdirs-4.4.0.dist-info/licenses/LICENSE": "29e0fd62e929850e86eb28c3fdccf0cefdf4fa94879011cffb3d0d4bed6d4db6",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/tomli-2.4.0.dist-info/licenses/LICENSE": "b80816b0d530b8accb4c2211783790984a6e3b61922c2b5ee92f3372ab2742fe",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/wheel-0.46.3.dist-info/licenses/LICENSE.txt": "30c23618679108f3e8ea1d2a658c7ca417bdfc891c98ef1a89fa4ff0c9828654",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/_vendor/zipp-3.23.0.dist-info/licenses/LICENSE": "5a57cb4db85e2a2dd88c290628908add57e3451449e0a9a71fdfb38776fd759d",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/config/NOTICE": "2dddf08818297a3b89d43d95ff659d8da85741108c9136dfa3a4d856c0623bd8",
+      "third_party_licenses/python/setuptools-83.0.0/setuptools/config/_validate_pyproject/NOTICE": "09c9bcea95ca086f8bc5bed174e40bc835b297d40fb5f86bbbb570fe0a5581a7"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "SQLAlchemy",
+    "version": "2.0.51",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://www.sqlalchemy.org",
+    "files": [
+      "third_party_licenses/python/sqlalchemy-2.0.51/sqlalchemy-2.0.51.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/sqlalchemy-2.0.51/sqlalchemy-2.0.51.dist-info/licenses/LICENSE": "9bb754071e711cf75728b9051b170bfb8f9e3b879c08386c96a36989c42cd5f1"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "starlette",
+    "version": "1.3.1",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/Kludex/starlette",
+    "files": [
+      "third_party_licenses/python/starlette-1.3.1/starlette-1.3.1.dist-info/licenses/LICENSE.md"
+    ],
+    "sha256": {
+      "third_party_licenses/python/starlette-1.3.1/starlette-1.3.1.dist-info/licenses/LICENSE.md": "dcb95677a02240243187e964f941847d19b17821cf99e5afae684fab328c19bf"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "typing-inspection",
+    "version": "0.4.2",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://github.com/pydantic/typing-inspection",
+    "files": [
+      "third_party_licenses/python/typing-inspection-0.4.2/typing_inspection-0.4.2.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/typing-inspection-0.4.2/typing_inspection-0.4.2.dist-info/licenses/LICENSE": "804b59b25f2c31bd278f9202a19ae49a3945aa2664387e2d0a128c7cacc61ec3"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "typing_extensions",
+    "version": "4.16.0",
+    "scope": "runtime",
+    "license": "PSF-2.0",
+    "source": "https://github.com/python/typing_extensions/issues",
+    "files": [
+      "third_party_licenses/python/typing-extensions-4.16.0/typing_extensions-4.16.0.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/typing-extensions-4.16.0/typing_extensions-4.16.0.dist-info/licenses/LICENSE": "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "uvicorn",
+    "version": "0.51.0",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://uvicorn.dev/release-notes",
+    "files": [
+      "third_party_licenses/python/uvicorn-0.51.0/uvicorn-0.51.0.dist-info/licenses/LICENSE.md"
+    ],
+    "sha256": {
+      "third_party_licenses/python/uvicorn-0.51.0/uvicorn-0.51.0.dist-info/licenses/LICENSE.md": "efe1acf3e62fb99c288b0ec73e5a773b7268ef4320fe757ea994214e4b63c371"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "watchfiles",
+    "version": "1.2.0",
+    "scope": "runtime",
+    "license": "MIT",
+    "source": "https://github.com/samuelcolvin/watchfiles",
+    "files": [
+      "third_party_licenses/python/watchfiles-1.2.0/watchfiles-1.2.0.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/watchfiles-1.2.0/watchfiles-1.2.0.dist-info/licenses/LICENSE": "2d40a03346bded8daa4bd22d23825a6f2568a0820fbef76ac05bae534421e189"
+    }
+  },
+  {
+    "ecosystem": "Python",
+    "name": "websockets",
+    "version": "16.1.1",
+    "scope": "runtime",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/python-websockets/websockets",
+    "files": [
+      "third_party_licenses/python/websockets-16.1.1/websockets-16.1.1.dist-info/licenses/LICENSE"
+    ],
+    "sha256": {
+      "third_party_licenses/python/websockets-16.1.1/websockets-16.1.1.dist-info/licenses/LICENSE": "0f44514998aca209d3482d10204a8adf2aa4296ff157a36a5c0922f2280632d3"
+    }
+  },
+  {
+    "ecosystem": "Runtime",
+    "name": "CPython and standard-library third parties",
+    "version": "3.12.14",
+    "scope": "bundled runtime",
+    "license": "PSF and component notices",
+    "source": "https://www.python.org/downloads/release/python-31214/",
+    "files": [
+      "third_party_licenses/runtime/Python-LICENSE.txt",
+      "third_party_licenses/runtime/Python-THIRD-PARTY-LICENSES.rst"
+    ],
+    "sha256": {
+      "third_party_licenses/runtime/Python-LICENSE.txt": "886a0ead2d89030ee62dbff52b04e47ab91998341295bb9c56fb952b4e081c7a",
+      "third_party_licenses/runtime/Python-THIRD-PARTY-LICENSES.rst": "341832873fd316a37927e79385093fbbfd40a467428480835fe435a80cadf4e5"
+    }
+  },
+  {
+    "ecosystem": "Runtime",
+    "name": "Expat",
+    "version": "2.8.3",
+    "scope": "bundled XML parser",
+    "license": "MIT",
+    "source": "https://github.com/libexpat/libexpat/tree/R_2_8_3",
+    "files": [
+      "third_party_licenses/runtime/Expat-COPYING.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/runtime/Expat-COPYING.txt": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+    }
+  },
+  {
+    "ecosystem": "Runtime",
+    "name": "libffi",
+    "version": "see bundled runtime binary",
+    "scope": "bundled ctypes native dependency",
+    "license": "MIT",
+    "source": "https://github.com/libffi/libffi",
+    "files": [
+      "third_party_licenses/runtime/libffi-LICENSE.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/runtime/libffi-LICENSE.txt": "2c9c2acb9743e6b007b91350475308aee44691d96aa20eacef8e199988c8c388"
+    }
+  },
+  {
+    "ecosystem": "Runtime",
+    "name": "OpenSSL",
+    "version": "3.5.8",
+    "scope": "bundled libcrypto/libssl",
+    "license": "Apache-2.0",
+    "source": "https://github.com/openssl/openssl/tree/openssl-3.5.8",
+    "files": [
+      "third_party_licenses/runtime/OpenSSL-LICENSE.txt",
+      "third_party_licenses/runtime/OpenSSL-AUTHORS.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/runtime/OpenSSL-LICENSE.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+      "third_party_licenses/runtime/OpenSSL-AUTHORS.txt": "b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e"
+    }
+  },
+  {
+    "ecosystem": "Runtime",
+    "name": "SQLite",
+    "version": "3.53.1",
+    "scope": "bundled SQLite native runtime",
+    "license": "Public domain",
+    "source": "https://www.sqlite.org/copyright.html",
+    "files": [
+      "third_party_licenses/runtime/SQLite-PUBLIC-DOMAIN.html"
+    ],
+    "sha256": {
+      "third_party_licenses/runtime/SQLite-PUBLIC-DOMAIN.html": "44ca9f793055c8e32fc65f65a4f5bcf813a33f5bdaaa084067dd617a4ed3cc70"
+    }
+  },
+  {
+    "ecosystem": "Runtime",
+    "name": "XZ / liblzma",
+    "version": "not exposed by Python",
+    "scope": "bundled lzma native dependency; upstream 5.2.5 licensing reference",
+    "license": "Public domain (liblzma; see component notice)",
+    "source": "https://github.com/tukaani-project/xz/tree/v5.2.5",
+    "files": [
+      "third_party_licenses/runtime/XZ-liblzma-COPYING.txt"
+    ],
+    "sha256": {
+      "third_party_licenses/runtime/XZ-liblzma-COPYING.txt": "bcb02973ef6e87ea73d331b3a80df7748407f17efdb784b61b47e0e610d3bb5c"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/code-frame",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-code-frame",
+    "files": [
+      "third_party_licenses/frontend/_babel_code-frame-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_code-frame-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/compat-data",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/babel/babel.git",
+    "files": [
+      "third_party_licenses/frontend/_babel_compat-data-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_compat-data-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/core",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-core",
+    "files": [
+      "third_party_licenses/frontend/_babel_core-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_core-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/generator",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-generator",
+    "files": [
+      "third_party_licenses/frontend/_babel_generator-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_generator-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/helper-compilation-targets",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/babel/babel.git",
+    "files": [
+      "third_party_licenses/frontend/_babel_helper-compilation-targets-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_helper-compilation-targets-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/helper-globals",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/babel/babel.git",
+    "files": [
+      "third_party_licenses/frontend/_babel_helper-globals-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_helper-globals-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/helper-module-imports",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-helper-module-imports",
+    "files": [
+      "third_party_licenses/frontend/_babel_helper-module-imports-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_helper-module-imports-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/helper-module-transforms",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-helper-module-transforms",
+    "files": [
+      "third_party_licenses/frontend/_babel_helper-module-transforms-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_helper-module-transforms-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/helper-plugin-utils",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-helper-plugin-utils",
+    "files": [
+      "third_party_licenses/frontend/_babel_helper-plugin-utils-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_helper-plugin-utils-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/helper-string-parser",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-helper-string-parser",
+    "files": [
+      "third_party_licenses/frontend/_babel_helper-string-parser-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_helper-string-parser-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/helper-validator-identifier",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/babel/babel.git",
+    "files": [
+      "third_party_licenses/frontend/_babel_helper-validator-identifier-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_helper-validator-identifier-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/helper-validator-option",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/babel/babel.git",
+    "files": [
+      "third_party_licenses/frontend/_babel_helper-validator-option-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_helper-validator-option-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/helpers",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-helpers",
+    "files": [
+      "third_party_licenses/frontend/_babel_helpers-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_helpers-7.29.7/LICENSE": "4be9d87b56a306293223b490c0d0b245e9e94f39884147bf051a6c7b825aeb30"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/parser",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-parser",
+    "files": [
+      "third_party_licenses/frontend/_babel_parser-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_parser-7.29.7/LICENSE": "2e97627cb278aa7556fb9e8817368302301a595b6c7582512b8d74c57b773652"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/plugin-transform-react-jsx-self",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-self",
+    "files": [
+      "third_party_licenses/frontend/_babel_plugin-transform-react-jsx-self-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_plugin-transform-react-jsx-self-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/plugin-transform-react-jsx-source",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-plugin-transform-react-jsx-source",
+    "files": [
+      "third_party_licenses/frontend/_babel_plugin-transform-react-jsx-source-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_plugin-transform-react-jsx-source-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/template",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-template",
+    "files": [
+      "third_party_licenses/frontend/_babel_template-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_template-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/traverse",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-traverse",
+    "files": [
+      "third_party_licenses/frontend/_babel_traverse-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_traverse-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@babel/types",
+    "version": "7.29.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://babel.dev/docs/en/next/babel-types",
+    "files": [
+      "third_party_licenses/frontend/_babel_types-7.29.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_babel_types-7.29.7/LICENSE": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@esbuild/win32-x64",
+    "version": "0.28.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "git+https://github.com/evanw/esbuild.git",
+    "files": [
+      "third_party_licenses/frontend/_esbuild_win32-x64-0.28.1/LICENSE.md"
+    ],
+    "license_text_origin": "same-version parent tool esbuild",
+    "sha256": {
+      "third_party_licenses/frontend/_esbuild_win32-x64-0.28.1/LICENSE.md": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@jridgewell/gen-mapping",
+    "version": "0.3.13",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/jridgewell/sourcemaps/tree/main/packages/gen-mapping",
+    "files": [
+      "third_party_licenses/frontend/_jridgewell_gen-mapping-0.3.13/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_jridgewell_gen-mapping-0.3.13/LICENSE": "769d154fbde32a915af110b1123650bc79f4cbe675acc66e005265bf069c6c6c"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@jridgewell/remapping",
+    "version": "2.3.5",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/jridgewell/sourcemaps/tree/main/packages/remapping",
+    "files": [
+      "third_party_licenses/frontend/_jridgewell_remapping-2.3.5/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_jridgewell_remapping-2.3.5/LICENSE": "769d154fbde32a915af110b1123650bc79f4cbe675acc66e005265bf069c6c6c"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@jridgewell/resolve-uri",
+    "version": "3.1.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/jridgewell/resolve-uri",
+    "files": [
+      "third_party_licenses/frontend/_jridgewell_resolve-uri-3.1.2/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_jridgewell_resolve-uri-3.1.2/LICENSE": "b8778b155bfde5a28b023a558753c0fa058a52bb9de35c343c250be1bbcdedab"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@jridgewell/sourcemap-codec",
+    "version": "1.5.5",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/jridgewell/sourcemaps/tree/main/packages/sourcemap-codec",
+    "files": [
+      "third_party_licenses/frontend/_jridgewell_sourcemap-codec-1.5.5/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_jridgewell_sourcemap-codec-1.5.5/LICENSE": "769d154fbde32a915af110b1123650bc79f4cbe675acc66e005265bf069c6c6c"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@jridgewell/trace-mapping",
+    "version": "0.3.31",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/jridgewell/sourcemaps/tree/main/packages/trace-mapping",
+    "files": [
+      "third_party_licenses/frontend/_jridgewell_trace-mapping-0.3.31/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_jridgewell_trace-mapping-0.3.31/LICENSE": "769d154fbde32a915af110b1123650bc79f4cbe675acc66e005265bf069c6c6c"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@rolldown/pluginutils",
+    "version": "1.0.0-rc.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://rolldown.rs/",
+    "files": [
+      "third_party_licenses/frontend/_rolldown_pluginutils-1.0.0-rc.3/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_rolldown_pluginutils-1.0.0-rc.3/LICENSE": "23ecfff35a5a2e80d92142f75228912c3b1abc4b5a8337a821ff4397e2f9f734"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@rollup/rollup-win32-x64-gnu",
+    "version": "4.62.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://rollupjs.org/",
+    "files": [
+      "third_party_licenses/frontend/_rollup_rollup-win32-x64-gnu-4.62.2/LICENSE.md"
+    ],
+    "license_text_origin": "same-version parent tool rollup",
+    "sha256": {
+      "third_party_licenses/frontend/_rollup_rollup-win32-x64-gnu-4.62.2/LICENSE.md": "fa1bd040c5bdeefe65b3821cebf474f2733ce65df13089bd151dda1778e62fe8"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@rollup/rollup-win32-x64-msvc",
+    "version": "4.62.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://rollupjs.org/",
+    "files": [
+      "third_party_licenses/frontend/_rollup_rollup-win32-x64-msvc-4.62.2/LICENSE.md"
+    ],
+    "license_text_origin": "same-version parent tool rollup",
+    "sha256": {
+      "third_party_licenses/frontend/_rollup_rollup-win32-x64-msvc-4.62.2/LICENSE.md": "fa1bd040c5bdeefe65b3821cebf474f2733ce65df13089bd151dda1778e62fe8"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/babel__core",
+    "version": "7.20.5",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__core",
+    "files": [
+      "third_party_licenses/frontend/_types_babel__core-7.20.5/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_babel__core-7.20.5/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/babel__generator",
+    "version": "7.27.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__generator",
+    "files": [
+      "third_party_licenses/frontend/_types_babel__generator-7.27.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_babel__generator-7.27.0/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/babel__template",
+    "version": "7.4.4",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__template",
+    "files": [
+      "third_party_licenses/frontend/_types_babel__template-7.4.4/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_babel__template-7.4.4/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/babel__traverse",
+    "version": "7.28.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/babel__traverse",
+    "files": [
+      "third_party_licenses/frontend/_types_babel__traverse-7.28.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_babel__traverse-7.28.0/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/debug",
+    "version": "4.1.13",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/debug",
+    "files": [
+      "third_party_licenses/frontend/_types_debug-4.1.13/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_debug-4.1.13/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/estree",
+    "version": "1.0.9",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/estree",
+    "files": [
+      "third_party_licenses/frontend/_types_estree-1.0.9/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_estree-1.0.9/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/estree-jsx",
+    "version": "1.0.5",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/estree-jsx",
+    "files": [
+      "third_party_licenses/frontend/_types_estree-jsx-1.0.5/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_estree-jsx-1.0.5/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/hast",
+    "version": "3.0.5",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/hast",
+    "files": [
+      "third_party_licenses/frontend/_types_hast-3.0.5/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_hast-3.0.5/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/mdast",
+    "version": "4.0.4",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/mdast",
+    "files": [
+      "third_party_licenses/frontend/_types_mdast-4.0.4/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_mdast-4.0.4/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/ms",
+    "version": "2.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/ms",
+    "files": [
+      "third_party_licenses/frontend/_types_ms-2.1.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_ms-2.1.0/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/unist",
+    "version": "2.0.11",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/unist",
+    "files": [
+      "third_party_licenses/frontend/_types_unist-2.0.11/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_unist-2.0.11/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@types/unist",
+    "version": "3.0.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/unist",
+    "files": [
+      "third_party_licenses/frontend/_types_unist-3.0.3/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_types_unist-3.0.3/LICENSE": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@ungap/structured-clone",
+    "version": "1.3.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "ISC",
+    "source": "https://github.com/ungap/structured-clone#readme",
+    "files": [
+      "third_party_licenses/frontend/_ungap_structured-clone-1.3.3/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_ungap_structured-clone-1.3.3/LICENSE": "dc6d4961d8b6ee747231582ae9c53ce1d66bf76bc9f5a28f554c0e97210953bf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "@vitejs/plugin-react",
+    "version": "5.2.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#readme",
+    "files": [
+      "third_party_licenses/frontend/_vitejs_plugin-react-5.2.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/_vitejs_plugin-react-5.2.0/LICENSE": "29b68325fe026047d13e187b44c33b2acacf7dc647dec4583702e59f235e13b5"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "bail",
+    "version": "2.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/bail",
+    "files": [
+      "third_party_licenses/frontend/bail-2.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/bail-2.0.2/license": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "baseline-browser-mapping",
+    "version": "2.10.43",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "Apache-2.0",
+    "source": "git+https://github.com/web-platform-dx/baseline-browser-mapping.git",
+    "files": [
+      "third_party_licenses/frontend/baseline-browser-mapping-2.10.43/LICENSE.txt"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/baseline-browser-mapping-2.10.43/LICENSE.txt": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "browserslist",
+    "version": "4.28.6",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "browserslist/browserslist",
+    "files": [
+      "third_party_licenses/frontend/browserslist-4.28.6/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/browserslist-4.28.6/LICENSE": "21c2679a63d7699c0e644409e2f17d0adbc7a965003feb06b3ff4b833d21f722"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "caniuse-lite",
+    "version": "1.0.30001806",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "CC-BY-4.0",
+    "source": "browserslist/caniuse-lite",
+    "files": [
+      "third_party_licenses/frontend/caniuse-lite-1.0.30001806/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/caniuse-lite-1.0.30001806/LICENSE": "fd3a263fe19ed8faa9068b43abaebafc02c77897b0c6fc09abc04bb592e5f16e"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "ccount",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/ccount",
+    "files": [
+      "third_party_licenses/frontend/ccount-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/ccount-2.0.1/license": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "character-entities",
+    "version": "2.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/character-entities",
+    "files": [
+      "third_party_licenses/frontend/character-entities-2.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/character-entities-2.0.2/license": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "character-entities-html4",
+    "version": "2.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/character-entities-html4",
+    "files": [
+      "third_party_licenses/frontend/character-entities-html4-2.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/character-entities-html4-2.1.0/license": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "character-entities-legacy",
+    "version": "3.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/character-entities-legacy",
+    "files": [
+      "third_party_licenses/frontend/character-entities-legacy-3.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/character-entities-legacy-3.0.0/license": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "character-reference-invalid",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/character-reference-invalid",
+    "files": [
+      "third_party_licenses/frontend/character-reference-invalid-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/character-reference-invalid-2.0.1/license": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "comma-separated-tokens",
+    "version": "2.0.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/comma-separated-tokens",
+    "files": [
+      "third_party_licenses/frontend/comma-separated-tokens-2.0.3/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/comma-separated-tokens-2.0.3/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "convert-source-map",
+    "version": "2.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/thlorenz/convert-source-map",
+    "files": [
+      "third_party_licenses/frontend/convert-source-map-2.0.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/convert-source-map-2.0.0/LICENSE": "1fa6ee8bb95a81ae3d73a5bd074a3ac380ffec13697051063ca1a601921b91db"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "debug",
+    "version": "4.4.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "git://github.com/debug-js/debug.git",
+    "files": [
+      "third_party_licenses/frontend/debug-4.4.3/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/debug-4.4.3/LICENSE": "3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "decode-named-character-reference",
+    "version": "1.3.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/decode-named-character-reference",
+    "files": [
+      "third_party_licenses/frontend/decode-named-character-reference-1.3.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/decode-named-character-reference-1.3.0/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "dequal",
+    "version": "2.0.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "lukeed/dequal",
+    "files": [
+      "third_party_licenses/frontend/dequal-2.0.3/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/dequal-2.0.3/license": "306fa513e39b23a6e8747520de761809d206b99800ef41907b530226574c59ae"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "devlop",
+    "version": "1.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/devlop",
+    "files": [
+      "third_party_licenses/frontend/devlop-1.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/devlop-1.1.0/license": "6f296a5eccc1dc96714bb94ebaa9cac25b0a1467d74cc5263ac4d0646ab01f62"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "electron-to-chromium",
+    "version": "1.5.392",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "ISC",
+    "source": "git+https://github.com/Kilian/electron-to-chromium.git",
+    "files": [
+      "third_party_licenses/frontend/electron-to-chromium-1.5.392/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/electron-to-chromium-1.5.392/LICENSE": "25ba5c59dad3e0dd8f9540beaa0f0a86a10e3aec35af5fdc8e88c5f6a5c0d8c6"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "entities",
+    "version": "6.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "BSD-2-Clause",
+    "source": "git://github.com/fb55/entities.git",
+    "files": [
+      "third_party_licenses/frontend/entities-6.0.1/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/entities-6.0.1/LICENSE": "cb992345949ccd6e8394b2cd6c465f7b897c864f845937dbf64e8997f389e164"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "esbuild",
+    "version": "0.28.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "git+https://github.com/evanw/esbuild.git",
+    "files": [
+      "third_party_licenses/frontend/esbuild-0.28.1/LICENSE.md"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/esbuild-0.28.1/LICENSE.md": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "escalade",
+    "version": "3.2.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "lukeed/escalade",
+    "files": [
+      "third_party_licenses/frontend/escalade-3.2.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/escalade-3.2.0/license": "9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "escape-string-regexp",
+    "version": "5.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "sindresorhus/escape-string-regexp",
+    "files": [
+      "third_party_licenses/frontend/escape-string-regexp-5.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/escape-string-regexp-5.0.0/license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "estree-util-is-identifier-name",
+    "version": "3.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/estree-util-is-identifier-name",
+    "files": [
+      "third_party_licenses/frontend/estree-util-is-identifier-name-3.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/estree-util-is-identifier-name-3.0.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "extend",
+    "version": "3.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/justmoon/node-extend.git",
+    "files": [
+      "third_party_licenses/frontend/extend-3.0.2/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/extend-3.0.2/LICENSE": "97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "fdir",
+    "version": "6.5.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/thecodrr/fdir#readme",
+    "files": [
+      "third_party_licenses/frontend/fdir-6.5.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/fdir-6.5.0/LICENSE": "9a39f2aadab11a3697edd668ff2d8ad885b649737b7ab4d3bf12b34e5ada0c86"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "gensync",
+    "version": "1.0.0-beta.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/loganfsmyth/gensync",
+    "files": [
+      "third_party_licenses/frontend/gensync-1.0.0-beta.2/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/gensync-1.0.0-beta.2/LICENSE": "e3a956681ee067f971ac413994171b3d90ca801ec6324e76c9c55366cfe31cb0"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "hast-util-from-parse5",
+    "version": "8.0.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/hast-util-from-parse5",
+    "files": [
+      "third_party_licenses/frontend/hast-util-from-parse5-8.0.3/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/hast-util-from-parse5-8.0.3/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "hast-util-parse-selector",
+    "version": "4.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/hast-util-parse-selector",
+    "files": [
+      "third_party_licenses/frontend/hast-util-parse-selector-4.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/hast-util-parse-selector-4.0.0/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "hast-util-raw",
+    "version": "9.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/hast-util-raw",
+    "files": [
+      "third_party_licenses/frontend/hast-util-raw-9.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/hast-util-raw-9.1.0/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "hast-util-sanitize",
+    "version": "5.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/hast-util-sanitize",
+    "files": [
+      "third_party_licenses/frontend/hast-util-sanitize-5.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/hast-util-sanitize-5.0.2/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "hast-util-to-jsx-runtime",
+    "version": "2.3.6",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/hast-util-to-jsx-runtime",
+    "files": [
+      "third_party_licenses/frontend/hast-util-to-jsx-runtime-2.3.6/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/hast-util-to-jsx-runtime-2.3.6/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "hast-util-to-parse5",
+    "version": "8.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/hast-util-to-parse5",
+    "files": [
+      "third_party_licenses/frontend/hast-util-to-parse5-8.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/hast-util-to-parse5-8.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "hast-util-whitespace",
+    "version": "3.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/hast-util-whitespace",
+    "files": [
+      "third_party_licenses/frontend/hast-util-whitespace-3.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/hast-util-whitespace-3.0.0/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "hastscript",
+    "version": "9.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/hastscript",
+    "files": [
+      "third_party_licenses/frontend/hastscript-9.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/hastscript-9.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "html-url-attributes",
+    "version": "3.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/rehypejs/rehype-minify/tree/main/packages/html-url-attributes",
+    "files": [
+      "third_party_licenses/frontend/html-url-attributes-3.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/html-url-attributes-3.0.1/license": "e18cf5173e928f808f0cd208097fee8fbec9d28fc0255213938e4c559e29ff58"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "html-void-elements",
+    "version": "3.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/html-void-elements",
+    "files": [
+      "third_party_licenses/frontend/html-void-elements-3.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/html-void-elements-3.0.0/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "inline-style-parser",
+    "version": "0.2.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "git+https://github.com/remarkablemark/inline-style-parser.git",
+    "files": [
+      "third_party_licenses/frontend/inline-style-parser-0.2.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/inline-style-parser-0.2.7/LICENSE": "395c95f20598da653ff1eb1cb9d74947c7fac689697147f1d192fd0242a0e635"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "is-alphabetical",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/is-alphabetical",
+    "files": [
+      "third_party_licenses/frontend/is-alphabetical-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/is-alphabetical-2.0.1/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "is-alphanumerical",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/is-alphanumerical",
+    "files": [
+      "third_party_licenses/frontend/is-alphanumerical-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/is-alphanumerical-2.0.1/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "is-decimal",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/is-decimal",
+    "files": [
+      "third_party_licenses/frontend/is-decimal-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/is-decimal-2.0.1/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "is-hexadecimal",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/is-hexadecimal",
+    "files": [
+      "third_party_licenses/frontend/is-hexadecimal-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/is-hexadecimal-2.0.1/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "is-plain-obj",
+    "version": "4.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "sindresorhus/is-plain-obj",
+    "files": [
+      "third_party_licenses/frontend/is-plain-obj-4.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/is-plain-obj-4.1.0/license": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "js-tokens",
+    "version": "4.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "lydell/js-tokens",
+    "files": [
+      "third_party_licenses/frontend/js-tokens-4.0.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/js-tokens-4.0.0/LICENSE": "2213d91c606205c71eb051a199478cdc2adde945893404d7f1421436dd6d5cc1"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "jsesc",
+    "version": "3.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://mths.be/jsesc",
+    "files": [
+      "third_party_licenses/frontend/jsesc-3.1.0/LICENSE-MIT.txt"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/jsesc-3.1.0/LICENSE-MIT.txt": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "json5",
+    "version": "2.2.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "http://json5.org/",
+    "files": [
+      "third_party_licenses/frontend/json5-2.2.3/LICENSE.md"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/json5-2.2.3/LICENSE.md": "53e59feb13058722d977c699eb0407c7bce2f93c949b681bbd2ff31698535927"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "longest-streak",
+    "version": "3.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/longest-streak",
+    "files": [
+      "third_party_licenses/frontend/longest-streak-3.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/longest-streak-3.1.0/license": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "lru-cache",
+    "version": "5.1.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "ISC",
+    "source": "git://github.com/isaacs/node-lru-cache.git",
+    "files": [
+      "third_party_licenses/frontend/lru-cache-5.1.1/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/lru-cache-5.1.1/LICENSE": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "markdown-table",
+    "version": "3.0.4",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/markdown-table",
+    "files": [
+      "third_party_licenses/frontend/markdown-table-3.0.4/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/markdown-table-3.0.4/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-find-and-replace",
+    "version": "3.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-find-and-replace",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-find-and-replace-3.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-find-and-replace-3.0.2/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-from-markdown",
+    "version": "2.0.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-from-markdown",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-from-markdown-2.0.3/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-from-markdown-2.0.3/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-gfm",
+    "version": "3.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-gfm",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-gfm-3.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-gfm-3.1.0/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-gfm-autolink-literal",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-gfm-autolink-literal",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-gfm-autolink-literal-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-gfm-autolink-literal-2.0.1/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-gfm-footnote",
+    "version": "2.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-gfm-footnote",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-gfm-footnote-2.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-gfm-footnote-2.1.0/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-gfm-strikethrough",
+    "version": "2.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-gfm-strikethrough",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-gfm-strikethrough-2.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-gfm-strikethrough-2.0.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-gfm-table",
+    "version": "2.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-gfm-table",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-gfm-table-2.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-gfm-table-2.0.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-gfm-task-list-item",
+    "version": "2.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-gfm-task-list-item",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-gfm-task-list-item-2.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-gfm-task-list-item-2.0.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-mdx-expression",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-mdx-expression",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-mdx-expression-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-mdx-expression-2.0.1/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-mdx-jsx",
+    "version": "3.2.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-mdx-jsx",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-mdx-jsx-3.2.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-mdx-jsx-3.2.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-mdxjs-esm",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-mdxjs-esm",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-mdxjs-esm-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-mdxjs-esm-2.0.1/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-phrasing",
+    "version": "4.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-phrasing",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-phrasing-4.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-phrasing-4.1.0/license": "b6d1a4e1831b177acc96f22a817d4f0f4c18419355badc3125754445fc69e3a7"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-to-hast",
+    "version": "13.2.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-to-hast",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-to-hast-13.2.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-to-hast-13.2.1/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-to-markdown",
+    "version": "2.1.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-to-markdown",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-to-markdown-2.1.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-to-markdown-2.1.2/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "mdast-util-to-string",
+    "version": "4.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/mdast-util-to-string",
+    "files": [
+      "third_party_licenses/frontend/mdast-util-to-string-4.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/mdast-util-to-string-4.0.0/license": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark",
+    "version": "4.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark",
+    "files": [
+      "third_party_licenses/frontend/micromark-4.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-4.0.2/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-core-commonmark",
+    "version": "2.0.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-core-commonmark",
+    "files": [
+      "third_party_licenses/frontend/micromark-core-commonmark-2.0.3/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-core-commonmark-2.0.3/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-extension-gfm",
+    "version": "3.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "micromark/micromark-extension-gfm",
+    "files": [
+      "third_party_licenses/frontend/micromark-extension-gfm-3.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-extension-gfm-3.0.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-extension-gfm-autolink-literal",
+    "version": "2.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "micromark/micromark-extension-gfm-autolink-literal",
+    "files": [
+      "third_party_licenses/frontend/micromark-extension-gfm-autolink-literal-2.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-extension-gfm-autolink-literal-2.1.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-extension-gfm-footnote",
+    "version": "2.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "micromark/micromark-extension-gfm-footnote",
+    "files": [
+      "third_party_licenses/frontend/micromark-extension-gfm-footnote-2.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-extension-gfm-footnote-2.1.0/license": "807a88522a850092aece49486207c17c313c4d5708ac276524840fe1caa0b0fa"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-extension-gfm-strikethrough",
+    "version": "2.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "micromark/micromark-extension-gfm-strikethrough",
+    "files": [
+      "third_party_licenses/frontend/micromark-extension-gfm-strikethrough-2.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-extension-gfm-strikethrough-2.1.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-extension-gfm-table",
+    "version": "2.1.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "micromark/micromark-extension-gfm-table",
+    "files": [
+      "third_party_licenses/frontend/micromark-extension-gfm-table-2.1.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-extension-gfm-table-2.1.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-extension-gfm-tagfilter",
+    "version": "2.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "micromark/micromark-extension-gfm-tagfilter",
+    "files": [
+      "third_party_licenses/frontend/micromark-extension-gfm-tagfilter-2.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-extension-gfm-tagfilter-2.0.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-extension-gfm-task-list-item",
+    "version": "2.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "micromark/micromark-extension-gfm-task-list-item",
+    "files": [
+      "third_party_licenses/frontend/micromark-extension-gfm-task-list-item-2.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-extension-gfm-task-list-item-2.1.0/license": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-factory-destination",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-destination",
+    "files": [
+      "third_party_licenses/frontend/micromark-factory-destination-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-factory-destination-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-factory-label",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-label",
+    "files": [
+      "third_party_licenses/frontend/micromark-factory-label-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-factory-label-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-factory-space",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-space",
+    "files": [
+      "third_party_licenses/frontend/micromark-factory-space-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-factory-space-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-factory-title",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-title",
+    "files": [
+      "third_party_licenses/frontend/micromark-factory-title-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-factory-title-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-factory-whitespace",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-factory-whitespace",
+    "files": [
+      "third_party_licenses/frontend/micromark-factory-whitespace-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-factory-whitespace-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-character",
+    "version": "2.1.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-character",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-character-2.1.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-character-2.1.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-chunked",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-chunked",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-chunked-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-chunked-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-classify-character",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-classify-character",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-classify-character-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-classify-character-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-combine-extensions",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-combine-extensions",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-combine-extensions-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-combine-extensions-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-decode-numeric-character-reference",
+    "version": "2.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-decode-numeric-character-reference",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-decode-numeric-character-reference-2.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-decode-numeric-character-reference-2.0.2/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-decode-string",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-decode-string",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-decode-string-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-decode-string-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-encode",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-encode",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-encode-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-encode-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-html-tag-name",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-html-tag-name",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-html-tag-name-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-html-tag-name-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-normalize-identifier",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-normalize-identifier",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-normalize-identifier-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-normalize-identifier-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-resolve-all",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-resolve-all",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-resolve-all-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-resolve-all-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-sanitize-uri",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-sanitize-uri",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-sanitize-uri-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-sanitize-uri-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-subtokenize",
+    "version": "2.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-subtokenize",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-subtokenize-2.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-subtokenize-2.1.0/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-symbol",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-symbol",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-symbol-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-symbol-2.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "micromark-util-types",
+    "version": "2.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromark/micromark/tree/main/packages/micromark-util-types",
+    "files": [
+      "third_party_licenses/frontend/micromark-util-types-2.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/micromark-util-types-2.0.2/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "ms",
+    "version": "2.1.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "vercel/ms",
+    "files": [
+      "third_party_licenses/frontend/ms-2.1.3/license.md"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/ms-2.1.3/license.md": "1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "nanoid",
+    "version": "3.3.16",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "ai/nanoid",
+    "files": [
+      "third_party_licenses/frontend/nanoid-3.3.16/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/nanoid-3.3.16/LICENSE": "da4db1480d9beea3483a2eda5c53b22238d0827d57da162b48f122e04d2d9987"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "node-releases",
+    "version": "2.0.51",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/chicoxyzzy/node-releases.git",
+    "files": [
+      "third_party_licenses/frontend/node-releases-2.0.51/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/node-releases-2.0.51/LICENSE": "3706296ed611888111ceccc1dff4712844dea4bde0b185c82d718c3b69895abe"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "parse-entities",
+    "version": "4.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/parse-entities",
+    "files": [
+      "third_party_licenses/frontend/parse-entities-4.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/parse-entities-4.0.2/license": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "parse5",
+    "version": "7.3.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://parse5.js.org",
+    "files": [
+      "third_party_licenses/frontend/parse5-7.3.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/parse5-7.3.0/LICENSE": "8c535800331e1e4439835555b3f9edc7fe9dee2fab0d8bbbd5a982e8b8343d4d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "picocolors",
+    "version": "1.1.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "ISC",
+    "source": "alexeyraspopov/picocolors",
+    "files": [
+      "third_party_licenses/frontend/picocolors-1.1.1/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/picocolors-1.1.1/LICENSE": "6582629e2979466878f6014313dcc2f3756c9616148682227ce3063dde310750"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "picomatch",
+    "version": "4.0.5",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://github.com/micromatch/picomatch",
+    "files": [
+      "third_party_licenses/frontend/picomatch-4.0.5/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/picomatch-4.0.5/LICENSE": "d0cd141b0c322fded5dfad1d4645bb2fedfc05b7321fe1009469638190d59ef9"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "postcss",
+    "version": "8.5.19",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://postcss.org/",
+    "files": [
+      "third_party_licenses/frontend/postcss-8.5.19/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/postcss-8.5.19/LICENSE": "5be1f3465bba68a626777f984878814aaf35e7ef8e9fd314d469bcf887050fb8"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "property-information",
+    "version": "7.2.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/property-information",
+    "files": [
+      "third_party_licenses/frontend/property-information-7.2.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/property-information-7.2.0/license": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "react",
+    "version": "19.2.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://react.dev/",
+    "files": [
+      "third_party_licenses/frontend/react-19.2.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/react-19.2.7/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "react-dom",
+    "version": "19.2.7",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://react.dev/",
+    "files": [
+      "third_party_licenses/frontend/react-dom-19.2.7/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/react-dom-19.2.7/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "react-markdown",
+    "version": "10.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "remarkjs/react-markdown",
+    "files": [
+      "third_party_licenses/frontend/react-markdown-10.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/react-markdown-10.1.0/license": "f6196c64e144f9a6fa9154c3a80bc8b89615a9567934b83a8951879f06ba2aef"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "react-refresh",
+    "version": "0.18.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://react.dev/",
+    "files": [
+      "third_party_licenses/frontend/react-refresh-0.18.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/react-refresh-0.18.0/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "rehype-raw",
+    "version": "7.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "rehypejs/rehype-raw",
+    "files": [
+      "third_party_licenses/frontend/rehype-raw-7.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/rehype-raw-7.0.0/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "rehype-sanitize",
+    "version": "6.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "rehypejs/rehype-sanitize",
+    "files": [
+      "third_party_licenses/frontend/rehype-sanitize-6.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/rehype-sanitize-6.0.0/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "remark-gfm",
+    "version": "4.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "remarkjs/remark-gfm",
+    "files": [
+      "third_party_licenses/frontend/remark-gfm-4.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/remark-gfm-4.0.1/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "remark-parse",
+    "version": "11.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://remark.js.org",
+    "files": [
+      "third_party_licenses/frontend/remark-parse-11.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/remark-parse-11.0.0/license": "413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "remark-rehype",
+    "version": "11.1.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "remarkjs/remark-rehype",
+    "files": [
+      "third_party_licenses/frontend/remark-rehype-11.1.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/remark-rehype-11.1.2/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "remark-stringify",
+    "version": "11.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://remark.js.org",
+    "files": [
+      "third_party_licenses/frontend/remark-stringify-11.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/remark-stringify-11.0.0/license": "413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "rollup",
+    "version": "4.62.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://rollupjs.org/",
+    "files": [
+      "third_party_licenses/frontend/rollup-4.62.2/LICENSE.md"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/rollup-4.62.2/LICENSE.md": "fa1bd040c5bdeefe65b3821cebf474f2733ce65df13089bd151dda1778e62fe8"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "scheduler",
+    "version": "0.27.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://react.dev/",
+    "files": [
+      "third_party_licenses/frontend/scheduler-0.27.0/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/scheduler-0.27.0/LICENSE": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "semver",
+    "version": "6.3.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "ISC",
+    "source": "https://github.com/npm/node-semver.git",
+    "files": [
+      "third_party_licenses/frontend/semver-6.3.1/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/semver-6.3.1/LICENSE": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "source-map-js",
+    "version": "1.2.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/7rulnik/source-map-js",
+    "files": [
+      "third_party_licenses/frontend/source-map-js-1.2.1/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/source-map-js-1.2.1/LICENSE": "6cb0631f71c7749763fd3dd1d5bee52dd1070ec17f2edc1710079ad070bd2fbd"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "space-separated-tokens",
+    "version": "2.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/space-separated-tokens",
+    "files": [
+      "third_party_licenses/frontend/space-separated-tokens-2.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/space-separated-tokens-2.0.2/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "stringify-entities",
+    "version": "4.0.4",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/stringify-entities",
+    "files": [
+      "third_party_licenses/frontend/stringify-entities-4.0.4/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/stringify-entities-4.0.4/license": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "style-to-js",
+    "version": "1.1.21",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "git+https://github.com/remarkablemark/style-to-js.git",
+    "files": [
+      "third_party_licenses/frontend/style-to-js-1.1.21/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/style-to-js-1.1.21/LICENSE": "bbb380e5c1a717079378d6ea4d33c8a5a81655d4612b749f882e34e46712aab5"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "style-to-object",
+    "version": "1.0.14",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "git+https://github.com/remarkablemark/style-to-object.git",
+    "files": [
+      "third_party_licenses/frontend/style-to-object-1.0.14/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/style-to-object-1.0.14/LICENSE": "896c9fd6b5fc48ac31800b9d29a6e3ffcb0c2d534ed077ebfa5c2fa388cc38b7"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "tinyglobby",
+    "version": "0.2.17",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://superchupu.dev/tinyglobby",
+    "files": [
+      "third_party_licenses/frontend/tinyglobby-0.2.17/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/tinyglobby-0.2.17/LICENSE": "22c68811e174cbbfb3813d4135918df4f540959c14d872e601d9abe83d3cde8f"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "trim-lines",
+    "version": "3.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/trim-lines",
+    "files": [
+      "third_party_licenses/frontend/trim-lines-3.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/trim-lines-3.0.1/license": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "trough",
+    "version": "2.2.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/trough",
+    "files": [
+      "third_party_licenses/frontend/trough-2.2.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/trough-2.2.0/license": "6c03fd41cfd7c92d8aa8a2fa521b94b2683f059123281dcf921ddea9216b6254"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "unified",
+    "version": "11.0.5",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://unifiedjs.com",
+    "files": [
+      "third_party_licenses/frontend/unified-11.0.5/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/unified-11.0.5/license": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "unist-util-is",
+    "version": "6.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/unist-util-is",
+    "files": [
+      "third_party_licenses/frontend/unist-util-is-6.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/unist-util-is-6.0.1/license": "82974dbf2639d13edab95c32ed9cb6c0867ede272cd2e07ce47ce8548fe55c05"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "unist-util-position",
+    "version": "5.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/unist-util-position",
+    "files": [
+      "third_party_licenses/frontend/unist-util-position-5.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/unist-util-position-5.0.0/license": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "unist-util-stringify-position",
+    "version": "4.0.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/unist-util-stringify-position",
+    "files": [
+      "third_party_licenses/frontend/unist-util-stringify-position-4.0.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/unist-util-stringify-position-4.0.0/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "unist-util-visit",
+    "version": "5.1.0",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/unist-util-visit",
+    "files": [
+      "third_party_licenses/frontend/unist-util-visit-5.1.0/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/unist-util-visit-5.1.0/license": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "unist-util-visit-parents",
+    "version": "6.0.2",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "syntax-tree/unist-util-visit-parents",
+    "files": [
+      "third_party_licenses/frontend/unist-util-visit-parents-6.0.2/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/unist-util-visit-parents-6.0.2/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "update-browserslist-db",
+    "version": "1.2.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "browserslist/update-db",
+    "files": [
+      "third_party_licenses/frontend/update-browserslist-db-1.2.3/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/update-browserslist-db-1.2.3/LICENSE": "c414dde36704bd9c8a76c7aa2921b19270ff9abeb478ea0050250d16cf29b0f6"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "vfile",
+    "version": "6.0.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "vfile/vfile",
+    "files": [
+      "third_party_licenses/frontend/vfile-6.0.3/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/vfile-6.0.3/license": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "vfile-location",
+    "version": "5.0.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "vfile/vfile-location",
+    "files": [
+      "third_party_licenses/frontend/vfile-location-5.0.3/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/vfile-location-5.0.3/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "vfile-message",
+    "version": "4.0.3",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "vfile/vfile-message",
+    "files": [
+      "third_party_licenses/frontend/vfile-message-4.0.3/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/vfile-message-4.0.3/license": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "vite",
+    "version": "7.3.6",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "https://vite.dev",
+    "files": [
+      "third_party_licenses/frontend/vite-7.3.6/LICENSE.md"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/vite-7.3.6/LICENSE.md": "a77a1c089806b39ad339535bdf3677f636c91d96693e8ad7b11fe733f650ea64"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "web-namespaces",
+    "version": "2.0.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/web-namespaces",
+    "files": [
+      "third_party_licenses/frontend/web-namespaces-2.0.1/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/web-namespaces-2.0.1/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "yallist",
+    "version": "3.1.1",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "ISC",
+    "source": "git+https://github.com/isaacs/yallist.git",
+    "files": [
+      "third_party_licenses/frontend/yallist-3.1.1/LICENSE"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/yallist-3.1.1/LICENSE": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
+    }
+  },
+  {
+    "ecosystem": "npm",
+    "name": "zwitch",
+    "version": "2.0.4",
+    "scope": "frontend production dependency graph (includes build tooling)",
+    "license": "MIT",
+    "source": "wooorm/zwitch",
+    "files": [
+      "third_party_licenses/frontend/zwitch-2.0.4/license"
+    ],
+    "license_text_origin": "installed package",
+    "sha256": {
+      "third_party_licenses/frontend/zwitch-2.0.4/license": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+    }
+  }
+]

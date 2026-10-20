@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -9,8 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import ConflictError, NotFoundError
+from app.core.credentials import credential_is_configured, credential_source
+from app.core.secrets import SecretStorageError, protect_secret
 from app.models import GatewayConfig, GatewayModel
 from app.providers.gateways import discover_gateway_models, probe_gateway
+from app.providers.model_probe import probe_gateway_model
 from app.schemas.api import (
     GatewayCreate,
     GatewayHealthRead,
@@ -19,6 +21,7 @@ from app.schemas.api import (
     GatewayModelUpdate,
     GatewayRead,
     GatewayUpdate,
+    ModelHealthRead,
     is_sensitive_metadata_key,
 )
 
@@ -37,7 +40,14 @@ class GatewayService:
         return _gateway_read(self._gateway(gateway_id))
 
     def create_gateway(self, payload: GatewayCreate) -> GatewayRead:
-        item = GatewayConfig(**payload.model_dump(mode="json"))
+        values = payload.model_dump(mode="json", exclude={"secret_value"})
+        item = GatewayConfig(**values)
+        if payload.secret_value:
+            try:
+                item.secret_ciphertext = protect_secret(payload.secret_value)
+            except SecretStorageError as exc:
+                raise ConflictError(str(exc)) from exc
+            item.secret_env_name = None
         item.name = item.name.strip()
         item.protocol = item.protocol.strip()
         item.base_url = item.base_url.strip().rstrip("/")
@@ -47,8 +57,27 @@ class GatewayService:
 
     def update_gateway(self, gateway_id: int, payload: GatewayUpdate) -> GatewayRead:
         item = self._gateway(gateway_id)
-        for key, value in payload.model_dump(exclude_unset=True, mode="json").items():
-            if isinstance(value, str) and key in {"name", "protocol", "base_url", "secret_env_name"}:
+        values = payload.model_dump(exclude_unset=True, mode="json")
+        secret_value = values.pop("secret_value", None)
+        clear_secret = bool(values.pop("clear_secret", False))
+        if clear_secret:
+            item.secret_ciphertext = None
+            item.secret_env_name = None
+        if secret_value:
+            try:
+                item.secret_ciphertext = protect_secret(secret_value)
+            except SecretStorageError as exc:
+                raise ConflictError(str(exc)) from exc
+            item.secret_env_name = None
+        elif "secret_env_name" in values and values["secret_env_name"]:
+            item.secret_ciphertext = None
+        for key, value in values.items():
+            if isinstance(value, str) and key in {
+                "name",
+                "protocol",
+                "base_url",
+                "secret_env_name",
+            }:
                 value = value.strip()
             setattr(item, key, value)
         self._commit_unique("A gateway with that name already exists")
@@ -61,7 +90,9 @@ class GatewayService:
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
-            raise ConflictError("Gateway or its models are referenced by a processing profile") from exc
+            raise ConflictError(
+                "Gateway or its models are referenced by a processing profile"
+            ) from exc
 
     async def health(self, gateway_id: int) -> GatewayHealthRead:
         item = self._gateway(gateway_id)
@@ -71,8 +102,6 @@ class GatewayService:
         )
         item.health_status = result.status
         item.last_checked_at = result.checked_at
-        for model in item.models:
-            model.health_status = result.status
         self.session.commit()
         return GatewayHealthRead(
             gateway_id=item.id,
@@ -85,9 +114,7 @@ class GatewayService:
         gateway = self._gateway(gateway_id)
         discovered = await discover_gateway_models(
             gateway,
-            timeout_seconds=_numeric_gateway_setting(
-                gateway, "timeout_seconds", 15.0, 1.0, 600.0
-            ),
+            timeout_seconds=_numeric_gateway_setting(gateway, "timeout_seconds", 15.0, 1.0, 600.0),
         )
         existing = {item.model_name: item for item in gateway.models}
         for raw in discovered:
@@ -125,6 +152,24 @@ class GatewayService:
 
     def get_model(self, model_id: int) -> GatewayModelRead:
         return _gateway_model_read(self._model(model_id))
+
+    async def health_model(self, model_id: int) -> ModelHealthRead:
+        item = self._model(model_id)
+        result = await probe_gateway_model(
+            item,
+            timeout_seconds=_numeric_gateway_setting(
+                item.gateway, "timeout_seconds", 30.0, 1.0, 30.0
+            ),
+        )
+        item.health_status = result.status
+        self.session.commit()
+        return ModelHealthRead(
+            model_id=item.id,
+            status=result.status,
+            detail=result.detail,
+            checked_at=result.checked_at,
+            latency_ms=result.latency_ms,
+        )
 
     def create_model(self, payload: GatewayModelCreate) -> GatewayModelRead:
         self._gateway(payload.gateway_id)
@@ -192,7 +237,8 @@ def _gateway_read(item: GatewayConfig) -> GatewayRead:
         protocol=item.protocol,
         base_url=item.base_url,
         secret_env_name=item.secret_env_name,
-        secret_configured=bool(item.secret_env_name and os.getenv(item.secret_env_name)),
+        secret_source=credential_source(item),
+        secret_configured=credential_is_configured(item),
         enabled=item.enabled,
         health_status=item.health_status,
         last_checked_at=item.last_checked_at,
@@ -259,8 +305,10 @@ def _apply_discovered_capabilities(item: GatewayModel, capabilities: dict[str, A
             setattr(item, field, value)
         elif field in numeric_fields and isinstance(value, (int, float)) and value > 0:
             setattr(item, field, float(value))
-        elif field in list_fields and isinstance(value, list) and all(
-            isinstance(entry, str) for entry in value
+        elif (
+            field in list_fields
+            and isinstance(value, list)
+            and all(isinstance(entry, str) for entry in value)
         ):
             setattr(item, field, value)
 
@@ -308,7 +356,7 @@ def seed_default_gateways(session: Session) -> None:
             "models": [
                 {
                     "model_name": "fun-asr-realtime-2026-02-28",
-                    "display_name": "Fun-ASR Realtime 2026-02-28",
+                    "display_name": "Fun-ASR 02-28（云端长音频）",
                     "supports_native_long_audio": True,
                     "supports_streaming": True,
                     "supports_segment_timestamps": True,
@@ -320,7 +368,7 @@ def seed_default_gateways(session: Session) -> None:
                 },
                 {
                     "model_name": "fun-asr-realtime",
-                    "display_name": "Fun-ASR Realtime (stable alias)",
+                    "display_name": "Fun-ASR（云端实时）",
                     "supports_native_long_audio": True,
                     "supports_streaming": True,
                     "supports_segment_timestamps": True,
@@ -336,11 +384,18 @@ def seed_default_gateways(session: Session) -> None:
             "gateway_type": "ASR",
             "protocol": "video2doc-asr-http-v1",
             "base_url": "http://127.0.0.1:8101",
-            "settings": {"timeout_seconds": 300, "max_retries": 1},
+            "settings": {
+                "timeout_seconds": 300,
+                "max_retries": 1,
+                "managed_lifecycle": True,
+                "runtime_kind": "asr",
+                "runtime_provider": "firered",
+                "startup_timeout_seconds": 600,
+            },
             "models": [
                 {
                     "model_name": "FireRedTeam/FireRedASR2-AED",
-                    "display_name": "FireRedASR2-AED",
+                    "display_name": "FireRed 2（中文·方言）",
                     "max_chunk_seconds": 55.0,
                     "supports_segment_timestamps": True,
                     "supports_word_timestamps": True,
@@ -356,11 +411,18 @@ def seed_default_gateways(session: Session) -> None:
             "gateway_type": "ASR",
             "protocol": "video2doc-asr-http-v1",
             "base_url": "http://127.0.0.1:8102",
-            "settings": {"timeout_seconds": 900, "max_retries": 0},
+            "settings": {
+                "timeout_seconds": 900,
+                "max_retries": 0,
+                "managed_lifecycle": True,
+                "runtime_kind": "asr",
+                "runtime_provider": "qwen",
+                "startup_timeout_seconds": 600,
+            },
             "models": [
                 {
                     "model_name": "Qwen/Qwen3-ASR-1.7B",
-                    "display_name": "Qwen3-ASR-1.7B + ForcedAligner",
+                    "display_name": "Qwen3 1.7B（多语·词级时间戳）",
                     "max_chunk_seconds": 180.0,
                     "max_alignment_seconds": 300.0,
                     "supports_segment_timestamps": True,
@@ -378,11 +440,18 @@ def seed_default_gateways(session: Session) -> None:
             "gateway_type": "ASR",
             "protocol": "video2doc-asr-http-v1",
             "base_url": "http://127.0.0.1:8103",
-            "settings": {"timeout_seconds": 600, "max_retries": 1},
+            "settings": {
+                "timeout_seconds": 600,
+                "max_retries": 1,
+                "managed_lifecycle": True,
+                "runtime_kind": "asr",
+                "runtime_provider": "whisper",
+                "startup_timeout_seconds": 600,
+            },
             "models": [
                 {
                     "model_name": "large-v3",
-                    "display_name": "Whisper large-v3 (quality)",
+                    "display_name": "Whisper V3（多语·质量优先）",
                     "max_chunk_seconds": 30.0,
                     "supports_segment_timestamps": True,
                     "supports_word_timestamps": True,
@@ -393,7 +462,7 @@ def seed_default_gateways(session: Session) -> None:
                 },
                 {
                     "model_name": "large-v3-turbo",
-                    "display_name": "Whisper large-v3-turbo (speed)",
+                    "display_name": "Whisper Turbo（多语·快速转写）",
                     "max_chunk_seconds": 30.0,
                     "supports_segment_timestamps": True,
                     "supports_word_timestamps": True,
@@ -428,11 +497,15 @@ def seed_default_gateways(session: Session) -> None:
                 "timeout_seconds": 180,
                 "max_retries": 1,
                 "runtime": "paddleocr",
+                "managed_lifecycle": True,
+                "runtime_kind": "ocr",
+                "runtime_provider": "paddleocr",
+                "startup_timeout_seconds": 120,
             },
             "models": [
                 {
                     "model_name": "PP-OCRv5_server",
-                    "display_name": "PP-OCRv5 Server (Chinese/English)",
+                    "display_name": "OCR v5（中英文画面）",
                     "supports_confidence": True,
                     "supports_language_detection": False,
                     "languages": ["ch", "en"],
@@ -470,7 +543,7 @@ def seed_default_gateways(session: Session) -> None:
             "models": [
                 {
                     "model_name": "PaddleOCR-VL-1.6-0.9B",
-                    "display_name": "PaddleOCR-VL 1.6 (external Docker)",
+                    "display_name": "OCR-VL 1.6（复杂版面）",
                     "supports_confidence": False,
                     "supports_language_detection": False,
                     "languages": ["zh", "en"],
@@ -505,8 +578,7 @@ def seed_default_gateways(session: Session) -> None:
         if gateway is None:
             gateway = GatewayConfig(**definition, created_at=now, updated_at=now)
             gateway.models = [
-                GatewayModel(**model, created_at=now, updated_at=now)
-                for model in model_definitions
+                GatewayModel(**model, created_at=now, updated_at=now) for model in model_definitions
             ]
             session.add(gateway)
             continue

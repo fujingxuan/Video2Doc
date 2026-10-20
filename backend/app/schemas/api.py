@@ -7,7 +7,7 @@ import re
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Capability(StrEnum):
@@ -18,6 +18,7 @@ class Capability(StrEnum):
 
 
 class GatewayType(StrEnum):
+    LLM = "LLM"
     ASR = "ASR"
     OCR = "OCR"
 
@@ -28,6 +29,7 @@ class GatewayCreate(BaseModel):
     protocol: str = Field(min_length=1, max_length=64)
     base_url: str = Field(min_length=1)
     secret_env_name: str | None = Field(default=None, max_length=200)
+    secret_value: str | None = Field(default=None, max_length=20_000, repr=False)
     enabled: bool = True
     settings: dict[str, Any] = Field(default_factory=dict)
 
@@ -47,6 +49,12 @@ class GatewayCreate(BaseModel):
         _reject_sensitive_metadata(value, "settings")
         return value
 
+    @model_validator(mode="after")
+    def one_secret_source(self) -> GatewayCreate:
+        if self.secret_env_name and self.secret_value:
+            raise ValueError("Choose an environment variable or a direct credential, not both")
+        return self
+
 
 class GatewayUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
@@ -54,6 +62,8 @@ class GatewayUpdate(BaseModel):
     protocol: str | None = Field(default=None, min_length=1, max_length=64)
     base_url: str | None = Field(default=None, min_length=1)
     secret_env_name: str | None = Field(default=None, max_length=200)
+    secret_value: str | None = Field(default=None, max_length=20_000, repr=False)
+    clear_secret: bool = False
     enabled: bool | None = None
     settings: dict[str, Any] | None = None
 
@@ -69,12 +79,16 @@ class GatewayUpdate(BaseModel):
 
     @field_validator("settings")
     @classmethod
-    def settings_do_not_contain_secrets(
-        cls, value: dict[str, Any] | None
-    ) -> dict[str, Any] | None:
+    def settings_do_not_contain_secrets(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
         if value is not None:
             _reject_sensitive_metadata(value, "settings")
         return value
+
+    @model_validator(mode="after")
+    def one_secret_source(self) -> GatewayUpdate:
+        if self.secret_env_name and self.secret_value:
+            raise ValueError("Choose an environment variable or a direct credential, not both")
+        return self
 
 
 class GatewayRead(BaseModel):
@@ -84,6 +98,7 @@ class GatewayRead(BaseModel):
     protocol: str
     base_url: str
     secret_env_name: str | None
+    secret_source: Literal["NONE", "ENVIRONMENT", "DIRECT"]
     secret_configured: bool
     enabled: bool
     health_status: str
@@ -168,6 +183,14 @@ class GatewayHealthRead(BaseModel):
     checked_at: datetime
 
 
+class ModelHealthRead(BaseModel):
+    model_id: int
+    status: str
+    detail: str
+    checked_at: datetime
+    latency_ms: int
+
+
 def _validate_gateway_base_url(value: str) -> str:
     normalized = value.strip().rstrip("/")
     parsed = urlparse(normalized)
@@ -225,11 +248,31 @@ class ModelCreate(BaseModel):
     capabilities: list[Capability] = Field(min_length=1)
     notes: str | None = None
     enabled: bool = True
+    provider: str | None = Field(default=None, max_length=100)
+    base_url: str | None = None
+    secret_env_name: str | None = Field(default=None, max_length=200)
+    secret_value: str | None = Field(default=None, max_length=20_000, repr=False)
 
     @field_validator("capabilities")
     @classmethod
     def unique_capabilities(cls, value: list[Capability]) -> list[Capability]:
         return list(dict.fromkeys(value))
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_base_url(cls, value: str | None) -> str | None:
+        return _validate_gateway_base_url(value) if value else None
+
+    @field_validator("secret_env_name")
+    @classmethod
+    def valid_secret_env_name(cls, value: str | None) -> str | None:
+        return _validate_secret_env_name(value)
+
+    @model_validator(mode="after")
+    def one_secret_source(self) -> ModelCreate:
+        if self.secret_env_name and self.secret_value:
+            raise ValueError("Choose an environment variable or a direct credential, not both")
+        return self
 
 
 class ModelUpdate(BaseModel):
@@ -237,14 +280,41 @@ class ModelUpdate(BaseModel):
     capabilities: list[Capability] | None = None
     notes: str | None = None
     enabled: bool | None = None
+    provider: str | None = Field(default=None, max_length=100)
+    base_url: str | None = None
+    secret_env_name: str | None = Field(default=None, max_length=200)
+    secret_value: str | None = Field(default=None, max_length=20_000, repr=False)
+    clear_secret: bool = False
+
+    @field_validator("base_url")
+    @classmethod
+    def valid_base_url(cls, value: str | None) -> str | None:
+        return _validate_gateway_base_url(value) if value else None
+
+    @field_validator("secret_env_name")
+    @classmethod
+    def valid_secret_env_name(cls, value: str | None) -> str | None:
+        return _validate_secret_env_name(value)
+
+    @model_validator(mode="after")
+    def one_secret_source(self) -> ModelUpdate:
+        if self.secret_env_name and self.secret_value:
+            raise ValueError("Choose an environment variable or a direct credential, not both")
+        return self
 
 
 class ModelRead(BaseModel):
     id: int
     name: str
+    display_name: str = ""
     capabilities: list[Capability]
     notes: str | None
     enabled: bool
+    provider: str | None
+    base_url: str | None
+    secret_env_name: str | None
+    secret_source: Literal["NONE", "ENVIRONMENT", "DIRECT"]
+    secret_configured: bool
     created_at: datetime
     updated_at: datetime
 
@@ -264,7 +334,7 @@ class ProfileFields(BaseModel):
     fix_sentences: bool = True
     auto_paragraphs: bool = True
     generate_headings: bool = True
-    keep_timestamps: bool = True
+    keep_timestamps: bool = False
     keep_raw_transcript: bool = True
     keep_downloaded_media: bool = False
     ocr_frame_interval_seconds: float = Field(default=5.0, gt=0, le=3600)
@@ -301,9 +371,23 @@ class ProfileUpdate(BaseModel):
     data_directory: str | None = None
 
 
+class ProfileModelSelection(BaseModel):
+    capability: Literal["ASR", "OCR", "TEXT_PROCESSING"]
+    source: Literal["GATEWAY", "MODEL_CONFIG"]
+    model_id: int
+    model_name: str
+    display_name: str
+    gateway_id: int | None = None
+    gateway_name: str | None = None
+    protocol: str | None = None
+
+
 class ProfileRead(ProfileFields):
     id: int
     is_builtin: bool
+    asr_selection: ProfileModelSelection | None = None
+    ocr_selection: ProfileModelSelection | None = None
+    text_selection: ProfileModelSelection | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -327,21 +411,18 @@ class SettingsUpdate(BaseModel):
     default_text_model_name: str | None = Field(default=None, max_length=300)
     text_prompt_version: str | None = Field(default=None, max_length=100)
     faithfulness_min_length_ratio: float | None = Field(default=None, ge=0.5, le=1.0)
-    faithfulness_formula_symbol_ratio: float | None = Field(
-        default=None, ge=0.5, le=1.0
-    )
+    faithfulness_formula_symbol_ratio: float | None = Field(default=None, ge=0.5, le=1.0)
     markdown_template_version: str | None = Field(default=None, max_length=100)
     image_insertion_policy: str | None = Field(default=None, max_length=100)
     image_min_gap_seconds: float | None = Field(default=None, ge=0, le=3600)
     export_filename_template: str | None = Field(default=None, max_length=300)
-    export_attachment_directory_template: str | None = Field(
-        default=None, max_length=300
-    )
+    export_attachment_directory_template: str | None = Field(default=None, max_length=300)
     export_data_directory_template: str | None = Field(default=None, max_length=300)
     export_conflict_policy: Literal["rename", "fail", "overwrite"] | None = None
     export_keep_json_sidecar: bool | None = None
     export_copy_transcript: bool | None = None
     export_copy_subtitles: bool | None = None
+    auto_clear_task_cache: bool | None = None
 
 
 class SettingsRead(BaseModel):
@@ -377,7 +458,21 @@ class SettingsRead(BaseModel):
     export_keep_json_sidecar: bool
     export_copy_transcript: bool
     export_copy_subtitles: bool
+    auto_clear_task_cache: bool
     updated_at: datetime
+
+
+class CacheClearRequest(BaseModel):
+    task_ids: list[int] = Field(default_factory=list, max_length=500)
+    all_tasks: bool = False
+
+    @model_validator(mode="after")
+    def require_scope(self) -> CacheClearRequest:
+        if not self.all_tasks and not self.task_ids:
+            raise ValueError("请选择任务，或指定清除全部任务缓存")
+        if any(task_id <= 0 for task_id in self.task_ids):
+            raise ValueError("任务 ID 必须为正整数")
+        return self
 
 
 class TaskInput(BaseModel):
@@ -385,6 +480,7 @@ class TaskInput(BaseModel):
     source_type: Literal["URL", "LOCAL_FILE"]
     title: str | None = Field(default=None, max_length=300)
     simulate_failure: Literal["never", "once", "always"] = "never"
+    text_source: Literal["ASR", "SUBTITLE"] = "ASR"
 
     @field_validator("source")
     @classmethod
@@ -394,9 +490,24 @@ class TaskInput(BaseModel):
             raise ValueError("输入来源不能为空或包含 NUL 字符")
         return normalized
 
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if "\x00" in normalized:
+            raise ValueError("任务标题不能包含 NUL 字符")
+        return normalized or None
 
-class TaskBatchCreate(BaseModel):
-    inputs: list[TaskInput] = Field(min_length=1, max_length=100)
+    @model_validator(mode="after")
+    def subtitle_requires_video_url(self) -> TaskInput:
+        if self.text_source == "SUBTITLE" and self.source_type != "URL":
+            raise ValueError("从视频链接抓取字幕仅支持 URL 输入")
+        return self
+
+
+class TaskConfiguration(BaseModel):
     profile_id: int | None = None
     config_overrides: dict[str, Any] = Field(default_factory=dict)
     pipeline_mode: Literal["REAL", "SIMULATED"] = "REAL"
@@ -404,8 +515,19 @@ class TaskBatchCreate(BaseModel):
     asr_gateway_model_id: int | None = None
     ocr_gateway_model_id: int | None = None
     text_model_id: int | None = None
+    export_directory: str | None = None
     export_vault_path: str | None = None
     export_inbox_relative_path: str | None = None
+
+    @field_validator("export_directory")
+    @classmethod
+    def export_directory_must_be_absolute(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        normalized = value.strip()
+        if "\x00" in normalized or not Path(normalized).is_absolute():
+            raise ValueError("Export directory must be an absolute path")
+        return normalized
 
     @field_validator("export_vault_path")
     @classmethod
@@ -427,6 +549,14 @@ class TaskBatchCreate(BaseModel):
         if "\x00" in normalized or path.is_absolute() or ".." in path.parts:
             raise ValueError("Export Inbox must be a safe relative path")
         return normalized
+
+
+class TaskBatchCreate(TaskConfiguration):
+    inputs: list[TaskInput] = Field(min_length=1, max_length=100)
+
+
+class TaskUpdate(TaskConfiguration):
+    input: TaskInput
 
 
 class SnapshotRead(BaseModel):
@@ -451,10 +581,12 @@ class StageRead(BaseModel):
     retryable: bool | None
     input_artifacts: list[str] | None
     output_artifacts: list[str] | None
+    model_usage: list[dict[str, Any]] = Field(default_factory=list)
     log_path: str | None
 
 
 class TaskRead(BaseModel):
+    review_submission_path: str | None = None
     id: int
     source: str
     source_type: str
@@ -481,6 +613,15 @@ class TaskRead(BaseModel):
     updated_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
+    deleted_at: datetime | None = None
+    trash_expires_at: datetime | None = None
+
+
+class TaskPage(BaseModel):
+    items: list[TaskRead]
+    total: int
+    offset: int
+    limit: int
 
 
 class TaskDetail(TaskRead):
@@ -498,7 +639,8 @@ class TaskDetail(TaskRead):
 
 
 class QueueStatus(BaseModel):
-    max_concurrency: int = 1
+    waiting_review: int = 0
+    max_concurrency: int = 2
     running: int
     queued: int
     completed: int

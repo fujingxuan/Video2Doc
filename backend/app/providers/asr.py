@@ -19,6 +19,8 @@ import httpx
 import websockets
 
 from app.core.config import get_settings
+from app.core.credentials import resolve_gateway_credential
+from app.core.secrets import SecretStorageError
 from app.core.errors import PipelineCancelled, PipelineError
 from app.providers.process import CancelCheck, ExternalProcessRunner, process_registry
 from app.providers.gateways import gateway_endpoint, trust_environment_proxy
@@ -326,36 +328,50 @@ class OpenAICompatibleAsrProvider:
         cancel_endpoint: str | None = None,
         request_id: str | None = None,
     ) -> httpx.Response:
-        task = asyncio.create_task(
-            client.post(
-                self.endpoint,
-                headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
-                data=data,
-                files=files,
-            )
-        )
-        while not task.done():
+        async def ensure_active() -> None:
             if process_registry.shutting_down:
                 from app.core.errors import PipelineInterrupted
 
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
                 raise PipelineInterrupted(stage="ASR_TRANSCRIBE")
             if await check_cancelled(cancel_check):
+                raise PipelineCancelled(stage="ASR_TRANSCRIBE")
+
+        task: asyncio.Task[httpx.Response] | None = None
+        try:
+            await ensure_active()
+            task = asyncio.create_task(
+                client.post(
+                    self.endpoint,
+                    headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
+                    data=data,
+                    files=files,
+                )
+            )
+            while not task.done():
+                await ensure_active()
+                await asyncio.wait({task}, timeout=get_settings().process_poll_seconds)
+            # A response can complete between polls while cancellation or
+            # shutdown is being requested. Never persist that late response.
+            await ensure_active()
+            return await task
+        except PipelineCancelled:
+            if task is not None:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-                if cancel_endpoint and request_id:
-                    try:
-                        await asyncio.wait_for(
-                            client.post(f"{cancel_endpoint}/{request_id}"), timeout=2.0
-                        )
-                    except (Exception, asyncio.CancelledError):
-                        # Closing the upload already prevents accepting a late result. The
-                        # explicit cancellation call is best effort for local inference workers.
-                        pass
-                raise PipelineCancelled(stage="ASR_TRANSCRIBE")
-            await asyncio.sleep(get_settings().process_poll_seconds)
-        return await task
+            if cancel_endpoint and request_id:
+                try:
+                    await asyncio.wait_for(
+                        client.post(f"{cancel_endpoint}/{request_id}"), timeout=2.0
+                    )
+                except Exception:
+                    # The explicit cancellation is best effort for local workers.
+                    pass
+            raise
+        finally:
+            if task is not None:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 class UnifiedAsrGatewayProvider(OpenAICompatibleAsrProvider):
@@ -749,7 +765,7 @@ def normalize_asr_response(
                     model=request.model,
                     chunk_index=request.chunk.index,
                     raw_response_reference=str(raw_path),
-                    words=tuple(_normalize_words(raw.get("words"))),
+                    words=_preserve_segment_punctuation(text, tuple(_normalize_words(raw.get("words")))),
                 )
             )
     elif optional_text(payload.get("text")):
@@ -765,10 +781,15 @@ def normalize_asr_response(
                 model=request.model,
                 chunk_index=request.chunk.index,
                 raw_response_reference=str(raw_path),
-                words=tuple(_normalize_words(payload.get("words"))),
+                words=_preserve_segment_punctuation(str(payload["text"]), tuple(_normalize_words(payload.get("words")))),
             )
         )
-    if not segments:
+    explicit_no_speech = (
+        payload.get("no_speech") is True
+        and not optional_text(payload.get("text"))
+        and raw_segments == []
+    )
+    if not segments and not explicit_no_speech:
         raise PipelineError("ASR_PROVIDER_FAILED", "ASR 未返回任何可用转写文本")
     return AsrResult(
         provider=provider,
@@ -778,6 +799,30 @@ def normalize_asr_response(
         raw_response_reference=str(raw_path),
         segments=tuple(segments),
     )
+
+
+def _preserve_segment_punctuation(text: str, words: tuple[AsrWord, ...]) -> tuple[AsrWord, ...]:
+    """Some providers punctuate segment text but return unpunctuated word tokens.
+
+    Carry punctuation into aligned words before overlap trimming reconstructs text.
+    Only exact lexical alignment is eligible; never infer punctuation or wording.
+    """
+    if not words or any(not normalize_text_for_overlap(w.text) for w in words):
+        return words
+    if normalize_text_for_overlap("".join(w.text for w in words)) != normalize_text_for_overlap(text):
+        return words
+    positions = [index for index, char in enumerate(text) if normalize_text_for_overlap(char)]
+    if len(positions) != len(normalize_text_for_overlap(text)):
+        return words
+    consumed = 0
+    start = 0
+    aligned = []
+    for word in words:
+        consumed += len(normalize_text_for_overlap(word.text))
+        end = positions[consumed] if consumed < len(positions) else len(text)
+        aligned.append(replace(word, text=text[start:end].strip()))
+        start = end
+    return tuple(aligned)
 
 
 def _normalize_words(value: Any) -> list[AsrWord]:
@@ -813,6 +858,16 @@ def combine_asr_results(
     combined: list[AsrSegment] = []
     for result in sorted(results, key=lambda item: item.chunk_index):
         chunk = chunk_map[result.chunk_index]
+        if not result.segments:
+            diagnostics.append(
+                {
+                    "type": "no_speech_chunk",
+                    "chunk_index": result.chunk_index,
+                    "source_start_seconds": chunk.start_time,
+                    "source_end_seconds": chunk.end_time,
+                }
+            )
+            continue
         for segment_index, segment in enumerate(result.segments):
             candidate = _map_segment_to_global(segment, chunk.start_time)
             candidate = _deduplicate_boundary_segment(
@@ -1048,6 +1103,33 @@ def _deduplicate_boundary_segment(
                     }
                 )
 
+    # Segment-only providers often split the same overlapping speech differently.
+    # Trim only a long exact suffix/prefix with time overlap, keeping uncertain text.
+    if not candidate.words:
+        for prior in reversed(previous):
+            if not _time_ranges_overlap(candidate, prior, boundary_start, boundary_end):
+                continue
+            left = normalize_text_for_overlap(prior.text)
+            right = normalize_text_for_overlap(candidate.text)
+            size = next((n for n in range(min(len(left), len(right)), 11, -1)
+                         if left.endswith(right[:n])), 0)
+            if not size:
+                continue
+            end = 0
+            while end < len(candidate.text) and len(
+                normalize_text_for_overlap(candidate.text[:end])
+            ) < size:
+                end += 1
+            tail = candidate.text[end:].lstrip(" ，。！？、,.!?;；:：")
+            diagnostics.append({"type": "duplicate_removed", "chunk_index": chunk.index,
+                                "method": "timed_exact_suffix_prefix", "removed_text": candidate.text[:end]})
+            if not tail:
+                return None
+            # Keep the provider's coarse interval: clearing it would reorder the
+            # retained tail to the end of the entire transcript.
+            candidate = replace(candidate, text=tail)
+            break
+
     for prior in reversed(previous[-4:]):
         if not _time_ranges_overlap(candidate, prior, boundary_start, boundary_end):
             continue
@@ -1210,6 +1292,7 @@ def save_transcript_artifacts(
     language: str | None,
     chunk_count: int,
     merge_diagnostics: list[dict[str, Any]] | None = None,
+    provider_responses: list[str] | None = None,
 ) -> dict[str, str]:
     normalized_path = paths.asr / "normalized.json"
     raw_index_path = paths.asr / "raw.json"
@@ -1231,7 +1314,9 @@ def save_transcript_artifacts(
         {
             **payload,
             "provider_responses": sorted(
-                {segment.raw_response_reference for segment in segments}
+                provider_responses
+                if provider_responses is not None
+                else {segment.raw_response_reference for segment in segments}
             ),
         },
     )
@@ -1257,6 +1342,12 @@ def save_transcript_artifacts(
             "segment_count": len(segments),
             "text": preview_text[:20_000],
             "truncated": len(preview_text) > 20_000,
+            "quality_warnings": [
+                f"音频 {item['source_start_seconds']:.1f}–{item['source_end_seconds']:.1f} 秒"
+                "仍有疑似重复，请对照音频校对；原始内容已保留。"
+                for item in (merge_diagnostics or [])
+                if item.get("type") == "asr_repetition_detected" and not item.get("resolved")
+            ],
         },
     )
     return {
@@ -1309,10 +1400,20 @@ def load_asr_gateway_credentials(snapshot: dict[str, Any]) -> tuple[dict[str, An
     model = str(config.get("model") or "").strip()
     protocol = str(config.get("provider") or "").strip()
     secret_env_name = str(config.get("secret_env_name") or "").strip()
-    secret = os.getenv(secret_env_name, "").strip() if secret_env_name else ""
+    gateway_id = config.get("gateway_id")
+    try:
+        secret = (
+            resolve_gateway_credential(int(gateway_id))
+            if gateway_id is not None
+            else (os.getenv(secret_env_name, "").strip() if secret_env_name else "")
+        )
+    except (SecretStorageError, TypeError, ValueError) as exc:
+        raise PipelineError(
+            "ASR_SECRET_MISSING", "无法读取 ASR Gateway 密钥", technical_detail=str(exc)
+        ) from exc
     if not base_url or not model or not protocol:
         raise PipelineError("ASR_CONFIG_INVALID", "任务快照中的 ASR Gateway 配置不完整")
-    if secret_env_name and not secret:
+    if (secret_env_name or config.get("secret_source") == "DIRECT") and not secret:
         code = "DASHSCOPE_KEY_MISSING" if protocol == "dashscope-fun-asr-websocket" else "ASR_SECRET_MISSING"
         raise PipelineError(code, f"缺少 ASR Gateway 密钥环境变量 {secret_env_name}")
     return config, secret

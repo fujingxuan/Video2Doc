@@ -2,13 +2,14 @@
 param(
     [ValidateSet("firered", "qwen", "whisper", "mock")]
     [string]$Provider,
+    [int]$Port = 0,
     [string]$ModelRoot = "D:\Models\Video2Doc",
     [string]$Distribution = "Ubuntu"
 )
 
 $ErrorActionPreference = "Continue"
 $ports = @{ firered = 8101; qwen = 8102; whisper = 8103; mock = 8199 }
-$Port = $ports[$Provider]
+if ($Port -eq 0) { $Port = $ports[$Provider] }
 $pidPath = Join-Path $ModelRoot "logs\$Provider\gateway.pid"
 if (Test-Path -LiteralPath $pidPath) {
     $processId = [int](Get-Content -LiteralPath $pidPath -Raw)

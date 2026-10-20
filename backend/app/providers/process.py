@@ -40,16 +40,26 @@ class PlatformProcessTreeTerminator:
         if process.returncode is not None:
             return
         if os.name == "nt":
-            killer = await asyncio.create_subprocess_exec(
-                "taskkill",
-                "/PID",
-                str(process.pid),
-                "/T",
-                "/F",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await killer.wait()
+            try:
+                killer = await asyncio.create_subprocess_exec(
+                    "taskkill",
+                    "/PID",
+                    str(process.pid),
+                    "/T",
+                    "/F",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    creationflags=_windows_creation_flags(),
+                )
+                try:
+                    await asyncio.wait_for(killer.wait(), timeout=5)
+                except TimeoutError:
+                    killer.kill()
+                    await killer.wait()
+            except OSError:
+                # The parent-process fallback must also work when taskkill
+                # cannot be started (missing executable or denied access).
+                pass
         else:
             try:
                 os.killpg(process.pid, signal.SIGTERM)
@@ -120,7 +130,7 @@ class ExternalProcessRunner:
         log_dir.mkdir(parents=True, exist_ok=True)
         stdout_log = log_dir / f"{log_name}.stdout.log"
         stderr_log = log_dir / f"{log_name}.stderr.log"
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+        creationflags = _windows_creation_flags(new_process_group=True)
         start = time.monotonic()
         try:
             process = await asyncio.create_subprocess_exec(
@@ -151,16 +161,27 @@ class ExternalProcessRunner:
             if stream is None:
                 return
             with destination.open("w", encoding="utf-8", errors="replace") as handle:
-                while True:
-                    raw = await stream.readline()
-                    if not raw:
-                        break
+                def emit(raw: bytes) -> None:
                     line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
                     collected.append(line)
                     handle.write(line + "\n")
                     handle.flush()
                     if callback:
                         callback(line)
+
+                # yt-dlp emits a complete metadata object on one line, often
+                # exceeding StreamReader.readline's default 64 KiB limit.
+                pending: list[bytes] = []
+                while chunk := await stream.read(64 * 1024):
+                    parts = chunk.split(b"\n")
+                    pending.append(parts[0])
+                    if len(parts) > 1:
+                        emit(b"".join(pending))
+                        for part in parts[1:-1]:
+                            emit(part)
+                        pending = [parts[-1]]
+                if raw := b"".join(pending):
+                    emit(raw)
 
         stdout_task = asyncio.create_task(
             consume(process.stdout, stdout_log, stdout_lines, stdout_callback)
@@ -171,7 +192,13 @@ class ExternalProcessRunner:
         wait_task = asyncio.create_task(process.wait())
         terminal_error: PipelineError | None = None
         try:
-            while not wait_task.done():
+            tasks = {wait_task, stdout_task, stderr_task}
+            while not all(task.done() for task in tasks):
+                # A failed log reader or progress callback must stop the
+                # process promptly instead of leaving a blocked output pipe.
+                for reader in (stdout_task, stderr_task):
+                    if reader.done():
+                        reader.result()
                 if process_registry.shutting_down:
                     terminal_error = PipelineInterrupted()
                     await self.terminator.terminate(process)
@@ -193,15 +220,25 @@ class ExternalProcessRunner:
                     )
                     await self.terminator.terminate(process)
                     break
-                await asyncio.sleep(get_settings().process_poll_seconds)
+                pending_tasks = {task for task in tasks if not task.done()}
+                if pending_tasks:
+                    await asyncio.wait(
+                        pending_tasks,
+                        timeout=get_settings().process_poll_seconds,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
             await wait_task
             await asyncio.gather(stdout_task, stderr_task)
         finally:
-            process_registry.unregister(process)
-            if not stdout_task.done():
-                stdout_task.cancel()
-            if not stderr_task.done():
-                stderr_task.cancel()
+            try:
+                if process.returncode is None:
+                    await self.terminator.terminate(process)
+            finally:
+                for task in (stdout_task, stderr_task, wait_task):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(stdout_task, stderr_task, wait_task, return_exceptions=True)
+                process_registry.unregister(process)
         if terminal_error:
             raise terminal_error
         result = ProcessResult(
@@ -256,3 +293,12 @@ def redact_text(value: str) -> str:
     value = re.sub(r"(https?://)[^/@\s]+@", r"\1***@", value, flags=re.IGNORECASE)
     value = re.sub(r"(https?://[^\s?]+)\?[^\s]+", r"\1?***", value, flags=re.IGNORECASE)
     return value
+
+
+def _windows_creation_flags(*, new_process_group: bool = False) -> int:
+    if os.name != "nt":
+        return 0
+    flags = subprocess.CREATE_NO_WINDOW
+    if new_process_group:
+        flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+    return flags

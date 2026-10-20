@@ -4,7 +4,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile, status
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal, get_db
 from app.schemas.api import (
     Capability,
+    CacheClearRequest,
     GatewayCreate,
     GatewayHealthRead,
     GatewayModelCreate,
@@ -22,6 +23,7 @@ from app.schemas.api import (
     GatewayUpdate,
     HealthRead,
     ModelCreate,
+    ModelHealthRead,
     ModelRead,
     ModelUpdate,
     ProfileCreate,
@@ -32,13 +34,25 @@ from app.schemas.api import (
     SettingsUpdate,
     TaskBatchCreate,
     TaskDetail,
+    TaskPage,
     TaskRead,
+    TaskUpdate,
 )
 from app.services.catalog import CatalogService
+from app.services.cache import TaskCacheService
 from app.services.gateways import GatewayService
 from app.services.settings import SettingsService
-from app.services.system import media_tool_status, select_media_files
+from app.services.system import (
+    media_tool_status,
+    select_media_files,
+    select_output_directory,
+    select_subtitle_file,
+)
 from app.services.tasks import TaskService
+from app.services.events import paged_event_stream
+from app.services.review import TaskReviewService
+from app.services.manual_review import ManualDraftInput, ManualReviewService, ManualSubmitInput
+from app.services.uploads import create_uploaded_audio_tasks
 from app.workers.queue import queue_worker
 
 
@@ -77,9 +91,7 @@ def delete_gateway(gateway_id: int, session: Session = Depends(get_db)) -> Respo
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post(
-    "/gateways/{gateway_id}/health", response_model=GatewayHealthRead, tags=["gateways"]
-)
+@router.post("/gateways/{gateway_id}/health", response_model=GatewayHealthRead, tags=["gateways"])
 async def check_gateway_health(
     gateway_id: int, session: Session = Depends(get_db)
 ) -> GatewayHealthRead:
@@ -125,6 +137,17 @@ def update_gateway_model(
     return GatewayService(session).update_model(model_id, payload)
 
 
+@router.post(
+    "/gateway-models/{model_id}/health",
+    response_model=ModelHealthRead,
+    tags=["gateways"],
+)
+async def check_gateway_model_health(
+    model_id: int, session: Session = Depends(get_db)
+) -> ModelHealthRead:
+    return await GatewayService(session).health_model(model_id)
+
+
 @router.delete(
     "/gateway-models/{model_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["gateways"]
 )
@@ -139,7 +162,7 @@ def health(session: Session = Depends(get_db)) -> HealthRead:
     return HealthRead(
         status="ok",
         service="video2doc-backend",
-        version="1.0.0",
+        version="3.4.1",
         database="ok",
         queue_worker="running" if queue_worker.running else "stopped",
     )
@@ -157,7 +180,9 @@ def list_models(
     return CatalogService(session).list_models(capability.value if capability else None)
 
 
-@router.post("/models", response_model=ModelRead, status_code=status.HTTP_201_CREATED, tags=["models"])
+@router.post(
+    "/models", response_model=ModelRead, status_code=status.HTTP_201_CREATED, tags=["models"]
+)
 def create_model(payload: ModelCreate, session: Session = Depends(get_db)) -> ModelRead:
     return CatalogService(session).create_model(payload)
 
@@ -167,8 +192,17 @@ def get_model(model_id: int, session: Session = Depends(get_db)) -> ModelRead:
     return CatalogService(session).get_model(model_id)
 
 
+@router.post("/models/{model_id}/health", response_model=ModelHealthRead, tags=["models"])
+async def check_model_health(
+    model_id: int, session: Session = Depends(get_db)
+) -> ModelHealthRead:
+    return await CatalogService(session).health(model_id)
+
+
 @router.put("/models/{model_id}", response_model=ModelRead, tags=["models"])
-def update_model(model_id: int, payload: ModelUpdate, session: Session = Depends(get_db)) -> ModelRead:
+def update_model(
+    model_id: int, payload: ModelUpdate, session: Session = Depends(get_db)
+) -> ModelRead:
     return CatalogService(session).update_model(model_id, payload)
 
 
@@ -229,6 +263,24 @@ def select_media() -> dict[str, list[str]]:
     return {"paths": select_media_files()}
 
 
+@router.post("/system/select-subtitle", response_model=dict, tags=["system"])
+def select_subtitle() -> dict[str, str | None]:
+    return {"path": select_subtitle_file()}
+
+
+@router.post("/system/select-output-directory", response_model=dict, tags=["system"])
+def select_export_directory() -> dict[str, str | None]:
+    return {"path": select_output_directory()}
+
+
+@router.post("/system/cache/clear", response_model=dict, tags=["system"])
+def clear_task_cache(
+    payload: CacheClearRequest,
+    session: Session = Depends(get_db),
+) -> dict:
+    return TaskCacheService(session).clear(None if payload.all_tasks else payload.task_ids)
+
+
 @router.post("/system/shutdown", response_model=dict, tags=["system"])
 def shutdown_application(request: Request) -> dict[str, str]:
     callback = getattr(request.app.state, "request_shutdown", None)
@@ -240,19 +292,118 @@ def shutdown_application(request: Request) -> dict[str, str]:
     return {"status": "shutting_down"}
 
 
-@router.post("/tasks", response_model=list[TaskRead], status_code=status.HTTP_201_CREATED, tags=["tasks"])
+@router.post(
+    "/tasks", response_model=list[TaskRead], status_code=status.HTTP_201_CREATED, tags=["tasks"]
+)
 def create_tasks(payload: TaskBatchCreate, session: Session = Depends(get_db)) -> list[TaskRead]:
     return TaskService(session, queue_worker).create_batch(payload)
 
 
 @router.get("/tasks", response_model=list[TaskRead], tags=["tasks"])
-def list_tasks(status_filter: str | None = Query(default=None, alias="status"), session: Session = Depends(get_db)) -> list[TaskRead]:
+def list_tasks(
+    status_filter: str | None = Query(default=None, alias="status"),
+    session: Session = Depends(get_db),
+) -> list[TaskRead]:
     return TaskService(session).list(status_filter)
+
+
+def task_page_query(
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
+    status_filter: str | None = Query(default=None, alias="status", max_length=32),
+    search: str = Query(default="", max_length=200),
+    trashed: bool = Query(default=False),
+) -> dict:
+    return {"offset": offset, "limit": limit, "status": status_filter,
+            "search": search, "trashed": trashed}
+
+
+@router.get("/tasks/page", response_model=TaskPage, tags=["tasks"])
+def task_page(query: dict = Depends(task_page_query), session: Session = Depends(get_db)) -> TaskPage:
+    return TaskService(session).page(**query)
+
+
+@router.post("/tasks/trash/purge-expired", response_model=dict, tags=["tasks"])
+def purge_expired_tasks(session: Session = Depends(get_db)) -> dict:
+    return TaskService(session, queue_worker).purge_expired()
+
+
+@router.post("/tasks/upload-audio", response_model=list[TaskRead], status_code=201, tags=["tasks"])
+def upload_audio(
+    files: list[UploadFile] = File(...), configuration: str = Form("{}"),
+    session: Session = Depends(get_db),
+) -> list[TaskRead]:
+    return create_uploaded_audio_tasks(files, configuration, session, queue_worker)
+
+
+@router.get("/tasks/{task_id}/manual-review", response_model=dict, tags=["tasks"])
+def manual_review(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return ManualReviewService(session).get(task_id)
+
+
+@router.put("/tasks/{task_id}/manual-review", response_model=dict, tags=["tasks"])
+def save_manual_review(
+    task_id: int, payload: ManualDraftInput, session: Session = Depends(get_db),
+) -> dict:
+    return ManualReviewService(session).save(task_id, payload)
+
+
+@router.get("/tasks/{task_id}/manual-review/draft", tags=["tasks"])
+def download_manual_draft(task_id: int, session: Session = Depends(get_db)) -> PlainTextResponse:
+    draft = ManualReviewService(session).get(task_id)
+    return PlainTextResponse(
+        draft["original_text"], media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="task-{task_id}-draft.md"'},
+    )
+
+
+@router.post("/tasks/{task_id}/manual-review/submit", response_model=dict, tags=["tasks"])
+def submit_manual_review(
+    task_id: int, payload: ManualSubmitInput, session: Session = Depends(get_db),
+) -> dict:
+    return ManualReviewService(session, queue_worker).submit(task_id, payload)
 
 
 @router.get("/tasks/{task_id}", response_model=TaskDetail, tags=["tasks"])
 def get_task(task_id: int, session: Session = Depends(get_db)) -> TaskDetail:
     return TaskService(session).get(task_id)
+
+
+@router.put("/tasks/{task_id}", response_model=TaskRead, tags=["tasks"])
+def update_task(
+    task_id: int,
+    payload: TaskUpdate,
+    session: Session = Depends(get_db),
+) -> TaskRead:
+    return TaskService(session, queue_worker).update(task_id, payload)
+
+
+@router.delete("/tasks/{task_id}", response_model=TaskRead, tags=["tasks"])
+def delete_task(task_id: int, session: Session = Depends(get_db)) -> TaskRead:
+    return TaskService(session, queue_worker).delete(task_id)
+
+
+@router.post("/tasks/{task_id}/restore", response_model=TaskRead, tags=["tasks"])
+def restore_task(task_id: int, session: Session = Depends(get_db)) -> TaskRead:
+    return TaskService(session, queue_worker).restore(task_id)
+
+
+@router.delete("/tasks/{task_id}/permanent", response_model=dict, tags=["tasks"])
+def purge_task(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskService(session, queue_worker).purge(task_id)
+
+
+@router.get("/tasks/{task_id}/review", response_model=dict, tags=["tasks"])
+def review_task(task_id: int, session: Session = Depends(get_db)) -> dict:
+    return TaskReviewService(session).get(task_id)
+
+
+@router.get("/tasks/{task_id}/review/diff", tags=["tasks"])
+def review_task_diff(task_id: int, session: Session = Depends(get_db)) -> PlainTextResponse:
+    return PlainTextResponse(
+        TaskReviewService(session).get(task_id)["diff"],
+        headers={"Content-Disposition": f'attachment; filename="task-{task_id}.diff"'},
+    )
 
 
 @router.get("/tasks/{task_id}/snapshot", response_model=dict, tags=["tasks"])
@@ -304,6 +455,11 @@ def get_task_markdown(
         TaskService(session).markdown(task_id),
         media_type="text/markdown; charset=utf-8",
     )
+
+
+@router.post("/tasks/{task_id}/audio/copy", response_model=dict, tags=["tasks"])
+def copy_task_audio(task_id: int, session: Session = Depends(get_db)) -> dict[str, str]:
+    return TaskService(session).copy_audio(task_id)
 
 
 @router.post("/tasks/{task_id}/open/{target}", response_model=dict, tags=["tasks"])
@@ -360,5 +516,13 @@ def events() -> StreamingResponse:
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/events/pages", tags=["queue"])
+def page_events(query: dict = Depends(task_page_query)) -> StreamingResponse:
+    return StreamingResponse(
+        paged_event_stream(**query), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

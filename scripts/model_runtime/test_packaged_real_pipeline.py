@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -33,9 +34,9 @@ ASR_LAUNCHER = (
 )
 MODEL_ROOT = Path(r"D:\Models\Video2Doc")
 FFMPEG = Path(
-    r"C:\Users\Aaron\AppData\Local\Microsoft\WinGet\Packages"
-    r"\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
-    r"\ffmpeg-8.1.2-full_build\bin\ffmpeg.exe"
+    os.environ.get("VIDEO2DOC_TEST_FFMPEG")
+    or shutil.which("ffmpeg")
+    or r"D:\Tools\ffmpeg\bin\ffmpeg.exe"
 )
 SOURCE_MEDIA = Path(r"D:\Video2Doc-Test\sample.mp4")
 TERMINAL_STATES = {"COMPLETED", "FAILED", "CANCELLED", "INTERRUPTED"}
@@ -384,10 +385,14 @@ def _run_application_acceptance(
                 ),
                 None,
             )
-            resumable = failed or completed
+            waiting = next(
+                (item for item in existing_tasks.json() if item["status"] == "WAITING_REVIEW"),
+                None,
+            )
+            resumable = failed or waiting or completed
             if not resumable:
                 raise RuntimeError(
-                    "No failed or completed packaged task is available to inspect"
+                    "No failed, waiting-review or completed packaged task is available to inspect"
                 )
             snapshot_before = client.get(
                 f"/tasks/{resumable['id']}/snapshot"
@@ -441,7 +446,7 @@ def _run_application_acceptance(
             retry_response.raise_for_status()
             task_id = int(failed["id"])
         elif resume_existing:
-            task_id = int(completed["id"])
+            task_id = int(resumable["id"])
         else:
             created = client.post("/tasks", json=create_payload)
             created.raise_for_status()
@@ -715,6 +720,20 @@ def _wait_task(
             previous = state
         if state[0] in TERMINAL_STATES:
             return task
+        if state[0] == "WAITING_REVIEW":
+            # This harness owns the isolated sample task and explicitly exercises
+            # the user action that adopts the initial draft before export.
+            draft_response = client.get(f"/tasks/{task_id}/manual-review")
+            draft_response.raise_for_status()
+            draft = draft_response.json()
+            submission = client.post(f"/tasks/{task_id}/manual-review/submit", json={
+                "action": "original", "attempt": draft["attempt"],
+                "source_sha256": draft["source_sha256"],
+            })
+            submission.raise_for_status()
+            if submission.json().get("requires_confirmation"):
+                raise RuntimeError("Initial draft unexpectedly requires a warning override")
+            continue
         time.sleep(1)
     raise RuntimeError(f"Timed out waiting for task {task_id}")
 

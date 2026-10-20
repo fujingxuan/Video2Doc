@@ -1,15 +1,21 @@
 import type {
   AppSettings,
+  CacheClearResult,
   Capability,
   GatewayConfig,
   GatewayModel,
   GatewayType,
+  ModelHealth,
   ModelConfig,
   ProcessingProfile,
   QueueState,
   Task,
   TaskDetail,
   SystemStatus,
+  TaskDeleteResult,
+  TaskPage,
+  TaskReview,
+  ManualReview,
 } from "../types";
 
 const defaultApiBase = ["5173", "4173"].includes(window.location.port)
@@ -30,10 +36,18 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      headers: { ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }), ...init?.headers },
+    });
+  } catch {
+    throw new ApiError(
+      "无法连接 Video2Doc 后端。请关闭失效窗口后重新启动应用。",
+      0,
+    );
+  }
   if (!response.ok) {
     let message = `请求失败 (${response.status})`;
     try {
@@ -49,17 +63,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ status: string; database: string; queue_worker: string }>("/health"),
+  health: () =>
+    request<{ status: string; version: string; database: string; queue_worker: string }>(
+      "/health",
+    ),
   models: (capability?: Capability) =>
     request<ModelConfig[]>(`/models${capability ? `?capability=${capability}` : ""}`),
-  createModel: (payload: {
-    name: string;
-    capabilities: Capability[];
-    notes?: string;
-    enabled?: boolean;
-  }) => request<ModelConfig>("/models", { method: "POST", body: JSON.stringify(payload) }),
-  updateModel: (id: number, payload: Partial<ModelConfig>) =>
+  createModel: (payload: Record<string, unknown>) =>
+    request<ModelConfig>("/models", { method: "POST", body: JSON.stringify(payload) }),
+  updateModel: (id: number, payload: Record<string, unknown>) =>
     request<ModelConfig>(`/models/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  checkModel: (id: number) =>
+    request<ModelHealth>(`/models/${id}/health`, { method: "POST" }),
   deleteModel: (id: number) => request<void>(`/models/${id}`, { method: "DELETE" }),
   gateways: (gatewayType?: GatewayType) =>
     request<GatewayConfig[]>(`/gateways${gatewayType ? `?gateway_type=${gatewayType}` : ""}`),
@@ -86,6 +101,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
+  checkGatewayModel: (id: number) =>
+    request<ModelHealth>(`/gateway-models/${id}/health`, { method: "POST" }),
   deleteGatewayModel: (id: number) =>
     request<void>(`/gateway-models/${id}`, { method: "DELETE" }),
   profiles: () => request<ProcessingProfile[]>("/profiles"),
@@ -106,7 +123,7 @@ export const api = {
   taskOcr: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/ocr`),
   taskTimeline: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/timeline`),
   taskDocument: (id: number) => request<Record<string, unknown>>(`/tasks/${id}/document`),
-  openTaskTarget: (id: number, target: "workspace" | "export_directory" | "markdown") =>
+  openTaskTarget: (id: number, target: "workspace" | "export_directory" | "markdown" | "word") =>
     request<{ target: string; path: string }>(`/tasks/${id}/open/${target}`, {
       method: "POST",
     }),
@@ -117,10 +134,45 @@ export const api = {
       .join("/")}`,
   createTasks: (payload: Record<string, unknown>) =>
     request<Task[]>("/tasks", { method: "POST", body: JSON.stringify(payload) }),
+  uploadAudio: (files: File[], configuration: Record<string, unknown>) => {
+    const body = new FormData();
+    files.forEach(file => body.append("files", file));
+    body.append("configuration", JSON.stringify(configuration));
+    return request<Task[]>("/tasks/upload-audio", { method: "POST", body });
+  },
+  copyAudio: (id: number) => request<{ path: string; message: string }>(`/tasks/${id}/audio/copy`, { method: "POST" }),
+  manualReview: (id: number) => request<ManualReview>(`/tasks/${id}/manual-review`),
+  manualDraftUrl: (id: number) => `${API_BASE}/tasks/${id}/manual-review/draft`,
+  saveManualReview: (id: number, payload: Record<string, unknown>) =>
+    request<{ saved: boolean }>(`/tasks/${id}/manual-review`, { method: "PUT", body: JSON.stringify(payload) }),
+  submitManualReview: (id: number, payload: Record<string, unknown>) =>
+    request<{ requires_confirmation: boolean; warnings: Array<{ code: string; message: string }>; task: Task | null }>(
+      `/tasks/${id}/manual-review/submit`, { method: "POST", body: JSON.stringify(payload) },
+    ),
+  updateTask: (id: number, payload: Record<string, unknown>) =>
+    request<Task>(`/tasks/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  taskPage: (query: string, signal?: AbortSignal) => request<TaskPage>(`/tasks/page?${query}`, { signal }),
+  taskReview: (id: number, signal?: AbortSignal) => request<TaskReview>(`/tasks/${id}/review`, { signal }),
+  reviewDiffUrl: (id: number) => `${API_BASE}/tasks/${id}/review/diff`,
+  deleteTask: (id: number) => request<Task>(`/tasks/${id}`, { method: "DELETE" }),
+  restoreTask: (id: number) => request<Task>(`/tasks/${id}/restore`, { method: "POST" }),
+  purgeTask: (id: number) => request<TaskDeleteResult>(`/tasks/${id}/permanent`, { method: "DELETE" }),
+  purgeExpiredTasks: () => request<{
+    deleted: TaskDeleteResult[]; skipped: Array<{ task_id: number; reason: string }>;
+  }>("/tasks/trash/purge-expired", { method: "POST" }),
   cancelTask: (id: number) => request<Task>(`/tasks/${id}/cancel`, { method: "POST" }),
   retryTask: (id: number) => request<Task>(`/tasks/${id}/retry`, { method: "POST" }),
   queue: () => request<QueueState>("/queue"),
   systemStatus: () => request<SystemStatus>("/system/status"),
   selectMedia: () => request<{ paths: string[] }>("/system/select-media", { method: "POST" }),
+  selectSubtitle: () =>
+    request<{ path: string | null }>("/system/select-subtitle", { method: "POST" }),
+  selectOutputDirectory: () =>
+    request<{ path: string | null }>("/system/select-output-directory", { method: "POST" }),
+  clearTaskCache: (payload: { task_ids?: number[]; all_tasks?: boolean }) =>
+    request<CacheClearResult>("/system/cache/clear", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   shutdownApp: () => request<{ status: string }>("/system/shutdown", { method: "POST" }),
 };

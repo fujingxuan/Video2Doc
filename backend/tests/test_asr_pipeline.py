@@ -84,6 +84,30 @@ def test_provider_missing_confidence_or_timestamps_remains_null(tmp_path: Path) 
     assert result.segments[0].end_time is None
 
 
+def test_provider_explicit_no_speech_chunk_is_valid(tmp_path: Path) -> None:
+    request = AsrRequest(AudioChunk(3, 10, 20, "chunk.wav"), "model")
+    result = normalize_asr_response(
+        {"text": "", "segments": [], "no_speech": True},
+        request,
+        tmp_path / "raw.json",
+        "provider",
+    )
+
+    assert result.chunk_index == 3
+    assert result.segments == ()
+
+
+def test_provider_empty_response_without_no_speech_marker_is_rejected(
+    tmp_path: Path,
+) -> None:
+    request = AsrRequest(AudioChunk(0, 0, 10, "chunk.wav"), "model")
+
+    with pytest.raises(PipelineError) as failure:
+        normalize_asr_response({}, request, tmp_path / "raw.json", "provider")
+
+    assert failure.value.code == "ASR_PROVIDER_FAILED"
+
+
 @pytest.mark.asyncio
 async def test_audio_chunker_single_chunk_writes_manifest(tmp_path: Path) -> None:
     paths = WorkspacePaths.from_root(tmp_path / "task")
@@ -234,6 +258,7 @@ def test_transcript_artifacts_are_separate_and_versioned(tmp_path: Path) -> None
         model="model",
         language="zh",
         chunk_count=1,
+        provider_responses=["raw-0.json", "raw-silent-1.json"],
     )
     assert Path(artifacts["raw"]).name == "raw.json"
     assert Path(artifacts["normalized"]).name == "normalized.json"
@@ -243,6 +268,32 @@ def test_transcript_artifacts_are_separate_and_versioned(tmp_path: Path) -> None
     )
     normalized = json.loads(Path(artifacts["normalized"]).read_text(encoding="utf-8"))
     assert normalized["schema_version"] == 1
+    raw_index = json.loads(Path(artifacts["raw"]).read_text(encoding="utf-8"))
+    assert raw_index["provider_responses"] == ["raw-0.json", "raw-silent-1.json"]
+
+
+def test_combine_records_no_speech_chunk_diagnostic() -> None:
+    chunks = [
+        AudioChunk(0, 0.0, 10.0, "chunk0.wav"),
+        AudioChunk(1, 10.0, 20.0, "chunk1.wav"),
+    ]
+    results = [
+        AsrResult("test", "m", "zh", 0, "raw0", (segment(0, 1.0, 2.0, "正文"),)),
+        AsrResult("test", "m", "zh", 1, "raw1", ()),
+    ]
+    diagnostics: list[dict[str, object]] = []
+
+    combined = combine_asr_results(results, chunks, diagnostics=diagnostics)
+
+    assert [item.text for item in combined] == ["正文"]
+    assert diagnostics == [
+        {
+            "type": "no_speech_chunk",
+            "chunk_index": 1,
+            "source_start_seconds": 10.0,
+            "source_end_seconds": 20.0,
+        }
+    ]
 
 
 def test_sensitive_response_fields_are_recursively_redacted() -> None:

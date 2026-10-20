@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.core.errors import PipelineCancelled, PipelineError
 from app.documents.ir import Document
 from app.documents.markdown import render_obsidian_markdown
+from app.documents.word import render_word_document
 from app.storage.workspace import safe_filename
 
 
@@ -58,6 +59,7 @@ class ExportConfig(BaseModel):
 @dataclass(frozen=True, slots=True)
 class ExportResult:
     markdown_path: str
+    word_path: str
     attachment_directory: str | None
     data_directory: str | None
     image_count: int
@@ -102,16 +104,13 @@ def export_document_bundle(
         base_stem,
         config,
         title=document.title,
+        cancel_check=cancel_check,
     )
-    attachments_name = safe_filename(
-        config.attachment_directory_template.format(stem=stem, title=document.title),
-        fallback=f"{stem}.assets",
+    markdown_name, word_name, attachments_name, data_name = _bundle_names(
+        stem, document.title, config
     )
-    data_name = safe_filename(
-        config.data_directory_template.format(stem=stem, title=document.title),
-        fallback=f"{stem}.data",
-    )
-    final_markdown = inbox / f"{stem}.md"
+    final_markdown = inbox / markdown_name
+    final_word = inbox / word_name
     final_attachments = inbox / attachments_name
     final_data = inbox / data_name
     stage = inbox / f".video2doc-export-{uuid.uuid4().hex}.tmp"
@@ -144,10 +143,14 @@ def export_document_bundle(
                 ),
                 f"frame-{index:04d}",
             )
-            timestamp = _filename_timestamp(block.timestamp.start_seconds)
+            timestamp = (
+                f"_{_filename_timestamp(block.timestamp.start_seconds)}"
+                if bool(staged_document.processing.get("keep_timestamps", False))
+                else ""
+            )
             filename = safe_filename(
-                f"{frame_id}_{timestamp}{source_image.suffix.lower() or '.jpg'}",
-                fallback=f"frame_{index:04d}_{timestamp}.jpg",
+                f"{frame_id}{timestamp}{source_image.suffix.lower() or '.jpg'}",
+                fallback=f"frame_{index:04d}{timestamp}.jpg",
             )
             destination = _unique_child(stage_attachments / filename)
             shutil.copy2(source_image, destination)
@@ -189,11 +192,13 @@ def export_document_bundle(
 
         markdown = render_obsidian_markdown(staged_document)
         _write_text_atomic(stage / final_markdown.name, markdown)
+        render_word_document(markdown, stage / word_name, asset_root=stage)
         _ensure_active(cancel_check)
 
         targets = [
             (stage / attachments_name, final_attachments),
             (stage / data_name, final_data),
+            (stage / word_name, final_word),
             (stage / final_markdown.name, final_markdown),
         ]
         if config.conflict_policy == "overwrite":
@@ -223,6 +228,7 @@ def export_document_bundle(
         raise
     return ExportResult(
         markdown_path=str(final_markdown),
+        word_path=str(final_word),
         attachment_directory=str(final_attachments) if image_count else None,
         data_directory=str(final_data) if sidecar_count else None,
         image_count=image_count,
@@ -237,33 +243,58 @@ def _resolve_stem(
     config: ExportConfig,
     *,
     title: str,
+    cancel_check: ExportCancelCheck | None = None,
 ) -> tuple[str, str]:
-    def targets_exist(candidate: str) -> bool:
-        attachments = safe_filename(
-            config.attachment_directory_template.format(
-                stem=candidate, title=title
-            ),
-            fallback=f"{candidate}.assets",
-        )
-        data = safe_filename(
-            config.data_directory_template.format(stem=candidate, title=title),
-            fallback=f"{candidate}.data",
-        )
-        return any(
-            path.exists()
-            for path in (inbox / f"{candidate}.md", inbox / attachments, inbox / data)
-        )
+    def conflicts(candidate: str) -> set[str]:
+        return {
+            name.casefold()
+            for name in _bundle_names(candidate, title, config)
+            if (inbox / name).exists() or (inbox / name).is_symlink()
+        }
 
-    if not targets_exist(stem):
+    blocked = conflicts(stem)
+    if not blocked:
         return stem, "none"
     if config.conflict_policy == "fail":
         raise PipelineError("EXPORT_CONFLICT", "目标笔记或附件目录已经存在")
     if config.conflict_policy == "overwrite":
         return stem, "overwrite"
     index = 2
-    while targets_exist(f"{stem} ({index})"):
+    while True:
+        _ensure_active(cancel_check)
+        candidate = f"{stem} ({index})"
+        next_blocked = conflicts(candidate)
+        if not next_blocked:
+            return candidate, "renamed"
+        if blocked & next_blocked:
+            raise PipelineError(
+                "EXPORT_CONFLICT",
+                "导出目录名冲突且无法随笔记重命名；请在附件和追溯目录模板中使用 {stem}，"
+                "并缩短过长的模板",
+            )
+        blocked = next_blocked
         index += 1
-    return f"{stem} ({index})", "renamed"
+
+
+def _bundle_names(stem: str, title: str, config: ExportConfig) -> tuple[str, str, str, str]:
+    names = (
+        f"{stem}.md",
+        f"{stem}.docx",
+        safe_filename(
+            config.attachment_directory_template.format(stem=stem, title=title),
+            fallback=f"{stem}.assets",
+        ),
+        safe_filename(
+            config.data_directory_template.format(stem=stem, title=title),
+            fallback=f"{stem}.data",
+        ),
+    )
+    # Keep Windows filename semantics even when validating on another OS.
+    if len({name.casefold() for name in names}) != len(names):
+        raise PipelineError(
+            "EXPORT_PATH_INVALID", "Markdown、Word、附件目录和追溯目录必须使用不同名称"
+        )
+    return names
 
 
 def _write_text_atomic(path: Path, text: str) -> None:
@@ -318,16 +349,12 @@ def _validate_template(value: str, allowed_fields: set[str]) -> None:
     if "\x00" in value or not value.strip():
         raise ValueError("Export template cannot be empty or contain NUL")
     try:
-        fields = [
-            field_name
-            for _literal, field_name, _format_spec, _conversion in string.Formatter().parse(
-                value
-            )
-            if field_name is not None
-        ]
+        parts = list(string.Formatter().parse(value))
     except ValueError as exc:
         raise ValueError("Export template contains unmatched braces") from exc
-    if any(field not in allowed_fields for field in fields):
+    if any(field not in allowed_fields for _, field, _, _ in parts if field is not None):
         raise ValueError(
             f"Export template fields must be one of: {', '.join(sorted(allowed_fields))}"
         )
+    if any(format_spec or conversion for _, _, format_spec, conversion in parts):
+        raise ValueError("Export templates do not support format specifications or conversions")

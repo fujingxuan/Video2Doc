@@ -40,7 +40,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Video2Doc API",
-    version="1.0.0",
+    version="3.4.1",
     description="Local faithful media-to-Obsidian application API.",
     lifespan=lifespan,
 )
@@ -85,5 +85,11 @@ async def handle_database_error(_request: Request, exc: SQLAlchemyError) -> JSON
 def root() -> FileResponse | dict[str, str]:
     index = frontend_directory / "index.html"
     if index.is_file():
-        return FileResponse(index)
+        # The portable launcher deliberately reuses one local URL. Never let
+        # that stable URL pin an older SPA entry point after the package is
+        # replaced; hashed /assets files remain safe for normal browser cache.
+        return FileResponse(
+            index,
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
     return {"service": "Video2Doc", "docs": "/docs", "health": f"{settings.api_prefix}/health"}

@@ -39,7 +39,7 @@ def models() -> dict[str, Any]:
         "models": [
             {
                 "model_name": MODEL_ID,
-                "display_name": "PP-OCRv5 Server (Chinese/English)",
+                "display_name": "OCR v5（中英文画面）",
                 "capabilities": {
                     "local": True,
                     "text_blocks": True,

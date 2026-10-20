@@ -3,6 +3,8 @@ param(
     [ValidateSet("firered", "qwen", "whisper", "mock")]
     [string]$Provider,
     [int]$Port = 0,
+    [ValidatePattern('^(cpu|cuda(:[0-9]+)?)$')]
+    [string]$Device = "cuda",
     [string]$ModelRoot = "D:\Models\Video2Doc",
     [string]$EnvironmentRoot = "",
     [string]$Distribution = "Ubuntu"
@@ -13,6 +15,20 @@ $ports = @{ firered = 8101; qwen = 8102; whisper = 8103; mock = 8199 }
 if ($Port -eq 0) { $Port = $ports[$Provider] }
 $existing = Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($existing) { throw "Port $Port is already listening." }
+$activeLocalAsr = @(
+    foreach ($entry in $ports.GetEnumerator()) {
+        if ($entry.Key -eq "mock" -or $entry.Value -eq $Port) { continue }
+        $listener = Get-NetTCPConnection -LocalPort $entry.Value -State Listen -ErrorAction SilentlyContinue
+        if ($listener) { "{0}:{1}" -f $entry.Key, $entry.Value }
+    }
+)
+if ($activeLocalAsr.Count -gt 0) {
+    $conflictMessage = (
+        "Another local ASR Gateway is already running ({0}). " +
+        "Video2Doc permits one GPU ASR model at a time; stop it before switching."
+    ) -f ($activeLocalAsr -join ", ")
+    throw $conflictMessage
+}
 
 $runtimeRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $servicePath = (& wsl.exe -d $Distribution -- wslpath -a (($runtimeRoot + "\asr_gateway_service.py") -replace "\\", "/")).Trim()
@@ -26,6 +42,12 @@ $wslEnvironmentRoot = if ([string]::IsNullOrWhiteSpace($EnvironmentRoot)) {
     $EnvironmentRoot.TrimEnd('/')
 }
 $python = if ($Provider -eq "mock") { "python3" } else { "$wslEnvironmentRoot/envs/$Provider/bin/python" }
+if ($Provider -ne "mock" -and [string]::IsNullOrWhiteSpace($EnvironmentRoot)) {
+    & wsl.exe -d $Distribution -- bash -lc "test -x '$python'"
+    if ($LASTEXITCODE -ne 0 -and (Test-Path -LiteralPath (Join-Path $ModelRoot "envs\$Provider"))) {
+        $python = "$wslModelRoot/envs/$Provider/bin/python"
+    }
+}
 if ($Provider -ne "mock") {
     & wsl.exe -d $Distribution -- bash -lc "test -x '$python'"
     if ($LASTEXITCODE -ne 0) {
@@ -50,6 +72,7 @@ if ($Provider -ne "mock") {
         }
     }
 
+    if ($Device -ne "cpu") {
     $gpuLine = & nvidia-smi --query-gpu=name,memory.total,memory.free --format=csv,noheader,nounits 2>$null | Select-Object -First 1
     # A preceding WSL native command can leave a stale LASTEXITCODE in Windows
     # PowerShell even when this pipeline returned a valid nvidia-smi row.
@@ -62,6 +85,7 @@ if ($Provider -ne "mock") {
     Write-Host "[OK] GPU: $($gpuParts[0]), total=$($gpuParts[1]) MiB, free=$freeMemoryMiB MiB"
     if ($freeMemoryMiB -lt $recommendedFreeMiB) {
         Write-Warning "$Provider has $freeMemoryMiB MiB free VRAM; recommended free VRAM is at least $recommendedFreeMiB MiB. Startup may fail with OOM."
+    }
     }
 }
 $logDirectory = Join-Path $ModelRoot "logs\$Provider"
@@ -105,7 +129,7 @@ if ($pathKeys.Count -gt 1) {
         [System.EnvironmentVariableTarget]::Process
     )
 }
-$process = Start-Process -FilePath "wsl.exe" -ArgumentList @("-d", $Distribution, "--", "bash", $launcherPath, $Provider, $wslModelRoot, $python, $servicePath, $Port) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+$process = Start-Process -FilePath "wsl.exe" -ArgumentList @("-d", $Distribution, "--", "bash", $launcherPath, $Provider, $wslModelRoot, $python, $servicePath, $Port, $Device) -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 Set-Content -LiteralPath $pidPath -Value $process.Id -Encoding ASCII
 
 $deadline = (Get-Date).AddSeconds(600)

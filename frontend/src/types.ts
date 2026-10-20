@@ -2,6 +2,8 @@ export type Capability = "ASR" | "OCR" | "TEXT_PROCESSING" | "VISION";
 export type TaskStatus =
   | "QUEUED"
   | "PROCESSING"
+  | "WAITING_REVIEW"
+  | "DELETING"
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED"
@@ -10,14 +12,20 @@ export type TaskStatus =
 export interface ModelConfig {
   id: number;
   name: string;
+  display_name?: string;
   capabilities: Capability[];
   notes: string | null;
   enabled: boolean;
+  provider: string | null;
+  base_url: string | null;
+  secret_env_name: string | null;
+  secret_source: "NONE" | "ENVIRONMENT" | "DIRECT";
+  secret_configured: boolean;
   created_at: string;
   updated_at: string;
 }
 
-export type GatewayType = "ASR" | "OCR";
+export type GatewayType = "LLM" | "ASR" | "OCR";
 
 export interface GatewayConfig {
   id: number;
@@ -26,6 +34,7 @@ export interface GatewayConfig {
   protocol: string;
   base_url: string;
   secret_env_name: string | null;
+  secret_source: "NONE" | "ENVIRONMENT" | "DIRECT";
   secret_configured: boolean;
   enabled: boolean;
   health_status: string;
@@ -86,8 +95,39 @@ export interface ProcessingProfile {
   markdown_template: string | null;
   output_directory: string | null;
   data_directory: string | null;
+  asr_selection: ProfileModelSelection | null;
+  ocr_selection: ProfileModelSelection | null;
+  text_selection: ProfileModelSelection | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ModelHealth {
+  model_id: number;
+  status: string;
+  detail: string;
+  checked_at: string;
+  latency_ms: number;
+}
+
+export interface ProfileModelSelection {
+  capability: "ASR" | "OCR" | "TEXT_PROCESSING";
+  source: "GATEWAY" | "MODEL_CONFIG";
+  model_id: number;
+  model_name: string;
+  display_name: string;
+  gateway_id: number | null;
+  gateway_name: string | null;
+  protocol: string | null;
+}
+
+export interface ModelUsage {
+  capability: "ASR" | "OCR" | "TEXT_PROCESSING" | "TEXT_SOURCE";
+  mode: "GATEWAY_MODEL" | "URL_SUBTITLE";
+  gateway_name: string | null;
+  protocol: string | null;
+  model_name: string | null;
+  display_name: string;
 }
 
 export interface StageRun {
@@ -103,10 +143,12 @@ export interface StageRun {
   technical_error: string | null;
   input_artifacts: string[] | null;
   output_artifacts: string[] | null;
+  model_usage: ModelUsage[];
   log_path: string | null;
 }
 
 export interface Task {
+  review_submission_path?: string | null;
   id: number;
   source: string;
   source_type: string;
@@ -133,6 +175,8 @@ export interface Task {
   updated_at: string;
   started_at: string | null;
   completed_at: string | null;
+  deleted_at?: string | null;
+  trash_expires_at?: string | null;
 }
 
 export interface TaskDetail extends Task {
@@ -152,6 +196,7 @@ export interface TaskDetail extends Task {
     video_streams?: Array<Record<string, unknown>>;
   } | null;
   transcript_preview: {
+    quality_warnings?: string[];
     provider?: string;
     model?: string;
     language?: string | null;
@@ -200,6 +245,7 @@ export interface TaskDetail extends Task {
     target_type: "WORKSPACE" | "OBSIDIAN";
     status: string;
     markdown_path: string | null;
+    word_path?: string | null;
     attachment_directory: string | null;
     data_directory: string | null;
     image_count: number;
@@ -211,6 +257,7 @@ export interface TaskDetail extends Task {
 }
 
 export interface QueueState {
+  waiting_review?: number;
   max_concurrency: number;
   running: number;
   queued: number;
@@ -254,7 +301,72 @@ export interface AppSettings {
   export_keep_json_sidecar: boolean;
   export_copy_transcript: boolean;
   export_copy_subtitles: boolean;
+  auto_clear_task_cache: boolean;
   updated_at: string;
+}
+
+export interface CacheClearResult {
+  tasks_cleared: number;
+  files_removed: number;
+  bytes_freed: number;
+  cleared: Array<{ task_id: number; files_removed: number; bytes_freed: number }>;
+  skipped: Array<{ task_id: number; reason: string }>;
+}
+
+export interface TaskDeleteResult {
+  task_id: number;
+  files_removed: number;
+  bytes_freed: number;
+  deleted_paths: string[];
+}
+
+export interface TaskPage {
+  items: Task[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface TaskPageQuery {
+  offset?: number;
+  limit?: number;
+  status?: string;
+  search?: string;
+  trashed?: boolean;
+}
+
+export interface TaskFeed {
+  page: TaskPage;
+  queue: QueueState;
+}
+
+export interface TaskPageDelta {
+  upserts: Task[];
+  removed_ids: number[];
+  order: number[];
+  total: number;
+  offset: number;
+  limit: number;
+  queue: QueueState;
+}
+
+export interface TaskReview {
+  manual_review?: boolean;
+  task_id: number;
+  title: string;
+  attempt: number;
+  original_text: string;
+  edited_text: string;
+  diff: string;
+  changed: boolean;
+  original_characters: number;
+  edited_characters: number;
+  source_count: number;
+  accepted: boolean | null;
+  fallback_used: boolean;
+  model: string | null;
+  reason: string | null;
+  prompt_version: string | null;
 }
 
 export interface SystemStatus {
@@ -270,4 +382,15 @@ export interface SystemStatus {
   log_directory: string;
   api_prefix: string;
   port: number;
+}
+
+export interface ManualReview {
+  task_id: number;
+  title: string;
+  attempt: number;
+  source_sha256: string;
+  original_text: string;
+  edited_text: string;
+  source_count: number;
+  prompt: string;
 }

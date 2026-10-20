@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -21,8 +22,9 @@ logger = logging.getLogger("video2doc.model_runtime")
 
 PROVIDER = os.getenv("VIDEO2DOC_ASR_PROVIDER", "mock").strip().lower()
 MODEL_ROOT = Path(os.getenv("VIDEO2DOC_MODEL_ROOT", "/mnt/d/Models/Video2Doc")).resolve()
-DEVICE = os.getenv("VIDEO2DOC_ASR_DEVICE", "cuda")
-COMPUTE_TYPE = os.getenv("VIDEO2DOC_WHISPER_COMPUTE_TYPE", "float16")
+DEVICE = os.getenv("VIDEO2DOC_ASR_DEVICE", "cuda").strip().casefold()
+CUDA_DEVICE = DEVICE == "cuda" or DEVICE.startswith("cuda:")
+COMPUTE_TYPE = os.getenv("VIDEO2DOC_WHISPER_COMPUTE_TYPE", "float16" if CUDA_DEVICE else "int8")
 FIRERED_USE_HALF = os.getenv("VIDEO2DOC_FIRERED_USE_HALF", "1").strip().casefold() not in {
     "0",
     "false",
@@ -40,15 +42,23 @@ FIRERED_MODEL = Path(
 class ModelRuntime:
     def __init__(self) -> None:
         self.lock = Lock()
+        self.inference_lock = Lock()
         self.loaded_name: str | None = None
         self.loaded_model: Any = None
         self.loaded_at: float | None = None
         self.load_seconds: float | None = None
+        self.actual_device: str | None = None
+        self.actual_dtype: str | None = None
+        self.last_metrics: dict[str, Any] = {}
 
     def unload(self) -> None:
         self.loaded_model = None
         self.loaded_name = None
         self.loaded_at = None
+        self.load_seconds = None
+        self.actual_device = None
+        self.actual_dtype = None
+        self.last_metrics = {}
         gc.collect()
         try:
             import torch
@@ -70,7 +80,14 @@ class ModelRuntime:
 
                 model_path = MODEL_ROOT / "whisper" / model_name
                 source = str(model_path) if model_path.exists() else model_name
-                self.loaded_model = WhisperModel(source, device=DEVICE, compute_type=COMPUTE_TYPE)
+                whisper_device = "cuda" if CUDA_DEVICE else DEVICE
+                whisper_options: dict[str, Any] = {
+                    "device": whisper_device,
+                    "compute_type": COMPUTE_TYPE,
+                }
+                if DEVICE.startswith("cuda:"):
+                    whisper_options["device_index"] = int(DEVICE.partition(":")[2])
+                self.loaded_model = WhisperModel(source, **whisper_options)
             elif PROVIDER == "qwen":
                 import torch
                 from qwen_asr import Qwen3ASRModel
@@ -79,17 +96,31 @@ class ModelRuntime:
                     raise ValueError(f"Unsupported Qwen model: {model_name}")
                 self.loaded_model = Qwen3ASRModel.from_pretrained(
                     QWEN_ASR_MODEL,
-                    dtype=torch.bfloat16,
-                    device_map="cuda:0",
+                    dtype=torch.bfloat16 if CUDA_DEVICE else torch.float32,
+                    device_map=(DEVICE if DEVICE.startswith("cuda:") else "cuda:0")
+                    if CUDA_DEVICE
+                    else DEVICE,
                     max_inference_batch_size=1,
                     max_new_tokens=2048,
                     forced_aligner=QWEN_ALIGNER_MODEL,
-                    forced_aligner_kwargs={"dtype": torch.bfloat16, "device_map": "cuda:0"},
+                    forced_aligner_kwargs={
+                        "dtype": torch.bfloat16 if CUDA_DEVICE else torch.float32,
+                        "device_map": (
+                            DEVICE if DEVICE.startswith("cuda:") else "cuda:0"
+                        )
+                        if CUDA_DEVICE
+                        else DEVICE,
+                    },
                 )
             elif PROVIDER == "mock":
                 self.loaded_model = object()
             elif PROVIDER == "firered":
+                import torch
                 from fireredasr2s.fireredasr2 import FireRedAsr2, FireRedAsr2Config
+
+                _install_firered_forced_align_compatibility()
+                if DEVICE.startswith("cuda:"):
+                    torch.cuda.set_device(int(DEVICE.partition(":")[2]))
 
                 if model_name not in {
                     "FireRedTeam/FireRedASR2-AED",
@@ -97,7 +128,7 @@ class ModelRuntime:
                 }:
                     raise ValueError(f"Unsupported FireRed model: {model_name}")
                 config = FireRedAsr2Config(
-                    use_gpu=DEVICE == "cuda",
+                    use_gpu=CUDA_DEVICE,
                     use_half=FIRERED_USE_HALF,
                     beam_size=3,
                     nbest=1,
@@ -107,14 +138,24 @@ class ModelRuntime:
                     eos_penalty=1.0,
                     return_timestamp=True,
                 )
-                self.loaded_model = FireRedAsr2.from_pretrained(
-                    "aed", str(FIRERED_MODEL), config
-                )
+                with _firered_fast_loader():
+                    self.loaded_model = FireRedAsr2.from_pretrained(
+                        "aed", str(FIRERED_MODEL), config
+                    )
+                _release_cpu_loader_memory()
             else:
                 raise ValueError(f"Unknown provider: {PROVIDER}")
             self.loaded_name = model_name
             self.loaded_at = time.time()
             self.load_seconds = time.perf_counter() - started
+            inner = getattr(self.loaded_model, "model", self.loaded_model)
+            if hasattr(inner, "parameters"):
+                parameter = next(inner.parameters())
+                self.actual_device = str(parameter.device)
+                self.actual_dtype = str(parameter.dtype).removeprefix("torch.")
+            elif PROVIDER == "whisper":
+                self.actual_device = str(getattr(inner, "device", DEVICE))
+                self.actual_dtype = str(getattr(inner, "compute_type", COMPUTE_TYPE))
             return self.loaded_model
 
 
@@ -124,17 +165,49 @@ cancelled_requests: set[str] = set()
 cancelled_requests_lock = Lock()
 
 
+@contextmanager
+def _firered_fast_loader():
+    """Avoid initializing/copying 1.15B random weights before loading the checkpoint.
+
+    Keep positional buffers on CPU because upstream computes scalar values there.
+    Scope the adapter to model loading; do not alter the installed vendor package.
+    """
+    from fireredasr2s.fireredasr2 import asr
+
+    original = asr.load_fireredasr_aed_model
+
+    def load(path: str) -> Any:
+        import torch
+        from accelerate import init_empty_weights
+
+        package = torch.load(path, map_location="cpu", weights_only=False, mmap=True)
+        with init_empty_weights(include_buffers=False):
+            model = asr.FireRedAsrAed.from_args(package["args"])
+        model.load_state_dict(package["model_state_dict"], strict=True, assign=True)
+        # assign=True replaces Parameter objects: restore upstream's tied embedding.
+        model.decoder.tgt_word_prj.weight = model.decoder.tgt_word_emb.weight
+        if any(p.is_meta for p in (*model.parameters(), *model.buffers())):
+            raise RuntimeError("FireRed checkpoint left uninitialized model tensors")
+        return model
+
+    asr.load_fireredasr_aed_model = load
+    try:
+        yield
+    finally:
+        asr.load_fireredasr_aed_model = original
+
+
 def supported_models() -> list[dict[str, Any]]:
     if PROVIDER == "whisper":
         return [
-            {"id": "large-v3", "display_name": "Whisper large-v3", "capabilities": _whisper_caps()},
-            {"id": "large-v3-turbo", "display_name": "Whisper large-v3-turbo", "capabilities": _whisper_caps()},
+            {"id": "large-v3", "display_name": "Whisper V3（多语·质量优先）", "capabilities": _whisper_caps()},
+            {"id": "large-v3-turbo", "display_name": "Whisper Turbo（多语·快速转写）", "capabilities": _whisper_caps()},
         ]
     if PROVIDER == "qwen":
         return [
             {
                 "id": "Qwen/Qwen3-ASR-1.7B",
-                "display_name": "Qwen3-ASR-1.7B + ForcedAligner",
+                "display_name": "Qwen3 1.7B（多语·词级时间戳）",
                 "capabilities": {
                     "segment_timestamps": True,
                     "word_timestamps": True,
@@ -148,7 +221,7 @@ def supported_models() -> list[dict[str, Any]]:
         return [
             {
                 "id": "FireRedTeam/FireRedASR2-AED",
-                "display_name": "FireRedASR2-AED",
+                "display_name": "FireRed 2（中文·方言）",
                 "capabilities": {
                     "segment_timestamps": True,
                     "word_timestamps": True,
@@ -176,6 +249,10 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "provider": PROVIDER,
         "device": DEVICE,
+        "cuda_enabled": CUDA_DEVICE,
+        "compute_type": runtime.actual_dtype,
+        "actual_device": runtime.actual_device,
+        "last_metrics": runtime.last_metrics,
         "loaded_model": runtime.loaded_name,
         "loaded_at": runtime.loaded_at,
         "load_seconds": runtime.load_seconds,
@@ -190,7 +267,8 @@ def models() -> dict[str, Any]:
 
 @app.post("/v1/models/unload")
 def unload() -> dict[str, str]:
-    runtime.unload()
+    with runtime.inference_lock:
+        runtime.unload()
     return {"status": "unloaded"}
 
 
@@ -247,7 +325,7 @@ async def transcribe(
                     call = _transcribe_firered, (audio_path, model)
                 else:
                     call = _transcribe_mock, (audio_path, model, language)
-                response = await asyncio.to_thread(call[0], *call[1])
+                response = await asyncio.to_thread(_run_inference, call[0], call[1])
             except RuntimeError as exc:
                 logger.exception("ASR inference failed")
                 raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -260,6 +338,72 @@ async def transcribe(
     response["inference_seconds"] = time.perf_counter() - started
     response["timestamp_granularity"] = timestamp_granularity
     return response
+
+
+def _run_inference(call: Any, arguments: tuple[Any, ...]) -> dict[str, Any]:
+    # Model switching and unloading must not overlap an active GPU inference.
+    with runtime.inference_lock:
+        cold = runtime.loaded_model is None or runtime.loaded_name != arguments[1]
+        started = time.perf_counter()
+        response = call(*arguments)
+        elapsed = time.perf_counter() - started
+        load_seconds = (runtime.load_seconds or 0.0) if cold else 0.0
+        runtime.last_metrics = {
+            "cold_start": cold,
+            "load_seconds": load_seconds,
+            "inference_seconds": max(0.0, elapsed - load_seconds),
+            "total_seconds": elapsed,
+            "actual_device": runtime.actual_device,
+            "compute_type": runtime.actual_dtype,
+        }
+        if CUDA_DEVICE and PROVIDER in {"firered", "qwen"}:
+            import torch
+
+            runtime.last_metrics["cuda_allocated_mib"] = torch.cuda.memory_allocated() / 1024**2
+            runtime.last_metrics["cuda_reserved_mib"] = torch.cuda.memory_reserved() / 1024**2
+        response["runtime_metrics"] = dict(runtime.last_metrics)
+        return response
+
+
+def _firered_alignment_log_probs(log_probs: Any, torch_module: Any) -> Any:
+    # FireRed selects BF16 automatically on recent NVIDIA GPUs, while
+    # torchaudio.forced_align accepts only FP16/FP32/FP64 logits.
+    return log_probs.float() if log_probs.dtype == torch_module.bfloat16 else log_probs
+
+
+def _install_firered_forced_align_compatibility() -> None:
+    import torch
+    import torchaudio
+
+    current = torchaudio.functional.forced_align
+    if getattr(current, "_video2doc_bfloat16_compatible", False):
+        return
+
+    def compatible_forced_align(log_probs: Any, *args: Any, **kwargs: Any) -> Any:
+        return current(
+            _firered_alignment_log_probs(log_probs, torch),
+            *args,
+            **kwargs,
+        )
+
+    compatible_forced_align._video2doc_bfloat16_compatible = True  # type: ignore[attr-defined]
+    torchaudio.functional.forced_align = compatible_forced_align
+
+
+def _release_cpu_loader_memory() -> None:
+    """Return transient checkpoint-loading allocations to the Linux host."""
+    import gc
+
+    gc.collect()
+    if os.name != "posix":
+        return
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6")
+        libc.malloc_trim(0)
+    except (AttributeError, OSError):
+        logger.debug("glibc malloc_trim is unavailable", exc_info=True)
 
 
 def _transcribe_whisper(audio_path: Path, model_name: str, language: str | None, prompt: str | None) -> dict[str, Any]:
@@ -302,24 +446,29 @@ def _transcribe_whisper(audio_path: Path, model_name: str, language: str | None,
                 },
             }
         )
+    text = "".join(item["text"] for item in segments).strip()
     return {
         "model": model_name,
         "provider": "faster-whisper",
         "language": info.language,
-        "text": "".join(item["text"] for item in segments).strip(),
+        "text": text,
         "segments": segments,
         "words": words,
         "duration": info.duration,
+        "no_speech": not bool(text),
     }
 
 
 def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) -> dict[str, Any]:
     model = runtime.load(model_name)
-    result = model.transcribe(
+    results = model.transcribe(
         audio=str(audio_path),
         language=_qwen_language(language),
         return_time_stamps=True,
-    )[0]
+    )
+    if not results:
+        raise RuntimeError("Qwen3-ASR returned no result")
+    result = results[0]
     # qwen-asr returns ForcedAlignItem objects directly in ``time_stamps`` for one
     # transcription result.  Indexing once more would keep only the first item and
     # then attempt to iterate that dataclass.
@@ -328,10 +477,11 @@ def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) ->
         {"start": item.start_time, "end": item.end_time, "text": item.text, "confidence": None}
         for item in raw_timestamps
     ]
+    text = str(result.text or "").strip()
     segment = {
         "start": words[0]["start"] if words else None,
         "end": words[-1]["end"] if words else None,
-        "text": result.text,
+        "text": text,
         "confidence": None,
         "words": words,
     }
@@ -339,10 +489,11 @@ def _transcribe_qwen(audio_path: Path, model_name: str, language: str | None) ->
         "model": model_name,
         "provider": "qwen-asr-transformers",
         "language": result.language,
-        "text": result.text,
-        "segments": [segment],
-        "words": words,
+        "text": text,
+        "segments": [segment] if text else [],
+        "words": words if text else [],
         "duration": segment["end"],
+        "no_speech": not bool(text),
     }
 
 
@@ -359,8 +510,6 @@ def _transcribe_firered(audio_path: Path, model_name: str) -> dict[str, Any]:
         raise RuntimeError("FireRedASR2-AED returned no result")
     record = records[0]
     text = str(record.get("text") or "").strip()
-    if not text:
-        raise RuntimeError("FireRedASR2-AED returned no text")
     words = [
         {
             "start": float(item[1]),
@@ -384,10 +533,11 @@ def _transcribe_firered(audio_path: Path, model_name: str) -> dict[str, Any]:
         "provider": "fireredasr2s-official-python",
         "language": None,
         "text": text,
-        "segments": [segment],
-        "words": words,
+        "segments": [segment] if text else [],
+        "words": words if text else [],
         "duration": record.get("dur_s"),
         "raw_records": records,
+        "no_speech": not bool(text),
     }
 
 
@@ -401,6 +551,7 @@ def _transcribe_mock(audio_path: Path, model_name: str, language: str | None) ->
         "segments": [{"start": 0.0, "end": 1.0, "text": "mock transcription", "confidence": None, "words": []}],
         "words": [],
         "duration": 1.0,
+        "no_speech": False,
     }
 
 

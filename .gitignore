@@ -38,6 +38,8 @@ pip-delete-this-directory.txt
 
 # Unit test / coverage reports
 htmlcov/
+.acceptance/
+.pytest-tmp-*/
 .tox/
 .nox/
 .coverage
@@ -195,9 +197,9 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
+#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, 
+#   and can be added to the global gitignore or merged into this file. However, if you prefer,
 #   you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 # Temporary file for partial code execution
@@ -208,6 +210,7 @@ data/*
 !data/.gitkeep
 backend/data/*
 !backend/data/.gitkeep
+backend/.test-runtime-*/
 *.db
 *.db-shm
 *.db-wal
@@ -230,6 +233,7 @@ Thumbs.db
 
 # Ruff stuff:
 .ruff_cache/
+tools/media/
 
 # PyPI configuration file
 .pypirc
@@ -241,3 +245,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local task outputs, personal transcripts, and scratch work
+/output/
+/tmp/
+/apply_transcript_corrections.py
+/second_pass.py
+/情书辩论赛_*.md
+.env.*
+!.env.example
+*cookies*.txt
+*.pem
+*.pfx
+*.key

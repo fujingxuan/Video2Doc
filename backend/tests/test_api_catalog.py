@@ -1,10 +1,129 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
+from app.providers.gateways import GatewayProbeResult
+from app.providers.model_probe import ModelProbeResult
 from app.services.gateways import seed_default_gateways
 from tests.helpers import wait_for_status
+
+
+def test_frontend_entry_point_is_never_cached(client: TestClient) -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+
+
+def test_direct_credentials_are_encrypted_and_never_returned(client: TestClient) -> None:
+    secret = "direct-secret-value-for-test"
+    model_response = client.post(
+        "/api/v1/models",
+        json={
+            "name": "direct-credential-model",
+            "provider": "custom",
+            "base_url": "http://127.0.0.1:13000/v1",
+            "capabilities": ["TEXT_PROCESSING"],
+            "secret_value": secret,
+        },
+    )
+    assert model_response.status_code == 201, model_response.text
+    model = model_response.json()
+    assert model["secret_source"] == "DIRECT"
+    assert model["secret_configured"] is True
+    assert secret not in model_response.text
+    assert secret not in client.get("/api/v1/models").text
+
+    gateway_response = client.post(
+        "/api/v1/gateways",
+        json={
+            "name": "direct-credential-asr",
+            "gateway_type": "ASR",
+            "protocol": "video2doc-asr-http-v1",
+            "base_url": "http://127.0.0.1:18109",
+            "secret_value": secret,
+        },
+    )
+    assert gateway_response.status_code == 201, gateway_response.text
+    gateway = gateway_response.json()
+    assert gateway["secret_source"] == "DIRECT"
+    assert gateway["secret_configured"] is True
+    assert secret not in gateway_response.text
+    assert secret not in client.get("/api/v1/gateways").text
+
+
+def test_each_model_has_an_independent_connectivity_endpoint(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    checked_at = datetime.now(timezone.utc)
+
+    async def text_probe(model):
+        assert model.name == "connectivity-llm"
+        return ModelProbeResult("HEALTHY", "LLM probe ok", checked_at, 12)
+
+    monkeypatch.setattr("app.services.catalog.probe_text_model", text_probe)
+    llm = client.post(
+        "/api/v1/models",
+        json={
+            "name": "connectivity-llm",
+            "provider": "custom",
+            "base_url": "http://127.0.0.1:13001/v1",
+            "capabilities": ["TEXT_PROCESSING"],
+        },
+    ).json()
+    llm_health = client.post(f"/api/v1/models/{llm['id']}/health")
+    assert llm_health.status_code == 200, llm_health.text
+    assert llm_health.json() == {
+        "model_id": llm["id"],
+        "status": "HEALTHY",
+        "detail": "LLM probe ok",
+        "checked_at": checked_at.isoformat().replace("+00:00", "Z"),
+        "latency_ms": 12,
+    }
+
+    gateway = client.post(
+        "/api/v1/gateways",
+        json={
+            "name": "connectivity-asr-gateway",
+            "gateway_type": "ASR",
+            "protocol": "video2doc-asr-http-v1",
+            "base_url": "http://127.0.0.1:18131",
+        },
+    ).json()
+    model = client.post(
+        "/api/v1/gateway-models",
+        json={
+            "gateway_id": gateway["id"],
+            "model_name": "connectivity-asr",
+            "display_name": "Connectivity ASR",
+        },
+    ).json()
+
+    async def gateway_model_probe(item, **_kwargs):
+        assert item.model_name == "connectivity-asr"
+        return ModelProbeResult("MODEL_NOT_FOUND", "not in model directory", checked_at, 8)
+
+    monkeypatch.setattr("app.services.gateways.probe_gateway_model", gateway_model_probe)
+    model_health = client.post(f"/api/v1/gateway-models/{model['id']}/health")
+    assert model_health.status_code == 200, model_health.text
+    assert model_health.json()["status"] == "MODEL_NOT_FOUND"
+    persisted = client.get("/api/v1/gateway-models?gateway_type=ASR").json()
+    persisted_model = next(item for item in persisted if item["id"] == model["id"])
+    assert persisted_model["health_status"] == "MODEL_NOT_FOUND"
+
+    async def gateway_probe(_gateway, **_kwargs):
+        return GatewayProbeResult("HEALTHY", "gateway only", checked_at)
+
+    monkeypatch.setattr("app.services.gateways.probe_gateway", gateway_probe)
+    gateway_health = client.post(f"/api/v1/gateways/{gateway['id']}/health")
+    assert gateway_health.status_code == 200, gateway_health.text
+    persisted = client.get("/api/v1/gateway-models?gateway_type=ASR").json()
+    persisted_model = next(item for item in persisted if item["id"] == model["id"])
+    assert persisted_model["health_status"] == "MODEL_NOT_FOUND"
 
 
 def test_health_models_profiles_settings_and_immutable_snapshot(
@@ -39,6 +158,18 @@ def test_health_models_profiles_settings_and_immutable_snapshot(
     )
     selected = client.post("/api/v1/system/select-media")
     assert selected.json()["paths"] == [r"D:\Video2Doc-Test\sample.mp4"]
+    monkeypatch.setattr(
+        "app.api.router.select_subtitle_file",
+        lambda: r"D:\Video2Doc-Test\sample.zh-CN.srt",
+    )
+    subtitle = client.post("/api/v1/system/select-subtitle")
+    assert subtitle.json()["path"].endswith("sample.zh-CN.srt")
+    monkeypatch.setattr(
+        "app.api.router.select_output_directory",
+        lambda: r"D:\Video2Doc-Output",
+    )
+    output = client.post("/api/v1/system/select-output-directory")
+    assert output.json()["path"] == r"D:\Video2Doc-Output"
     shutdown_called: list[bool] = []
     client.app.state.request_shutdown = lambda: shutdown_called.append(True)
     shutdown = client.post("/api/v1/system/shutdown")
@@ -117,6 +248,19 @@ def test_health_models_profiles_settings_and_immutable_snapshot(
     profile_response = client.post("/api/v1/profiles", json=profile_payload)
     assert profile_response.status_code == 201, profile_response.text
     profile = profile_response.json()
+    assert profile["asr_selection"] == {
+        "capability": "ASR",
+        "source": "GATEWAY",
+        "model_id": asr_gateway_model["id"],
+        "model_name": "test-asr",
+        "display_name": "Test ASR",
+        "gateway_id": asr_gateway["id"],
+        "gateway_name": "test-asr-gateway",
+        "protocol": "video2doc-asr-http-v1",
+    }
+    assert profile["ocr_selection"]["display_name"] == "Test OCR"
+    assert profile["text_selection"]["display_name"] == "gpt-5-mini（全文校对）"
+    assert profile["text_selection"]["model_name"] == "gpt-5-mini"
 
     invalid = client.post(
         "/api/v1/profiles",
@@ -160,8 +304,9 @@ def test_health_models_profiles_settings_and_immutable_snapshot(
     assert created.status_code == 201, created.text
     task_id = created.json()[0]["id"]
     snapshot_before = client.get(f"/api/v1/tasks/{task_id}/snapshot").json()
-    assert snapshot_before["schema_version"] == 5
-    assert snapshot_before["processing"]["prompt_version"] == "faithful-edit-v1"
+    assert snapshot_before["schema_version"] == 6
+    assert snapshot_before["processing"]["prompt_version"] == "faithful-article-v1"
+    assert snapshot_before["text_processing"]["timeout_seconds"] == 600.0
     assert snapshot_before["processing"]["markdown_template_version"] == "obsidian-v1"
     assert snapshot_before["export"]["conflict_policy"] == "rename"
     assert snapshot_before["export"]["keep_json_sidecar"] is True
@@ -199,9 +344,7 @@ def test_dashscope_task_snapshot_uses_one_continuous_stream_without_overlap(
     client: TestClient,
 ) -> None:
     models = client.get("/api/v1/gateway-models?gateway_type=ASR").json()
-    fun_asr = next(
-        item for item in models if item["model_name"] == "fun-asr-realtime-2026-02-28"
-    )
+    fun_asr = next(item for item in models if item["model_name"] == "fun-asr-realtime-2026-02-28")
     response = client.post(
         "/api/v1/tasks",
         json={

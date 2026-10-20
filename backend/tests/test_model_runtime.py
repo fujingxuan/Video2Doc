@@ -108,6 +108,24 @@ def test_whisper_response_normalization(monkeypatch, tmp_path: Path) -> None:
     assert response["words"] == [
         {"start": 0.1, "end": 0.4, "text": " hello", "confidence": 0.91}
     ]
+    assert response["no_speech"] is False
+
+
+def test_whisper_no_speech_is_a_valid_empty_response(monkeypatch, tmp_path: Path) -> None:
+    module = load_runtime(monkeypatch)
+    fake_model = SimpleNamespace(
+        transcribe=lambda *_args, **_kwargs: (
+            iter([]),
+            SimpleNamespace(language="zh", duration=3.0),
+        )
+    )
+    monkeypatch.setattr(module.runtime, "load", lambda _name: fake_model)
+
+    response = module._transcribe_whisper(tmp_path / "audio.wav", "large-v3", None, None)
+
+    assert response["text"] == ""
+    assert response["segments"] == []
+    assert response["no_speech"] is True
 
 
 def test_qwen_response_normalization_uses_all_forced_alignment_items(
@@ -128,6 +146,20 @@ def test_qwen_response_normalization_uses_all_forced_alignment_items(
     assert response["language"] == "Chinese"
     assert response["duration"] == 0.6
     assert [item["text"] for item in response["words"]] == ["你", "好"]
+    assert response["no_speech"] is False
+
+
+def test_qwen_no_speech_is_a_valid_empty_response(monkeypatch, tmp_path: Path) -> None:
+    module = load_runtime(monkeypatch)
+    fake_result = SimpleNamespace(language="Chinese", text="", time_stamps=[])
+    fake_model = SimpleNamespace(transcribe=lambda **_kwargs: [fake_result])
+    monkeypatch.setattr(module.runtime, "load", lambda _name: fake_model)
+
+    response = module._transcribe_qwen(tmp_path / "audio.wav", "Qwen/Qwen3-ASR-1.7B", "zh")
+
+    assert response["text"] == ""
+    assert response["segments"] == []
+    assert response["no_speech"] is True
 
 
 def test_firered_response_normalization_keeps_words_and_confidence(
@@ -152,3 +184,42 @@ def test_firered_response_normalization_keeps_words_and_confidence(
     assert response["segments"][0]["confidence"] == 0.943
     assert response["segments"][0]["start"] == 0.34
     assert [item["text"] for item in response["words"]] == ["hello", "speech"]
+    assert response["no_speech"] is False
+
+
+def test_firered_no_speech_is_a_valid_empty_response(monkeypatch, tmp_path: Path) -> None:
+    module = load_runtime(monkeypatch)
+    records = [{"text": "", "dur_s": 2.24, "timestamp": []}]
+    fake_model = SimpleNamespace(transcribe=lambda *_args: records)
+    monkeypatch.setattr(module.runtime, "load", lambda _name: fake_model)
+
+    response = module._transcribe_firered(tmp_path / "audio.wav", "FireRedTeam/FireRedASR2-AED")
+
+    assert response["text"] == ""
+    assert response["segments"] == []
+    assert response["duration"] == 2.24
+    assert response["no_speech"] is True
+
+
+def test_firered_alignment_casts_bfloat16_logits_to_float32(monkeypatch) -> None:
+    module = load_runtime(monkeypatch)
+    bfloat16 = object()
+    float32_logits = object()
+
+    class FakeLogits:
+        dtype = bfloat16
+
+        def float(self):  # type: ignore[no-untyped-def]
+            return float32_logits
+
+    fake_torch = SimpleNamespace(bfloat16=bfloat16)
+
+    assert module._firered_alignment_log_probs(FakeLogits(), fake_torch) is float32_logits
+
+
+def test_firered_alignment_leaves_supported_logits_unchanged(monkeypatch) -> None:
+    module = load_runtime(monkeypatch)
+    logits = SimpleNamespace(dtype="float32")
+    fake_torch = SimpleNamespace(bfloat16="bfloat16")
+
+    assert module._firered_alignment_log_probs(logits, fake_torch) is logits
