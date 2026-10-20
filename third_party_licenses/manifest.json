@@ -774,7 +774,7 @@
     "version": "7.29.7",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "https://github.com/babel/babel.git",
+    "source": "https://github.com/babel/babel",
     "files": [
       "third_party_licenses/frontend/_babel_compat-data-7.29.7/LICENSE"
     ],
@@ -819,7 +819,7 @@
     "version": "7.29.7",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "https://github.com/babel/babel.git",
+    "source": "https://github.com/babel/babel",
     "files": [
       "third_party_licenses/frontend/_babel_helper-compilation-targets-7.29.7/LICENSE"
     ],
@@ -834,7 +834,7 @@
     "version": "7.29.7",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "https://github.com/babel/babel.git",
+    "source": "https://github.com/babel/babel",
     "files": [
       "third_party_licenses/frontend/_babel_helper-globals-7.29.7/LICENSE"
     ],
@@ -909,7 +909,7 @@
     "version": "7.29.7",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "https://github.com/babel/babel.git",
+    "source": "https://github.com/babel/babel",
     "files": [
       "third_party_licenses/frontend/_babel_helper-validator-identifier-7.29.7/LICENSE"
     ],
@@ -924,7 +924,7 @@
     "version": "7.29.7",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "https://github.com/babel/babel.git",
+    "source": "https://github.com/babel/babel",
     "files": [
       "third_party_licenses/frontend/_babel_helper-validator-option-7.29.7/LICENSE"
     ],
@@ -1044,7 +1044,7 @@
     "version": "0.28.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "git+https://github.com/evanw/esbuild.git",
+    "source": "https://github.com/evanw/esbuild",
     "files": [
       "third_party_licenses/frontend/_esbuild_win32-x64-0.28.1/LICENSE.md"
     ],
@@ -1389,7 +1389,7 @@
     "version": "2.0.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/bail",
+    "source": "https://github.com/wooorm/bail",
     "files": [
       "third_party_licenses/frontend/bail-2.0.2/license"
     ],
@@ -1404,7 +1404,7 @@
     "version": "2.10.43",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "Apache-2.0",
-    "source": "git+https://github.com/web-platform-dx/baseline-browser-mapping.git",
+    "source": "https://github.com/web-platform-dx/baseline-browser-mapping",
     "files": [
       "third_party_licenses/frontend/baseline-browser-mapping-2.10.43/LICENSE.txt"
     ],
@@ -1419,7 +1419,7 @@
     "version": "4.28.6",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "browserslist/browserslist",
+    "source": "https://github.com/browserslist/browserslist",
     "files": [
       "third_party_licenses/frontend/browserslist-4.28.6/LICENSE"
     ],
@@ -1434,7 +1434,7 @@
     "version": "1.0.30001806",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "CC-BY-4.0",
-    "source": "browserslist/caniuse-lite",
+    "source": "https://github.com/browserslist/caniuse-lite",
     "files": [
       "third_party_licenses/frontend/caniuse-lite-1.0.30001806/LICENSE"
     ],
@@ -1449,7 +1449,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/ccount",
+    "source": "https://github.com/wooorm/ccount",
     "files": [
       "third_party_licenses/frontend/ccount-2.0.1/license"
     ],
@@ -1464,7 +1464,7 @@
     "version": "2.0.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/character-entities",
+    "source": "https://github.com/wooorm/character-entities",
     "files": [
       "third_party_licenses/frontend/character-entities-2.0.2/license"
     ],
@@ -1479,7 +1479,7 @@
     "version": "2.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/character-entities-html4",
+    "source": "https://github.com/wooorm/character-entities-html4",
     "files": [
       "third_party_licenses/frontend/character-entities-html4-2.1.0/license"
     ],
@@ -1494,7 +1494,7 @@
     "version": "3.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/character-entities-legacy",
+    "source": "https://github.com/wooorm/character-entities-legacy",
     "files": [
       "third_party_licenses/frontend/character-entities-legacy-3.0.0/license"
     ],
@@ -1509,7 +1509,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/character-reference-invalid",
+    "source": "https://github.com/wooorm/character-reference-invalid",
     "files": [
       "third_party_licenses/frontend/character-reference-invalid-2.0.1/license"
     ],
@@ -1524,7 +1524,7 @@
     "version": "2.0.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/comma-separated-tokens",
+    "source": "https://github.com/wooorm/comma-separated-tokens",
     "files": [
       "third_party_licenses/frontend/comma-separated-tokens-2.0.3/license"
     ],
@@ -1554,7 +1554,7 @@
     "version": "4.4.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "git://github.com/debug-js/debug.git",
+    "source": "https://github.com/debug-js/debug",
     "files": [
       "third_party_licenses/frontend/debug-4.4.3/LICENSE"
     ],
@@ -1569,7 +1569,7 @@
     "version": "1.3.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/decode-named-character-reference",
+    "source": "https://github.com/wooorm/decode-named-character-reference",
     "files": [
       "third_party_licenses/frontend/decode-named-character-reference-1.3.0/license"
     ],
@@ -1584,7 +1584,7 @@
     "version": "2.0.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "lukeed/dequal",
+    "source": "https://github.com/lukeed/dequal",
     "files": [
       "third_party_licenses/frontend/dequal-2.0.3/license"
     ],
@@ -1599,7 +1599,7 @@
     "version": "1.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/devlop",
+    "source": "https://github.com/wooorm/devlop",
     "files": [
       "third_party_licenses/frontend/devlop-1.1.0/license"
     ],
@@ -1614,7 +1614,7 @@
     "version": "1.5.392",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "ISC",
-    "source": "git+https://github.com/Kilian/electron-to-chromium.git",
+    "source": "https://github.com/Kilian/electron-to-chromium",
     "files": [
       "third_party_licenses/frontend/electron-to-chromium-1.5.392/LICENSE"
     ],
@@ -1629,7 +1629,7 @@
     "version": "6.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "BSD-2-Clause",
-    "source": "git://github.com/fb55/entities.git",
+    "source": "https://github.com/fb55/entities",
     "files": [
       "third_party_licenses/frontend/entities-6.0.1/LICENSE"
     ],
@@ -1644,7 +1644,7 @@
     "version": "0.28.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "git+https://github.com/evanw/esbuild.git",
+    "source": "https://github.com/evanw/esbuild",
     "files": [
       "third_party_licenses/frontend/esbuild-0.28.1/LICENSE.md"
     ],
@@ -1659,7 +1659,7 @@
     "version": "3.2.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "lukeed/escalade",
+    "source": "https://github.com/lukeed/escalade",
     "files": [
       "third_party_licenses/frontend/escalade-3.2.0/license"
     ],
@@ -1674,7 +1674,7 @@
     "version": "5.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "sindresorhus/escape-string-regexp",
+    "source": "https://github.com/sindresorhus/escape-string-regexp",
     "files": [
       "third_party_licenses/frontend/escape-string-regexp-5.0.0/license"
     ],
@@ -1689,7 +1689,7 @@
     "version": "3.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/estree-util-is-identifier-name",
+    "source": "https://github.com/syntax-tree/estree-util-is-identifier-name",
     "files": [
       "third_party_licenses/frontend/estree-util-is-identifier-name-3.0.0/license"
     ],
@@ -1704,7 +1704,7 @@
     "version": "3.0.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "https://github.com/justmoon/node-extend.git",
+    "source": "https://github.com/justmoon/node-extend",
     "files": [
       "third_party_licenses/frontend/extend-3.0.2/LICENSE"
     ],
@@ -1749,7 +1749,7 @@
     "version": "8.0.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/hast-util-from-parse5",
+    "source": "https://github.com/syntax-tree/hast-util-from-parse5",
     "files": [
       "third_party_licenses/frontend/hast-util-from-parse5-8.0.3/license"
     ],
@@ -1764,7 +1764,7 @@
     "version": "4.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/hast-util-parse-selector",
+    "source": "https://github.com/syntax-tree/hast-util-parse-selector",
     "files": [
       "third_party_licenses/frontend/hast-util-parse-selector-4.0.0/license"
     ],
@@ -1779,7 +1779,7 @@
     "version": "9.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/hast-util-raw",
+    "source": "https://github.com/syntax-tree/hast-util-raw",
     "files": [
       "third_party_licenses/frontend/hast-util-raw-9.1.0/license"
     ],
@@ -1794,7 +1794,7 @@
     "version": "5.0.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/hast-util-sanitize",
+    "source": "https://github.com/syntax-tree/hast-util-sanitize",
     "files": [
       "third_party_licenses/frontend/hast-util-sanitize-5.0.2/license"
     ],
@@ -1809,7 +1809,7 @@
     "version": "2.3.6",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/hast-util-to-jsx-runtime",
+    "source": "https://github.com/syntax-tree/hast-util-to-jsx-runtime",
     "files": [
       "third_party_licenses/frontend/hast-util-to-jsx-runtime-2.3.6/license"
     ],
@@ -1824,7 +1824,7 @@
     "version": "8.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/hast-util-to-parse5",
+    "source": "https://github.com/syntax-tree/hast-util-to-parse5",
     "files": [
       "third_party_licenses/frontend/hast-util-to-parse5-8.0.1/license"
     ],
@@ -1839,7 +1839,7 @@
     "version": "3.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/hast-util-whitespace",
+    "source": "https://github.com/syntax-tree/hast-util-whitespace",
     "files": [
       "third_party_licenses/frontend/hast-util-whitespace-3.0.0/license"
     ],
@@ -1854,7 +1854,7 @@
     "version": "9.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/hastscript",
+    "source": "https://github.com/syntax-tree/hastscript",
     "files": [
       "third_party_licenses/frontend/hastscript-9.0.1/license"
     ],
@@ -1884,7 +1884,7 @@
     "version": "3.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/html-void-elements",
+    "source": "https://github.com/wooorm/html-void-elements",
     "files": [
       "third_party_licenses/frontend/html-void-elements-3.0.0/license"
     ],
@@ -1899,7 +1899,7 @@
     "version": "0.2.7",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "git+https://github.com/remarkablemark/inline-style-parser.git",
+    "source": "https://github.com/remarkablemark/inline-style-parser",
     "files": [
       "third_party_licenses/frontend/inline-style-parser-0.2.7/LICENSE"
     ],
@@ -1914,7 +1914,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/is-alphabetical",
+    "source": "https://github.com/wooorm/is-alphabetical",
     "files": [
       "third_party_licenses/frontend/is-alphabetical-2.0.1/license"
     ],
@@ -1929,7 +1929,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/is-alphanumerical",
+    "source": "https://github.com/wooorm/is-alphanumerical",
     "files": [
       "third_party_licenses/frontend/is-alphanumerical-2.0.1/license"
     ],
@@ -1944,7 +1944,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/is-decimal",
+    "source": "https://github.com/wooorm/is-decimal",
     "files": [
       "third_party_licenses/frontend/is-decimal-2.0.1/license"
     ],
@@ -1959,7 +1959,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/is-hexadecimal",
+    "source": "https://github.com/wooorm/is-hexadecimal",
     "files": [
       "third_party_licenses/frontend/is-hexadecimal-2.0.1/license"
     ],
@@ -1974,7 +1974,7 @@
     "version": "4.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "sindresorhus/is-plain-obj",
+    "source": "https://github.com/sindresorhus/is-plain-obj",
     "files": [
       "third_party_licenses/frontend/is-plain-obj-4.1.0/license"
     ],
@@ -1989,7 +1989,7 @@
     "version": "4.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "lydell/js-tokens",
+    "source": "https://github.com/lydell/js-tokens",
     "files": [
       "third_party_licenses/frontend/js-tokens-4.0.0/LICENSE"
     ],
@@ -2034,7 +2034,7 @@
     "version": "3.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/longest-streak",
+    "source": "https://github.com/wooorm/longest-streak",
     "files": [
       "third_party_licenses/frontend/longest-streak-3.1.0/license"
     ],
@@ -2049,7 +2049,7 @@
     "version": "5.1.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "ISC",
-    "source": "git://github.com/isaacs/node-lru-cache.git",
+    "source": "https://github.com/isaacs/node-lru-cache",
     "files": [
       "third_party_licenses/frontend/lru-cache-5.1.1/LICENSE"
     ],
@@ -2064,7 +2064,7 @@
     "version": "3.0.4",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/markdown-table",
+    "source": "https://github.com/wooorm/markdown-table",
     "files": [
       "third_party_licenses/frontend/markdown-table-3.0.4/license"
     ],
@@ -2079,7 +2079,7 @@
     "version": "3.0.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-find-and-replace",
+    "source": "https://github.com/syntax-tree/mdast-util-find-and-replace",
     "files": [
       "third_party_licenses/frontend/mdast-util-find-and-replace-3.0.2/license"
     ],
@@ -2094,7 +2094,7 @@
     "version": "2.0.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-from-markdown",
+    "source": "https://github.com/syntax-tree/mdast-util-from-markdown",
     "files": [
       "third_party_licenses/frontend/mdast-util-from-markdown-2.0.3/license"
     ],
@@ -2109,7 +2109,7 @@
     "version": "3.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-gfm",
+    "source": "https://github.com/syntax-tree/mdast-util-gfm",
     "files": [
       "third_party_licenses/frontend/mdast-util-gfm-3.1.0/license"
     ],
@@ -2124,7 +2124,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-gfm-autolink-literal",
+    "source": "https://github.com/syntax-tree/mdast-util-gfm-autolink-literal",
     "files": [
       "third_party_licenses/frontend/mdast-util-gfm-autolink-literal-2.0.1/license"
     ],
@@ -2139,7 +2139,7 @@
     "version": "2.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-gfm-footnote",
+    "source": "https://github.com/syntax-tree/mdast-util-gfm-footnote",
     "files": [
       "third_party_licenses/frontend/mdast-util-gfm-footnote-2.1.0/license"
     ],
@@ -2154,7 +2154,7 @@
     "version": "2.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-gfm-strikethrough",
+    "source": "https://github.com/syntax-tree/mdast-util-gfm-strikethrough",
     "files": [
       "third_party_licenses/frontend/mdast-util-gfm-strikethrough-2.0.0/license"
     ],
@@ -2169,7 +2169,7 @@
     "version": "2.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-gfm-table",
+    "source": "https://github.com/syntax-tree/mdast-util-gfm-table",
     "files": [
       "third_party_licenses/frontend/mdast-util-gfm-table-2.0.0/license"
     ],
@@ -2184,7 +2184,7 @@
     "version": "2.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-gfm-task-list-item",
+    "source": "https://github.com/syntax-tree/mdast-util-gfm-task-list-item",
     "files": [
       "third_party_licenses/frontend/mdast-util-gfm-task-list-item-2.0.0/license"
     ],
@@ -2199,7 +2199,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-mdx-expression",
+    "source": "https://github.com/syntax-tree/mdast-util-mdx-expression",
     "files": [
       "third_party_licenses/frontend/mdast-util-mdx-expression-2.0.1/license"
     ],
@@ -2214,7 +2214,7 @@
     "version": "3.2.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-mdx-jsx",
+    "source": "https://github.com/syntax-tree/mdast-util-mdx-jsx",
     "files": [
       "third_party_licenses/frontend/mdast-util-mdx-jsx-3.2.0/license"
     ],
@@ -2229,7 +2229,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-mdxjs-esm",
+    "source": "https://github.com/syntax-tree/mdast-util-mdxjs-esm",
     "files": [
       "third_party_licenses/frontend/mdast-util-mdxjs-esm-2.0.1/license"
     ],
@@ -2244,7 +2244,7 @@
     "version": "4.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-phrasing",
+    "source": "https://github.com/syntax-tree/mdast-util-phrasing",
     "files": [
       "third_party_licenses/frontend/mdast-util-phrasing-4.1.0/license"
     ],
@@ -2259,7 +2259,7 @@
     "version": "13.2.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-to-hast",
+    "source": "https://github.com/syntax-tree/mdast-util-to-hast",
     "files": [
       "third_party_licenses/frontend/mdast-util-to-hast-13.2.1/license"
     ],
@@ -2274,7 +2274,7 @@
     "version": "2.1.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-to-markdown",
+    "source": "https://github.com/syntax-tree/mdast-util-to-markdown",
     "files": [
       "third_party_licenses/frontend/mdast-util-to-markdown-2.1.2/license"
     ],
@@ -2289,7 +2289,7 @@
     "version": "4.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/mdast-util-to-string",
+    "source": "https://github.com/syntax-tree/mdast-util-to-string",
     "files": [
       "third_party_licenses/frontend/mdast-util-to-string-4.0.0/license"
     ],
@@ -2334,7 +2334,7 @@
     "version": "3.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "micromark/micromark-extension-gfm",
+    "source": "https://github.com/micromark/micromark-extension-gfm",
     "files": [
       "third_party_licenses/frontend/micromark-extension-gfm-3.0.0/license"
     ],
@@ -2349,7 +2349,7 @@
     "version": "2.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "micromark/micromark-extension-gfm-autolink-literal",
+    "source": "https://github.com/micromark/micromark-extension-gfm-autolink-literal",
     "files": [
       "third_party_licenses/frontend/micromark-extension-gfm-autolink-literal-2.1.0/license"
     ],
@@ -2364,7 +2364,7 @@
     "version": "2.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "micromark/micromark-extension-gfm-footnote",
+    "source": "https://github.com/micromark/micromark-extension-gfm-footnote",
     "files": [
       "third_party_licenses/frontend/micromark-extension-gfm-footnote-2.1.0/license"
     ],
@@ -2379,7 +2379,7 @@
     "version": "2.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "micromark/micromark-extension-gfm-strikethrough",
+    "source": "https://github.com/micromark/micromark-extension-gfm-strikethrough",
     "files": [
       "third_party_licenses/frontend/micromark-extension-gfm-strikethrough-2.1.0/license"
     ],
@@ -2394,7 +2394,7 @@
     "version": "2.1.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "micromark/micromark-extension-gfm-table",
+    "source": "https://github.com/micromark/micromark-extension-gfm-table",
     "files": [
       "third_party_licenses/frontend/micromark-extension-gfm-table-2.1.1/license"
     ],
@@ -2409,7 +2409,7 @@
     "version": "2.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "micromark/micromark-extension-gfm-tagfilter",
+    "source": "https://github.com/micromark/micromark-extension-gfm-tagfilter",
     "files": [
       "third_party_licenses/frontend/micromark-extension-gfm-tagfilter-2.0.0/license"
     ],
@@ -2424,7 +2424,7 @@
     "version": "2.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "micromark/micromark-extension-gfm-task-list-item",
+    "source": "https://github.com/micromark/micromark-extension-gfm-task-list-item",
     "files": [
       "third_party_licenses/frontend/micromark-extension-gfm-task-list-item-2.1.0/license"
     ],
@@ -2724,7 +2724,7 @@
     "version": "2.1.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "vercel/ms",
+    "source": "https://github.com/vercel/ms",
     "files": [
       "third_party_licenses/frontend/ms-2.1.3/license.md"
     ],
@@ -2739,7 +2739,7 @@
     "version": "3.3.16",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "ai/nanoid",
+    "source": "https://github.com/ai/nanoid",
     "files": [
       "third_party_licenses/frontend/nanoid-3.3.16/LICENSE"
     ],
@@ -2754,7 +2754,7 @@
     "version": "2.0.51",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "https://github.com/chicoxyzzy/node-releases.git",
+    "source": "https://github.com/chicoxyzzy/node-releases",
     "files": [
       "third_party_licenses/frontend/node-releases-2.0.51/LICENSE"
     ],
@@ -2769,7 +2769,7 @@
     "version": "4.0.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/parse-entities",
+    "source": "https://github.com/wooorm/parse-entities",
     "files": [
       "third_party_licenses/frontend/parse-entities-4.0.2/license"
     ],
@@ -2799,7 +2799,7 @@
     "version": "1.1.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "ISC",
-    "source": "alexeyraspopov/picocolors",
+    "source": "https://github.com/alexeyraspopov/picocolors",
     "files": [
       "third_party_licenses/frontend/picocolors-1.1.1/LICENSE"
     ],
@@ -2844,7 +2844,7 @@
     "version": "7.2.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/property-information",
+    "source": "https://github.com/wooorm/property-information",
     "files": [
       "third_party_licenses/frontend/property-information-7.2.0/license"
     ],
@@ -2889,7 +2889,7 @@
     "version": "10.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "remarkjs/react-markdown",
+    "source": "https://github.com/remarkjs/react-markdown",
     "files": [
       "third_party_licenses/frontend/react-markdown-10.1.0/license"
     ],
@@ -2919,7 +2919,7 @@
     "version": "7.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "rehypejs/rehype-raw",
+    "source": "https://github.com/rehypejs/rehype-raw",
     "files": [
       "third_party_licenses/frontend/rehype-raw-7.0.0/license"
     ],
@@ -2934,7 +2934,7 @@
     "version": "6.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "rehypejs/rehype-sanitize",
+    "source": "https://github.com/rehypejs/rehype-sanitize",
     "files": [
       "third_party_licenses/frontend/rehype-sanitize-6.0.0/license"
     ],
@@ -2949,7 +2949,7 @@
     "version": "4.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "remarkjs/remark-gfm",
+    "source": "https://github.com/remarkjs/remark-gfm",
     "files": [
       "third_party_licenses/frontend/remark-gfm-4.0.1/license"
     ],
@@ -2979,7 +2979,7 @@
     "version": "11.1.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "remarkjs/remark-rehype",
+    "source": "https://github.com/remarkjs/remark-rehype",
     "files": [
       "third_party_licenses/frontend/remark-rehype-11.1.2/license"
     ],
@@ -3039,7 +3039,7 @@
     "version": "6.3.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "ISC",
-    "source": "https://github.com/npm/node-semver.git",
+    "source": "https://github.com/npm/node-semver",
     "files": [
       "third_party_licenses/frontend/semver-6.3.1/LICENSE"
     ],
@@ -3069,7 +3069,7 @@
     "version": "2.0.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/space-separated-tokens",
+    "source": "https://github.com/wooorm/space-separated-tokens",
     "files": [
       "third_party_licenses/frontend/space-separated-tokens-2.0.2/license"
     ],
@@ -3084,7 +3084,7 @@
     "version": "4.0.4",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/stringify-entities",
+    "source": "https://github.com/wooorm/stringify-entities",
     "files": [
       "third_party_licenses/frontend/stringify-entities-4.0.4/license"
     ],
@@ -3099,7 +3099,7 @@
     "version": "1.1.21",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "git+https://github.com/remarkablemark/style-to-js.git",
+    "source": "https://github.com/remarkablemark/style-to-js",
     "files": [
       "third_party_licenses/frontend/style-to-js-1.1.21/LICENSE"
     ],
@@ -3114,7 +3114,7 @@
     "version": "1.0.14",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "git+https://github.com/remarkablemark/style-to-object.git",
+    "source": "https://github.com/remarkablemark/style-to-object",
     "files": [
       "third_party_licenses/frontend/style-to-object-1.0.14/LICENSE"
     ],
@@ -3144,7 +3144,7 @@
     "version": "3.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/trim-lines",
+    "source": "https://github.com/wooorm/trim-lines",
     "files": [
       "third_party_licenses/frontend/trim-lines-3.0.1/license"
     ],
@@ -3159,7 +3159,7 @@
     "version": "2.2.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/trough",
+    "source": "https://github.com/wooorm/trough",
     "files": [
       "third_party_licenses/frontend/trough-2.2.0/license"
     ],
@@ -3189,7 +3189,7 @@
     "version": "6.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/unist-util-is",
+    "source": "https://github.com/syntax-tree/unist-util-is",
     "files": [
       "third_party_licenses/frontend/unist-util-is-6.0.1/license"
     ],
@@ -3204,7 +3204,7 @@
     "version": "5.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/unist-util-position",
+    "source": "https://github.com/syntax-tree/unist-util-position",
     "files": [
       "third_party_licenses/frontend/unist-util-position-5.0.0/license"
     ],
@@ -3219,7 +3219,7 @@
     "version": "4.0.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/unist-util-stringify-position",
+    "source": "https://github.com/syntax-tree/unist-util-stringify-position",
     "files": [
       "third_party_licenses/frontend/unist-util-stringify-position-4.0.0/license"
     ],
@@ -3234,7 +3234,7 @@
     "version": "5.1.0",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/unist-util-visit",
+    "source": "https://github.com/syntax-tree/unist-util-visit",
     "files": [
       "third_party_licenses/frontend/unist-util-visit-5.1.0/license"
     ],
@@ -3249,7 +3249,7 @@
     "version": "6.0.2",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "syntax-tree/unist-util-visit-parents",
+    "source": "https://github.com/syntax-tree/unist-util-visit-parents",
     "files": [
       "third_party_licenses/frontend/unist-util-visit-parents-6.0.2/license"
     ],
@@ -3264,7 +3264,7 @@
     "version": "1.2.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "browserslist/update-db",
+    "source": "https://github.com/browserslist/update-db",
     "files": [
       "third_party_licenses/frontend/update-browserslist-db-1.2.3/LICENSE"
     ],
@@ -3279,7 +3279,7 @@
     "version": "6.0.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "vfile/vfile",
+    "source": "https://github.com/vfile/vfile",
     "files": [
       "third_party_licenses/frontend/vfile-6.0.3/license"
     ],
@@ -3294,7 +3294,7 @@
     "version": "5.0.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "vfile/vfile-location",
+    "source": "https://github.com/vfile/vfile-location",
     "files": [
       "third_party_licenses/frontend/vfile-location-5.0.3/license"
     ],
@@ -3309,7 +3309,7 @@
     "version": "4.0.3",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "vfile/vfile-message",
+    "source": "https://github.com/vfile/vfile-message",
     "files": [
       "third_party_licenses/frontend/vfile-message-4.0.3/license"
     ],
@@ -3339,7 +3339,7 @@
     "version": "2.0.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/web-namespaces",
+    "source": "https://github.com/wooorm/web-namespaces",
     "files": [
       "third_party_licenses/frontend/web-namespaces-2.0.1/license"
     ],
@@ -3354,7 +3354,7 @@
     "version": "3.1.1",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "ISC",
-    "source": "git+https://github.com/isaacs/yallist.git",
+    "source": "https://github.com/isaacs/yallist",
     "files": [
       "third_party_licenses/frontend/yallist-3.1.1/LICENSE"
     ],
@@ -3369,7 +3369,7 @@
     "version": "2.0.4",
     "scope": "frontend production dependency graph (includes build tooling)",
     "license": "MIT",
-    "source": "wooorm/zwitch",
+    "source": "https://github.com/wooorm/zwitch",
     "files": [
       "third_party_licenses/frontend/zwitch-2.0.4/license"
     ],

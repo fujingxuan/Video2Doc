@@ -20,6 +20,7 @@ import sys
 import tomllib
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import pyexpat
 
@@ -32,6 +33,26 @@ OUTPUT = ROOT / "third_party_licenses"
 
 def safe_name(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9._-]+", "_", value)
+
+
+def normalize_source(value: str, fallback: str) -> str:
+    """Turn public package-repository shorthand into a browser-usable URL."""
+    value = value.strip()
+    if value.startswith("github:"):
+        value = "https://github.com/" + value.removeprefix("github:")
+    elif re.fullmatch(r"[\w.-]+/[\w.-]+(?:#.*)?", value):
+        value = "https://github.com/" + value
+    value = re.sub(r"^git\+", "", value)
+    value = re.sub(r"^git@github\.com:", "https://github.com/", value)
+    value = re.sub(r"^ssh://git@github\.com/", "https://github.com/", value)
+    value = re.sub(r"^git://", "https://", value)
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return fallback
+    if parsed.username is not None or parsed.password is not None:
+        return fallback
+    path = parsed.path.removesuffix(".git")
+    return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
 
 
 def is_notice(path: Path) -> bool:
@@ -76,10 +97,12 @@ def python_distributions() -> list[dict]:
                     files.append(copy_notice(source, OUTPUT / "python" /
                                              safe_name(f"{name}-{dist.version}") / relative))
             urls = dist.metadata.get_all("Project-URL", [])
+            fallback = f"https://pypi.org/project/{name}/{dist.version}/"
             homepage = dist.metadata.get("Home-page") or next(
                 (url.split(",", 1)[-1].strip() for url in urls),
-                f"https://pypi.org/project/{name}/{dist.version}/",
+                fallback,
             )
+            homepage = normalize_source(homepage, fallback)
             license_name = dist.metadata.get("License-Expression")
             if not license_name:
                 license_name = " ".join((dist.metadata.get("License") or "See license files").split())
@@ -149,6 +172,10 @@ def frontend_packages() -> list[dict]:
             repository = repository.get("url", "")
         source_url = info.get("homepage") or repository or (
             f"https://www.npmjs.com/package/{info['name']}/v/{info['version']}"
+        )
+        source_url = normalize_source(
+            source_url,
+            f"https://www.npmjs.com/package/{info['name']}/v/{info['version']}",
         )
         entries.append({"ecosystem": "npm", "name": info["name"],
                         "version": info["version"],
@@ -232,6 +259,8 @@ def main() -> None:
     if missing:
         raise RuntimeError("Missing license texts: " + ", ".join(missing))
     for item in entries:
+        if urlsplit(item["source"]).scheme not in {"http", "https"}:
+            raise RuntimeError(f"Invalid public source URL: {item['name']}")
         item["sha256"] = {file: hashlib.sha256((ROOT / file).read_bytes()).hexdigest()
                           for file in item["files"]}
     (OUTPUT / "manifest.json").write_text(json.dumps(entries, ensure_ascii=False, indent=2) + "\n",

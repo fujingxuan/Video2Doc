@@ -14,8 +14,8 @@
 
 ## 下载
 
-资产：`Video2Doc-3.4.1-windows-x64.zip`，36,178,862 字节。
+资产：`Video2Doc-3.4.1-windows-x64.zip`，36,178,812 字节。
 
-SHA-256：`99ca32c13f5cdf10ac3771850f52d491e165fd218b544ae4cd45ddbd5c88c736`。
+SHA-256：`e40b3ae8a95c2000acd56dc01778cecca83311764216e0f4c49d07ee20defbb2`。
 
 请完整解压后运行 `Video2Doc.exe`。媒体工具、ASR/OCR 模型与其独立环境需要另行安装；云端服务需用户自己的账号和密钥。[发行页面](https://github.com/fujingxuan/Video2Doc/releases/tag/v3.4.1) 的 `SHA256SUMS.txt` 为本次公开 ZIP 的校验文件。
